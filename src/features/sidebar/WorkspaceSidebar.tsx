@@ -220,6 +220,7 @@ function FileRow({
           <SidebarMenuButton
             isActive={isActive}
             onClick={onSelect}
+            onDoubleClick={() => onBeginRename()}
             onContextMenu={(event) => {
               event.preventDefault();
               onSelect();
@@ -229,7 +230,7 @@ function FileRow({
             style={{ paddingLeft: `${getFileRowPaddingLeft(level)}px` }}
           >
             <span className="w-0 shrink-0" />
-            <FileTextIcon />
+            <FileTextIcon className="ml-[-4px]" />
             <span>{file.label}</span>
           </SidebarMenuButton>
         )}
@@ -342,6 +343,13 @@ function FolderRow({
             <SidebarMenuButton
               isActive={isActive}
               onClick={() => onToggleExpanded(folder.id)}
+              onDoubleClick={() =>
+                onBeginRename({
+                  type: 'folder',
+                  id: folder.id,
+                  value: folder.label,
+                })
+              }
               onContextMenu={(event) => {
                 event.preventDefault();
                 onSelectFolder(folder.id);
@@ -367,15 +375,15 @@ function FolderRow({
               >
                 <ChevronDownIcon
                   className={cn(
-                    'size-3.5 transition-transform',
+                    'ml-[1px] size-3.5 transition-transform',
                     !isExpanded && '-rotate-90',
                   )}
                 />
               </button>
               {isExpanded ? (
-                <FolderOpenIcon className="ml-[5px]" />
+                <FolderOpenIcon className="ml-[0px]" />
               ) : (
-                <FolderIcon className="ml-[5px]" />
+                <FolderIcon className="ml-[0px]" />
               )}
               <span>{folder.label}</span>
               <span className="group/count absolute inset-y-0 right-1 z-10 w-0">
