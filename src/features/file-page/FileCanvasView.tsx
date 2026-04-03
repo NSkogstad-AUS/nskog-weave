@@ -12,18 +12,27 @@ import type { Point } from '@/types/workspace';
 
 interface FileCanvasViewProps {
   nodes: FilePageNode[];
-  selectedNodeId: string | null;
-  onMoveNode: (nodeId: string, position: Point) => void;
-  onSelectNode: (nodeId: string | null) => void;
+  selectedNodeIds: string[];
+  onMoveNodes: (positions: Record<string, Point>) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
 }
 
 const GRID_SIZE = 64;
 const CANVAS_PADDING = 32;
+const NODE_WIDTH = 208;
+const NODE_HEIGHT = 76;
 
 type DragState = {
-  nodeId: string;
+  nodeIds: string[];
   origin: Point;
-  basePosition: Point;
+  basePositions: Record<string, Point>;
+};
+
+type MarqueeState = {
+  origin: Point;
+  current: Point;
+  additive: boolean;
+  initialSelection: string[];
 };
 
 function snapToGrid(value: number) {
@@ -32,6 +41,27 @@ function snapToGrid(value: number) {
 
 function clampToCanvas(value: number) {
   return Math.max(CANVAS_PADDING, value);
+}
+
+function normalizeRectangle(start: Point, end: Point) {
+  return {
+    left: Math.min(start.x, end.x),
+    top: Math.min(start.y, end.y),
+    right: Math.max(start.x, end.x),
+    bottom: Math.max(start.y, end.y),
+  };
+}
+
+function rectanglesIntersect(
+  left: ReturnType<typeof normalizeRectangle>,
+  right: ReturnType<typeof normalizeRectangle>,
+) {
+  return !(
+    left.right < right.left ||
+    left.left > right.right ||
+    left.bottom < right.top ||
+    left.top > right.bottom
+  );
 }
 
 const NODE_META = {
@@ -61,15 +91,17 @@ const NODE_META = {
 
 export function FileCanvasView({
   nodes,
-  selectedNodeId,
-  onMoveNode,
-  onSelectNode,
+  selectedNodeIds,
+  onMoveNodes,
+  onSelectNodes,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
+  const [marqueeState, setMarqueeState] = useState<MarqueeState | null>(null);
+  const selectedIdSet = new Set(selectedNodeIds);
 
   useEffect(() => {
-    if (!dragState) {
+    if (!dragState && !marqueeState) {
       return;
     }
 
@@ -80,17 +112,58 @@ export function FileCanvasView({
         return;
       }
 
-      const nextX = dragState.basePosition.x + (localPoint.x - dragState.origin.x);
-      const nextY = dragState.basePosition.y + (localPoint.y - dragState.origin.y);
+      if (dragState) {
+        const nextPositions = dragState.nodeIds.reduce<Record<string, Point>>(
+          (positions, nodeId) => {
+            const basePosition = dragState.basePositions[nodeId];
+            const nextX = basePosition.x + (localPoint.x - dragState.origin.x);
+            const nextY = basePosition.y + (localPoint.y - dragState.origin.y);
 
-      onMoveNode(dragState.nodeId, {
-        x: clampToCanvas(snapToGrid(nextX)),
-        y: clampToCanvas(snapToGrid(nextY)),
-      });
+            positions[nodeId] = {
+              x: clampToCanvas(snapToGrid(nextX)),
+              y: clampToCanvas(snapToGrid(nextY)),
+            };
+
+            return positions;
+          },
+          {},
+        );
+
+        onMoveNodes(nextPositions);
+        return;
+      }
+
+      if (!marqueeState) {
+        return;
+      }
+
+      const nextMarquee = {
+        ...marqueeState,
+        current: localPoint,
+      };
+      const marqueeRect = normalizeRectangle(marqueeState.origin, localPoint);
+      const intersectingIds = nodes
+        .filter((node) =>
+          rectanglesIntersect(marqueeRect, {
+            left: node.position.x,
+            top: node.position.y,
+            right: node.position.x + NODE_WIDTH,
+            bottom: node.position.y + NODE_HEIGHT,
+          }),
+        )
+        .map((node) => node.id);
+
+      onSelectNodes(
+        marqueeState.additive
+          ? Array.from(new Set([...marqueeState.initialSelection, ...intersectingIds]))
+          : intersectingIds,
+      );
+      setMarqueeState(nextMarquee);
     };
 
     const handlePointerUp = () => {
       setDragState(null);
+      setMarqueeState(null);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -100,7 +173,7 @@ export function FileCanvasView({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [dragState, onMoveNode]);
+  }, [dragState, marqueeState, nodes, onMoveNodes, onSelectNodes]);
 
   function getLocalPoint(clientX: number, clientY: number) {
     if (!canvasRef.current) {
@@ -128,11 +201,22 @@ export function FileCanvasView({
       return;
     }
 
-    onSelectNode(node.id);
+    const nextSelectedIds =
+      selectedIdSet.has(node.id) && selectedNodeIds.length > 1 ? selectedNodeIds : [node.id];
+
+    onSelectNodes(nextSelectedIds);
     setDragState({
-      nodeId: node.id,
+      nodeIds: nextSelectedIds,
       origin: localPoint,
-      basePosition: node.position,
+      basePositions: nextSelectedIds.reduce<Record<string, Point>>((positions, nodeId) => {
+        const selectedNode = nodes.find((candidate) => candidate.id === nodeId);
+
+        if (selectedNode) {
+          positions[nodeId] = selectedNode.position;
+        }
+
+        return positions;
+      }, {}),
     });
   }
 
@@ -141,7 +225,23 @@ export function FileCanvasView({
       ref={canvasRef}
       onPointerDown={(event) => {
         if (event.target === event.currentTarget) {
-          onSelectNode(null);
+          const localPoint = getLocalPoint(event.clientX, event.clientY);
+
+          if (!localPoint) {
+            onSelectNodes([]);
+            return;
+          }
+
+          setMarqueeState({
+            origin: localPoint,
+            current: localPoint,
+            additive: event.shiftKey,
+            initialSelection: selectedNodeIds,
+          });
+
+          if (!event.shiftKey) {
+            onSelectNodes([]);
+          }
         }
       }}
       className="relative h-full min-h-[34rem] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]"
@@ -153,13 +253,17 @@ export function FileCanvasView({
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
         <span>Canvas</span>
-        <span>Drag folders and items · snaps to grid</span>
+        <span>
+          {selectedNodeIds.length > 1
+            ? `${selectedNodeIds.length} selected · marquee or drag`
+            : 'Drag folders and items · snaps to grid'}
+        </span>
       </div>
 
       {nodes.map((node) => {
         const meta = NODE_META[node.kind];
         const Icon = meta.icon;
-        const isSelected = selectedNodeId === node.id;
+        const isSelected = selectedIdSet.has(node.id);
 
         return (
           <button
@@ -169,7 +273,8 @@ export function FileCanvasView({
             className={cn(
               'absolute w-52 cursor-grab rounded-2xl border px-4 py-3 text-left shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] transition-[transform,box-shadow,border-color] duration-150 active:cursor-grabbing',
               meta.className,
-              dragState?.nodeId === node.id && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
+              dragState?.nodeIds.includes(node.id) &&
+                'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
               isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
             )}
             style={{
@@ -192,6 +297,23 @@ export function FileCanvasView({
           </button>
         );
       })}
+
+      {marqueeState ? (
+        <div
+          aria-hidden="true"
+          className="pointer-events-none absolute rounded-2xl border border-sky-400/50 bg-sky-400/10 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18)]"
+          style={{
+            left: normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+            top: normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+            width:
+              normalizeRectangle(marqueeState.origin, marqueeState.current).right -
+              normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+            height:
+              normalizeRectangle(marqueeState.origin, marqueeState.current).bottom -
+              normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+          }}
+        />
+      ) : null}
     </div>
   );
 }

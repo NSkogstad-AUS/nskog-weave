@@ -57,7 +57,7 @@ function hydrateFilePages(): FilePagesStore {
 
 export function useFilePages(activeFile: WorkspaceFile | null) {
   const [pages, setPages] = useState<FilePagesStore>(hydrateFilePages);
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
+  const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
 
   useEffect(() => {
     window.localStorage.setItem(FILE_PAGES_STORAGE_KEY, JSON.stringify(pages));
@@ -65,7 +65,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   useEffect(() => {
     if (!activeFile) {
-      setSelectedNodeId(null);
+      setSelectedNodeIds([]);
       return;
     }
 
@@ -77,7 +77,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
             [activeFile.id]: createDefaultFilePage(activeFile),
           },
     );
-    setSelectedNodeId(null);
+    setSelectedNodeIds([]);
   }, [activeFile?.id]);
 
   const activePage = useMemo(() => {
@@ -110,14 +110,14 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     }));
   }
 
-  function moveNode(nodeId: string, position: Point) {
+  function moveNodes(positions: Record<string, Point>) {
     updateActivePage((page) => ({
       ...page,
       nodes: page.nodes.map((node) =>
-        node.id === nodeId
+        positions[node.id]
           ? {
               ...node,
-              position,
+              position: positions[node.id],
             }
           : node,
       ),
@@ -139,10 +139,10 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   return {
     activePage,
-    selectedNodeId,
-    setSelectedNodeId,
+    selectedNodeIds,
+    setSelectedNodeIds,
     setView,
-    moveNode,
+    moveNodes,
     removeFilePage,
   };
 }

@@ -22,10 +22,10 @@ function App() {
   );
   const {
     activePage,
-    moveNode,
+    moveNodes,
     removeFilePage,
-    selectedNodeId,
-    setSelectedNodeId,
+    selectedNodeIds,
+    setSelectedNodeIds,
     setView,
   } = useFilePages(activeFile);
 
@@ -60,9 +60,9 @@ function App() {
             activeFile={activeFile}
             activeView={activePage?.view ?? null}
             nodes={activePage?.nodes ?? []}
-            selectedNodeId={selectedNodeId}
-            onMoveNode={moveNode}
-            onSelectNode={setSelectedNodeId}
+            selectedNodeIds={selectedNodeIds}
+            onMoveNodes={moveNodes}
+            onSelectNodes={setSelectedNodeIds}
             onViewChange={setView}
           />
         </div>

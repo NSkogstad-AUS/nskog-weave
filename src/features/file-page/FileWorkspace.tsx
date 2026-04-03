@@ -18,9 +18,9 @@ interface FileWorkspaceProps {
     kind: 'folder' | 'file' | 'element';
     position: { x: number; y: number };
   }>;
-  selectedNodeId: string | null;
-  onMoveNode: (nodeId: string, position: { x: number; y: number }) => void;
-  onSelectNode: (nodeId: string | null) => void;
+  selectedNodeIds: string[];
+  onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void;
+  onSelectNodes: (nodeIds: string[]) => void;
   onViewChange: (view: FilePageView) => void;
 }
 
@@ -28,9 +28,9 @@ export function FileWorkspace({
   activeFile,
   activeView,
   nodes,
-  selectedNodeId,
-  onMoveNode,
-  onSelectNode,
+  selectedNodeIds,
+  onMoveNodes,
+  onSelectNodes,
   onViewChange,
 }: FileWorkspaceProps) {
   if (!activeFile || !activeView) {
@@ -105,15 +105,15 @@ export function FileWorkspace({
         {activeView === 'canvas' ? (
           <FileCanvasView
             nodes={nodes}
-            selectedNodeId={selectedNodeId}
-            onMoveNode={onMoveNode}
-            onSelectNode={onSelectNode}
+            selectedNodeIds={selectedNodeIds}
+            onMoveNodes={onMoveNodes}
+            onSelectNodes={onSelectNodes}
           />
         ) : (
           <FileExplorerView
             nodes={nodes}
-            selectedNodeId={selectedNodeId}
-            onSelectNode={(nodeId) => onSelectNode(nodeId)}
+            selectedNodeIds={selectedNodeIds}
+            onSelectNode={(nodeId) => onSelectNodes([nodeId])}
           />
         )}
       </div>

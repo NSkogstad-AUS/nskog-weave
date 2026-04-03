@@ -10,7 +10,7 @@ import type { FilePageNode } from '@/types/filePage';
 
 interface FileExplorerViewProps {
   nodes: FilePageNode[];
-  selectedNodeId: string | null;
+  selectedNodeIds: string[];
   onSelectNode: (nodeId: string) => void;
 }
 
@@ -37,10 +37,11 @@ const NODE_META = {
 
 export function FileExplorerView({
   nodes,
-  selectedNodeId,
+  selectedNodeIds,
   onSelectNode,
 }: FileExplorerViewProps) {
   const orderedNodes = sortFilePageNodes(nodes);
+  const selectedIdSet = new Set(selectedNodeIds);
 
   return (
     <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/88 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]">
@@ -61,7 +62,7 @@ export function FileExplorerView({
               onClick={() => onSelectNode(node.id)}
               className={cn(
                 'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4 text-left transition hover:bg-slate-50/90',
-                selectedNodeId === node.id && 'bg-slate-50',
+                selectedIdSet.has(node.id) && 'bg-slate-50',
               )}
             >
               <span className="flex min-w-0 items-center gap-3">
