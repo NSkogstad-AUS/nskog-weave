@@ -175,41 +175,39 @@ function FileRow({
     <SidebarMenuItem>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <div>
-            {isEditing ? (
-              <div className="px-2 py-1">
-                <EditingRow
-                  value={editValue}
-                  onCancel={onCancelRename}
-                  onChange={onChangeRename}
-                  onCommit={onCommitRename}
-                />
-              </div>
-            ) : (
-              <SidebarMenuButton
-                isActive={isActive}
-                onClick={onSelect}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  onSelect();
-                  setMenuOpen(true);
-                }}
-                className="h-auto items-start gap-3 py-2.5 pr-10"
-                style={{ paddingLeft: `${level * 14 + 10}px` }}
-              >
-                <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-xl bg-sidebar-accent text-sidebar-accent-foreground">
-                  <FileTextIcon className="size-3.5" />
-                </div>
-                <div className="min-w-0">
-                  <div className="truncate text-sm font-medium">{file.label}</div>
-                  <div className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                    {file.description}
-                  </div>
-                </div>
-              </SidebarMenuButton>
-            )}
-          </div>
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-0 h-0 w-0 opacity-0"
+          />
         </DropdownMenuTrigger>
+
+        {isEditing ? (
+          <div className="px-2 py-1">
+            <EditingRow
+              value={editValue}
+              onCancel={onCancelRename}
+              onChange={onChangeRename}
+              onCommit={onCommitRename}
+            />
+          </div>
+        ) : (
+          <SidebarMenuButton
+            isActive={isActive}
+            onClick={onSelect}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onSelect();
+              setMenuOpen(true);
+            }}
+            className="pr-10"
+            style={{ paddingLeft: `${level * 14 + 10}px` }}
+          >
+            <FileTextIcon />
+            <span>{file.label}</span>
+          </SidebarMenuButton>
+        )}
 
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuLabel>File actions</DropdownMenuLabel>
@@ -294,54 +292,59 @@ function FolderRow({
     <SidebarMenuItem>
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
-          <div>
-            {isEditing ? (
-              <div className="px-2 py-1">
-                <EditingRow
-                  value={editingItem.value}
-                  onCancel={onCancelRename}
-                  onChange={onChangeRename}
-                  onCommit={onCommitRename}
-                />
-              </div>
-            ) : (
-              <SidebarMenuButton
-                isActive={isActive}
-                onClick={() => onSelectFolder(folder.id)}
-                onContextMenu={(event) => {
-                  event.preventDefault();
-                  onSelectFolder(folder.id);
-                  setMenuOpen(true);
-                }}
-                className="pr-10"
-                style={{ paddingLeft: `${level * 14 + 10}px` }}
-                tooltip={folder.label}
-              >
-                {hasChildren ? (
-                  <button
-                    type="button"
-                    className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onToggleExpanded(folder.id);
-                    }}
-                  >
-                    <ChevronDownIcon
-                      className={cn(
-                        'size-3.5 transition-transform',
-                        !isExpanded && '-rotate-90',
-                      )}
-                    />
-                  </button>
-                ) : (
-                  <span className="w-5" />
-                )}
-                {isExpanded ? <FolderOpenIcon /> : <FolderIcon />}
-                <span>{folder.label}</span>
-              </SidebarMenuButton>
-            )}
-          </div>
+          <button
+            type="button"
+            tabIndex={-1}
+            aria-hidden="true"
+            className="pointer-events-none absolute left-0 top-0 h-0 w-0 opacity-0"
+          />
         </DropdownMenuTrigger>
+
+        {isEditing ? (
+          <div className="px-2 py-1">
+            <EditingRow
+              value={editingItem.value}
+              onCancel={onCancelRename}
+              onChange={onChangeRename}
+              onCommit={onCommitRename}
+            />
+          </div>
+        ) : (
+          <SidebarMenuButton
+            isActive={isActive}
+            onClick={() => onToggleExpanded(folder.id)}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              onSelectFolder(folder.id);
+              setMenuOpen(true);
+            }}
+            className="pr-10"
+            style={{ paddingLeft: `${level * 14 + 10}px` }}
+            tooltip={folder.label}
+          >
+            {hasChildren ? (
+              <button
+                type="button"
+                className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onToggleExpanded(folder.id);
+                }}
+              >
+                <ChevronDownIcon
+                  className={cn(
+                    'size-3.5 transition-transform',
+                    !isExpanded && '-rotate-90',
+                  )}
+                />
+              </button>
+            ) : (
+              <span className="w-5" />
+            )}
+            {isExpanded ? <FolderOpenIcon /> : <FolderIcon />}
+            <span>{folder.label}</span>
+          </SidebarMenuButton>
+        )}
 
         {!isEditing ? <SidebarMenuBadge>{getFolderItemCount(folder)}</SidebarMenuBadge> : null}
 
@@ -391,57 +394,67 @@ function FolderRow({
         </DropdownMenuContent>
       </DropdownMenu>
 
-      {isExpanded && hasChildren ? (
-        <SidebarMenuSub>
-          {folder.children.map((childFolder) => (
-            <FolderRow
-              key={childFolder.id}
-              folder={childFolder}
-              level={level + 1}
-              searchActive={searchActive}
-              expandedFolderIds={expandedFolderIds}
-              activeItem={activeItem}
-              editingItem={editingItem}
-              onBeginRename={onBeginRename}
-              onCancelRename={onCancelRename}
-              onChangeRename={onChangeRename}
-              onCommitRename={onCommitRename}
-              onDeleteFolder={onDeleteFolder}
-              onDeleteFile={onDeleteFile}
-              onRequestDeleteFolder={onRequestDeleteFolder}
-              onSelectFile={onSelectFile}
-              onSelectFolder={onSelectFolder}
-              onToggleExpanded={onToggleExpanded}
-            />
-          ))}
+      {hasChildren ? (
+        <div
+          aria-hidden={!isExpanded}
+          className={cn(
+            'grid transition-[grid-template-rows,opacity] duration-200 ease-out',
+            isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
+          )}
+        >
+          <div className="overflow-hidden">
+            <SidebarMenuSub className={cn(!isExpanded && 'pointer-events-none')}>
+              {folder.children.map((childFolder) => (
+                <FolderRow
+                  key={childFolder.id}
+                  folder={childFolder}
+                  level={level + 1}
+                  searchActive={searchActive}
+                  expandedFolderIds={expandedFolderIds}
+                  activeItem={activeItem}
+                  editingItem={editingItem}
+                  onBeginRename={onBeginRename}
+                  onCancelRename={onCancelRename}
+                  onChangeRename={onChangeRename}
+                  onCommitRename={onCommitRename}
+                  onDeleteFolder={onDeleteFolder}
+                  onDeleteFile={onDeleteFile}
+                  onRequestDeleteFolder={onRequestDeleteFolder}
+                  onSelectFile={onSelectFile}
+                  onSelectFolder={onSelectFolder}
+                  onToggleExpanded={onToggleExpanded}
+                />
+              ))}
 
-          {folder.files.map((file) => (
-            <FileRow
-              key={file.id}
-              file={file}
-              isActive={activeItem?.type === 'file' && activeItem.id === file.id}
-              isEditing={editingItem?.type === 'file' && editingItem.id === file.id}
-              editValue={
-                editingItem?.type === 'file' && editingItem.id === file.id
-                  ? editingItem.value
-                  : file.label
-              }
-              level={level + 1}
-              onBeginRename={() =>
-                onBeginRename({
-                  type: 'file',
-                  id: file.id,
-                  value: file.label,
-                })
-              }
-              onCancelRename={onCancelRename}
-              onChangeRename={onChangeRename}
-              onCommitRename={onCommitRename}
-              onDelete={() => onDeleteFile(file.id)}
-              onSelect={() => onSelectFile(file.id)}
-            />
-          ))}
-        </SidebarMenuSub>
+              {folder.files.map((file) => (
+                <FileRow
+                  key={file.id}
+                  file={file}
+                  isActive={activeItem?.type === 'file' && activeItem.id === file.id}
+                  isEditing={editingItem?.type === 'file' && editingItem.id === file.id}
+                  editValue={
+                    editingItem?.type === 'file' && editingItem.id === file.id
+                      ? editingItem.value
+                      : file.label
+                  }
+                  level={level + 1}
+                  onBeginRename={() =>
+                    onBeginRename({
+                      type: 'file',
+                      id: file.id,
+                      value: file.label,
+                    })
+                  }
+                  onCancelRename={onCancelRename}
+                  onChangeRename={onChangeRename}
+                  onCommitRename={onCommitRename}
+                  onDelete={() => onDeleteFile(file.id)}
+                  onSelect={() => onSelectFile(file.id)}
+                />
+              ))}
+            </SidebarMenuSub>
+          </div>
+        </div>
       ) : null}
     </SidebarMenuItem>
   );
