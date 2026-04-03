@@ -110,6 +110,10 @@ function getRowPaddingLeft(level: number) {
   return level === 0 ? 10 : 14;
 }
 
+function getFileRowPaddingLeft(level: number) {
+  return getRowPaddingLeft(level);
+}
+
 function TreeElbow({ level }: { level: number }) {
   if (level === 0) {
     return null;
@@ -118,7 +122,7 @@ function TreeElbow({ level }: { level: number }) {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute left-[-11px] top-0 h-4 w-4 rounded-bl-[10px] border-b border-l border-sidebar-border/80"
+      className="pointer-events-none absolute left-[-8px] top-0 h-4 w-4 rounded-bl-[10px] border-b border-l border-sidebar-border/80"
     />
   );
 }
@@ -221,9 +225,10 @@ function FileRow({
               onSelect();
               setMenuOpen(true);
             }}
-            className="w-full pr-10"
-            style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
+            className="w-full pr-10 data-[active=true]:bg-sidebar-accent/45"
+            style={{ paddingLeft: `${getFileRowPaddingLeft(level)}px` }}
           >
+            <span className="w-0 shrink-0" />
             <FileTextIcon />
             <span>{file.label}</span>
           </SidebarMenuButton>
@@ -342,7 +347,7 @@ function FolderRow({
                 onSelectFolder(folder.id);
                 setMenuOpen(true);
               }}
-              className="w-full overflow-visible pr-14"
+              className="w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45"
               style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
               tooltip={folder.label}
             >
@@ -365,7 +370,11 @@ function FolderRow({
               ) : (
                 <span className="w-5" />
               )}
-              {isExpanded ? <FolderOpenIcon /> : <FolderIcon />}
+              {isExpanded ? (
+                <FolderOpenIcon className="ml-[5px]" />
+              ) : (
+                <FolderIcon className="ml-[5px]" />
+              )}
               <span>{folder.label}</span>
               <span className="group/count absolute inset-y-0 right-1 z-10 w-0">
                 <span className="absolute right-0 top-1/2 -translate-y-1/2 px-1 text-[11px] font-medium text-sidebar-foreground/70">
@@ -439,10 +448,14 @@ function FolderRow({
             isExpanded ? 'grid-rows-[1fr] opacity-100' : 'grid-rows-[0fr] opacity-0',
           )}
         >
-          <div className="overflow-hidden">
+          <div className="relative overflow-hidden">
+            <span
+              aria-hidden="true"
+              className="pointer-events-none absolute bottom-8 left-[17px] top-0 w-px bg-sidebar-border/80"
+            />
             <SidebarMenuSub
               className={cn(
-                'mr-0 px-0 pl-2.5 pr-0',
+                'mr-0 border-l-0 px-0 pl-2.5 pr-0',
                 !isExpanded && 'pointer-events-none',
               )}
             >
