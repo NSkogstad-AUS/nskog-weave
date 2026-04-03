@@ -302,7 +302,7 @@ const NODE_META = {
   element: {
     icon: SparklesIcon,
     eyebrow: 'Element',
-    className: 'border-sky-200/80 bg-sky-50/90',
+    className: 'border-slate-200/80 bg-white/95',
   },
 } satisfies Record<
   FilePageNode['kind'],
@@ -403,6 +403,7 @@ export function FileCanvasView({
   const [draftPositions, setDraftPositions] = useState<Record<string, Point>>({});
   const [snapPreviewPositions, setSnapPreviewPositions] = useState<Record<string, Point>>({});
   const [draftSizes, setDraftSizes] = useState<Record<string, FilePageNode['size']>>({});
+  const [draftIcons, setDraftIcons] = useState<Record<string, FilePageElementIcon>>({});
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
@@ -734,6 +735,23 @@ export function FileCanvasView({
     });
   }
 
+  function clearNodeIconPreview(nodeId?: string) {
+    if (!nodeId) {
+      setDraftIcons({});
+      return;
+    }
+
+    setDraftIcons((current) => {
+      if (!(nodeId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+  }
+
   function canResizeNode(nodeId: string, size: FilePageNode['size']) {
     const resizingNode = nodesRef.current.find((node) => node.id === nodeId);
 
@@ -766,6 +784,27 @@ export function FileCanvasView({
 
     clearNodeSizePreview(node.id);
     onResizeNode(node.id, size);
+    onSelectNodes([node.id]);
+  }
+
+  function previewNodeIcon(node: FilePageNode, icon: FilePageElementIcon) {
+    if (node.kind !== 'element') {
+      return;
+    }
+
+    setDraftIcons((current) => ({
+      ...current,
+      [node.id]: icon,
+    }));
+  }
+
+  function applyNodeIcon(node: FilePageNode, icon: FilePageElementIcon) {
+    if (node.kind !== 'element') {
+      return;
+    }
+
+    clearNodeIconPreview(node.id);
+    onUpdateNode(node.id, { icon });
     onSelectNodes([node.id]);
   }
 
@@ -847,7 +886,8 @@ export function FileCanvasView({
 
           {nodes.map((node) => {
             const meta = NODE_META[node.kind];
-            const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[node.icon] : null;
+            const elementIcon = draftIcons[node.id] ?? node.icon;
+            const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[elementIcon] : null;
             const Icon = elementMeta?.icon ?? meta.icon;
             const isSelected = selectedIdSet.has(node.id);
             const displaySize = draftSizes[node.id] ?? node.size;
@@ -865,6 +905,7 @@ export function FileCanvasView({
                 onOpenChange={(open) => {
                   if (!open) {
                     clearNodeSizePreview(node.id);
+                    clearNodeIconPreview(node.id);
                   }
                 }}
               >
@@ -912,12 +953,28 @@ export function FileCanvasView({
                       <div
                         className={cn(
                           'flex h-full items-start justify-between gap-3',
-                          isCompactElement && 'items-center justify-center',
+                          isCompactElement && 'items-center justify-center p-0',
                         )}
                       >
-                        <div className={cn('flex items-center gap-2.5', isCompactElement && 'gap-0')}>
-                          <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75">
-                            <Icon className="size-4 text-slate-600" />
+                        <div
+                          className={cn(
+                            'flex items-center gap-2.5',
+                            isCompactElement && 'h-full w-full items-center justify-center gap-0',
+                          )}
+                        >
+                          <span
+                            className={cn(
+                              'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
+                              isCompactElement &&
+                                'size-12 rounded-none border-transparent bg-transparent shadow-none',
+                            )}
+                          >
+                            <Icon
+                              className={cn(
+                                'size-4 text-slate-600',
+                                isCompactElement && 'size-7 text-slate-500',
+                              )}
+                            />
                           </span>
                           {!isCompactElement ? (
                             <div className="min-w-0">
@@ -972,7 +1029,10 @@ export function FileCanvasView({
                           <Icon className="size-4" />
                           Change icon
                         </ContextMenuSubTrigger>
-                        <ContextMenuSubContent className="w-48">
+                        <ContextMenuSubContent
+                          className="w-48"
+                          onPointerLeave={() => clearNodeIconPreview(node.id)}
+                        >
                           <div className="grid grid-cols-2 gap-1.5 p-1">
                             {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
                               const IconOption = iconMeta.icon;
@@ -980,14 +1040,18 @@ export function FileCanvasView({
                               return (
                                 <ContextMenuItem
                                   key={iconKey}
+                                  onFocus={() =>
+                                    previewNodeIcon(node, iconKey as FilePageElementIcon)
+                                  }
+                                  onPointerEnter={() =>
+                                    previewNodeIcon(node, iconKey as FilePageElementIcon)
+                                  }
                                   onSelect={() =>
-                                    onUpdateNode(node.id, {
-                                      icon: iconKey as FilePageElementIcon,
-                                    })
+                                    applyNodeIcon(node, iconKey as FilePageElementIcon)
                                   }
                                   className={cn(
                                     'min-h-0 rounded-xl p-2',
-                                    node.icon === iconKey && 'bg-sidebar-accent/55',
+                                    elementIcon === iconKey && 'bg-sidebar-accent/55',
                                   )}
                                 >
                                   <span className="flex w-full items-center gap-2">
