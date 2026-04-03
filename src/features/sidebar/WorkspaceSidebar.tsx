@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
   FileTextIcon,
@@ -528,7 +528,7 @@ interface WorkspaceSidebarProps {
   onOpenFile?: (fileId: string) => void;
 }
 
-export function WorkspaceSidebar({
+export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   onFileDelete,
   onFoldersChange,
   onOpenFile,
@@ -805,4 +805,4 @@ export function WorkspaceSidebar({
       </AlertDialog>
     </>
   );
-}
+});

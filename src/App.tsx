@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 
 import {
   SidebarInset,
@@ -29,6 +29,14 @@ function App() {
     setView,
   } = useFilePages(activeFile);
 
+  const handleFileDelete = useCallback(
+    (fileId: string) => {
+      removeFilePage(fileId);
+      setOpenFileId((current) => (current === fileId ? null : current));
+    },
+    [removeFilePage],
+  );
+
   useEffect(() => {
     if (openFileId && !findFileById(folders, openFileId)) {
       setOpenFileId(null);
@@ -49,10 +57,7 @@ function App() {
       <WorkspaceSidebar
         onFoldersChange={setFolders}
         onOpenFile={setOpenFileId}
-        onFileDelete={(fileId) => {
-          removeFilePage(fileId);
-          setOpenFileId((current) => (current === fileId ? null : current));
-        }}
+        onFileDelete={handleFileDelete}
       />
       <SidebarInset className="min-h-screen bg-transparent">
         <div className="flex h-full min-h-screen flex-col p-4 md:p-5">

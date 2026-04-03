@@ -35,6 +35,25 @@ type MarqueeState = {
   initialSelection: string[];
 };
 
+function positionsChanged(
+  current: Record<string, Point>,
+  next: Record<string, Point>,
+) {
+  const currentKeys = Object.keys(current);
+  const nextKeys = Object.keys(next);
+
+  if (currentKeys.length !== nextKeys.length) {
+    return true;
+  }
+
+  return nextKeys.some((key) => {
+    const currentPoint = current[key];
+    const nextPoint = next[key];
+
+    return !currentPoint || currentPoint.x !== nextPoint.x || currentPoint.y !== nextPoint.y;
+  });
+}
+
 function snapToGrid(value: number) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
 }
@@ -98,7 +117,11 @@ export function FileCanvasView({
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [marqueeState, setMarqueeState] = useState<MarqueeState | null>(null);
-  const selectedIdSet = new Set(selectedNodeIds);
+  const [draftPositions, setDraftPositions] = useState<Record<string, Point>>({});
+  const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
+  const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
+  const selectedIdSet = new Set(displaySelectedNodeIds);
+  const hasDraftPositions = Object.keys(draftPositions).length > 0;
 
   useEffect(() => {
     if (!dragState && !marqueeState) {
@@ -129,7 +152,9 @@ export function FileCanvasView({
           {},
         );
 
-        onMoveNodes(nextPositions);
+        setDraftPositions((current) =>
+          positionsChanged(current, nextPositions) ? nextPositions : current,
+        );
         return;
       }
 
@@ -145,15 +170,15 @@ export function FileCanvasView({
       const intersectingIds = nodes
         .filter((node) =>
           rectanglesIntersect(marqueeRect, {
-            left: node.position.x,
-            top: node.position.y,
-            right: node.position.x + NODE_WIDTH,
-            bottom: node.position.y + NODE_HEIGHT,
+            left: (draftPositions[node.id] ?? node.position).x,
+            top: (draftPositions[node.id] ?? node.position).y,
+            right: (draftPositions[node.id] ?? node.position).x + NODE_WIDTH,
+            bottom: (draftPositions[node.id] ?? node.position).y + NODE_HEIGHT,
           }),
         )
         .map((node) => node.id);
 
-      onSelectNodes(
+      setDraftSelectedNodeIds(
         marqueeState.additive
           ? Array.from(new Set([...marqueeState.initialSelection, ...intersectingIds]))
           : intersectingIds,
@@ -162,8 +187,18 @@ export function FileCanvasView({
     };
 
     const handlePointerUp = () => {
+      if (dragState && hasDraftPositions) {
+        onMoveNodes(draftPositions);
+      }
+
+      if (marqueeState) {
+        onSelectNodes(draftSelectedNodeIds ?? (marqueeState.additive ? marqueeState.initialSelection : []));
+      }
+
       setDragState(null);
       setMarqueeState(null);
+      setDraftPositions({});
+      setDraftSelectedNodeIds(null);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
@@ -173,7 +208,16 @@ export function FileCanvasView({
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
     };
-  }, [dragState, marqueeState, nodes, onMoveNodes, onSelectNodes]);
+  }, [
+    dragState,
+    draftPositions,
+    draftSelectedNodeIds,
+    hasDraftPositions,
+    marqueeState,
+    nodes,
+    onMoveNodes,
+    onSelectNodes,
+  ]);
 
   function getLocalPoint(clientX: number, clientY: number) {
     if (!canvasRef.current) {
@@ -205,6 +249,7 @@ export function FileCanvasView({
       selectedIdSet.has(node.id) && selectedNodeIds.length > 1 ? selectedNodeIds : [node.id];
 
     onSelectNodes(nextSelectedIds);
+    setDraftSelectedNodeIds(nextSelectedIds);
     setDragState({
       nodeIds: nextSelectedIds,
       origin: localPoint,
@@ -240,11 +285,13 @@ export function FileCanvasView({
           });
 
           if (!event.shiftKey) {
-            onSelectNodes([]);
+            setDraftSelectedNodeIds([]);
+          } else {
+            setDraftSelectedNodeIds(selectedNodeIds);
           }
         }
       }}
-      className="relative h-full min-h-[34rem] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]"
+      className="relative h-full min-h-[34rem] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none"
       style={{
         backgroundImage:
           'radial-gradient(circle, rgba(148,163,184,0.28) 1.15px, transparent 1.2px)',
@@ -254,8 +301,8 @@ export function FileCanvasView({
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
         <span>Canvas</span>
         <span>
-          {selectedNodeIds.length > 1
-            ? `${selectedNodeIds.length} selected · marquee or drag`
+          {displaySelectedNodeIds.length > 1
+            ? `${displaySelectedNodeIds.length} selected · marquee or drag`
             : 'Drag folders and items · snaps to grid'}
         </span>
       </div>
@@ -264,6 +311,7 @@ export function FileCanvasView({
         const meta = NODE_META[node.kind];
         const Icon = meta.icon;
         const isSelected = selectedIdSet.has(node.id);
+        const displayPosition = draftPositions[node.id] ?? node.position;
 
         return (
           <button
@@ -271,14 +319,14 @@ export function FileCanvasView({
             type="button"
             onPointerDown={(event) => handleNodePointerDown(event, node)}
             className={cn(
-              'absolute w-52 cursor-grab rounded-2xl border px-4 py-3 text-left shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] transition-[transform,box-shadow,border-color] duration-150 active:cursor-grabbing',
+              'absolute w-52 cursor-grab rounded-2xl border px-4 py-3 text-left shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] transition-[transform,box-shadow,border-color] duration-75 active:cursor-grabbing will-change-transform',
               meta.className,
               dragState?.nodeIds.includes(node.id) &&
                 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
               isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
             )}
             style={{
-              transform: `translate(${node.position.x}px, ${node.position.y}px)`,
+              transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
             }}
           >
             <div className="flex items-start justify-between gap-3">
