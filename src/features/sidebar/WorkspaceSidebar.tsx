@@ -122,7 +122,7 @@ function TreeElbow({ level }: { level: number }) {
   return (
     <span
       aria-hidden="true"
-      className="pointer-events-none absolute left-[-8px] top-0 h-4 w-4 rounded-bl-[10px] border-b border-l border-sidebar-border/80"
+      className="pointer-events-none absolute left-[-8px] top-0 z-20 h-4 w-4 rounded-bl-[10px] border-b border-l border-sidebar-border/80"
     />
   );
 }
