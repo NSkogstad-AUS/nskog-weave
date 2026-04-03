@@ -17,11 +17,22 @@ interface FileCanvasViewProps {
   onSelectNode: (nodeId: string | null) => void;
 }
 
+const GRID_SIZE = 64;
+const CANVAS_PADDING = 32;
+
 type DragState = {
   nodeId: string;
   origin: Point;
   basePosition: Point;
 };
+
+function snapToGrid(value: number) {
+  return Math.round(value / GRID_SIZE) * GRID_SIZE;
+}
+
+function clampToCanvas(value: number) {
+  return Math.max(CANVAS_PADDING, value);
+}
 
 const NODE_META = {
   folder: {
@@ -69,9 +80,12 @@ export function FileCanvasView({
         return;
       }
 
+      const nextX = dragState.basePosition.x + (localPoint.x - dragState.origin.x);
+      const nextY = dragState.basePosition.y + (localPoint.y - dragState.origin.y);
+
       onMoveNode(dragState.nodeId, {
-        x: Math.max(24, dragState.basePosition.x + (localPoint.x - dragState.origin.x)),
-        y: Math.max(24, dragState.basePosition.y + (localPoint.y - dragState.origin.y)),
+        x: clampToCanvas(snapToGrid(nextX)),
+        y: clampToCanvas(snapToGrid(nextY)),
       });
     };
 
@@ -134,12 +148,12 @@ export function FileCanvasView({
       style={{
         backgroundImage:
           'radial-gradient(circle, rgba(148,163,184,0.28) 1.15px, transparent 1.2px)',
-        backgroundSize: '18px 18px',
+        backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
       }}
     >
       <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
         <span>Canvas</span>
-        <span>Drag folders and items</span>
+        <span>Drag folders and items · snaps to grid</span>
       </div>
 
       {nodes.map((node) => {
@@ -153,8 +167,9 @@ export function FileCanvasView({
             type="button"
             onPointerDown={(event) => handleNodePointerDown(event, node)}
             className={cn(
-              'absolute w-52 cursor-grab rounded-2xl border px-4 py-3 text-left shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] transition-transform active:cursor-grabbing',
+              'absolute w-52 cursor-grab rounded-2xl border px-4 py-3 text-left shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] transition-[transform,box-shadow,border-color] duration-150 active:cursor-grabbing',
               meta.className,
+              dragState?.nodeId === node.id && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
               isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
             )}
             style={{
