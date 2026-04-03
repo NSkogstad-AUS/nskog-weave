@@ -2,15 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   ExpandIcon,
-  LightbulbIcon,
-  MessageSquareIcon,
-  PlusIcon,
-  FileTextIcon,
-  FolderIcon,
-  SparklesIcon,
-  TargetIcon,
   PencilLineIcon,
-  ShapesIcon,
+  PlusIcon,
   Trash2Icon,
 } from 'lucide-react';
 
@@ -24,9 +17,33 @@ import {
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/animate/tooltip';
 import { cn } from '@/lib/utils';
+import { CANVAS_PADDING, GRID_SIZE, NODE_CARD_CLASS } from './canvas/constants';
+import {
+  ELEMENT_ICON_META,
+  NODE_META,
+  RESIZE_OPTIONS,
+  ResizeOptionSwatch,
+} from './canvas/meta';
+import {
+  boundsOverlap,
+  clampToCanvas,
+  getNodeBoundsWithSize,
+  getNodeDimensions,
+  normalizeRectangle,
+  rectanglesIntersect,
+  resolveSnapPositions,
+  snapToSlotX,
+  snapToSlotY,
+} from './canvas/utils';
 import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
-import type { Point } from '@/types/workspace';
+import type { Point } from '@/types/geometry';
 
 interface FileCanvasViewProps {
   nodes: FilePageNode[];
@@ -45,18 +62,9 @@ interface FileCanvasViewProps {
     updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
   ) => void;
   onDeleteNode: (nodeId: string) => void;
+  onHoverNodeChange: (node: FilePageNode | null) => void;
   onSelectNodes: (nodeIds: string[]) => void;
 }
-
-const GRID_SIZE = 64;
-const CANVAS_PADDING = 32;
-const NODE_UNIT = 96;
-const SLOT_GAP_X = 16;
-const SLOT_GAP_Y = 16;
-const SLOT_STEP_X = NODE_UNIT + SLOT_GAP_X;
-const SLOT_STEP_Y = NODE_UNIT + SLOT_GAP_Y;
-const COLLISION_GAP = 10;
-const NODE_CARD_CLASS = 'absolute rounded-2xl border px-4 py-3 text-left';
 
 type DragState = {
   nodeIds: string[];
@@ -70,314 +78,6 @@ type MarqueeState = {
   additive: boolean;
   initialSelection: string[];
 };
-
-function positionsChanged(
-  current: Record<string, Point>,
-  next: Record<string, Point>,
-) {
-  const currentKeys = Object.keys(current);
-  const nextKeys = Object.keys(next);
-
-  if (currentKeys.length !== nextKeys.length) {
-    return true;
-  }
-
-  return nextKeys.some((key) => {
-    const currentPoint = current[key];
-    const nextPoint = next[key];
-
-    return !currentPoint || currentPoint.x !== nextPoint.x || currentPoint.y !== nextPoint.y;
-  });
-}
-
-function snapToGrid(value: number) {
-  return Math.round(value / GRID_SIZE) * GRID_SIZE;
-}
-
-function clampToCanvas(value: number) {
-  return Math.max(CANVAS_PADDING, value);
-}
-
-function clampUnits(value: number): 1 | 2 | 3 {
-  return Math.max(1, Math.min(3, value)) as 1 | 2 | 3;
-}
-
-function snapToSlotX(value: number) {
-  return (
-    CANVAS_PADDING +
-    Math.round((clampToCanvas(value) - CANVAS_PADDING) / SLOT_STEP_X) * SLOT_STEP_X
-  );
-}
-
-function snapToSlotY(value: number) {
-  return (
-    CANVAS_PADDING +
-    Math.round((clampToCanvas(value) - CANVAS_PADDING) / SLOT_STEP_Y) * SLOT_STEP_Y
-  );
-}
-
-function normalizeRectangle(start: Point, end: Point) {
-  return {
-    left: Math.min(start.x, end.x),
-    top: Math.min(start.y, end.y),
-    right: Math.max(start.x, end.x),
-    bottom: Math.max(start.y, end.y),
-  };
-}
-
-function rectanglesIntersect(
-  left: ReturnType<typeof normalizeRectangle>,
-  right: ReturnType<typeof normalizeRectangle>,
-) {
-  return !(
-    left.right < right.left ||
-    left.left > right.right ||
-    left.bottom < right.top ||
-    left.top > right.bottom
-  );
-}
-
-function getNodeBounds(position: Point) {
-  return getNodeBoundsWithSize(position, {
-    widthUnits: 1,
-    heightUnits: 1,
-  });
-}
-
-function getNodeDimensions(size: FilePageNode['size']) {
-  return {
-    width: NODE_UNIT + (size.widthUnits - 1) * SLOT_STEP_X,
-    height: NODE_UNIT + (size.heightUnits - 1) * SLOT_STEP_Y,
-  };
-}
-
-function getNodeBoundsWithSize(position: Point, size: FilePageNode['size']) {
-  const dimensions = getNodeDimensions(size);
-
-  return {
-    left: position.x,
-    top: position.y,
-    right: position.x + dimensions.width,
-    bottom: position.y + dimensions.height,
-  };
-}
-
-function boundsOverlap(
-  left: ReturnType<typeof getNodeBounds>,
-  right: ReturnType<typeof getNodeBounds>,
-) {
-  return !(
-    left.right + COLLISION_GAP <= right.left ||
-    left.left >= right.right + COLLISION_GAP ||
-    left.bottom + COLLISION_GAP <= right.top ||
-    left.top >= right.bottom + COLLISION_GAP
-  );
-}
-
-function buildCandidateAnchors(origin: Point) {
-  const baseColumn = Math.round((snapToSlotX(origin.x) - CANVAS_PADDING) / SLOT_STEP_X);
-  const baseRow = Math.round((snapToSlotY(origin.y) - CANVAS_PADDING) / SLOT_STEP_Y);
-  const candidates: Point[] = [];
-  const seen = new Set<string>();
-
-  for (let radius = 0; radius <= 10; radius += 1) {
-    const offsets =
-      radius === 0
-        ? [[0, 0]]
-        : [
-            [0, -radius],
-            [radius, 0],
-            [0, radius],
-            [-radius, 0],
-            ...Array.from({ length: radius - 1 }, (_, index) => index + 1).flatMap((step) => [
-              [step, -radius + step],
-              [radius - step, step],
-              [-step, radius - step],
-              [-radius + step, -step],
-            ]),
-          ];
-
-    offsets.forEach(([columnOffset, rowOffset]) => {
-      const column = baseColumn + columnOffset;
-      const row = baseRow + rowOffset;
-      const key = `${column}:${row}`;
-
-      if (seen.has(key)) {
-        return;
-      }
-
-      seen.add(key);
-      candidates.push({
-        x: CANVAS_PADDING + column * SLOT_STEP_X,
-        y: CANVAS_PADDING + row * SLOT_STEP_Y,
-      });
-    });
-  }
-
-  return candidates;
-}
-
-function resolveSnapPositions(
-  desiredPositions: Record<string, Point>,
-  dragNodeIds: string[],
-  stationaryNodes: FilePageNode[],
-  basePositions: Record<string, Point>,
-  nodeSizes: Record<string, FilePageNode['size']>,
-) {
-  const anchorId = dragNodeIds[0];
-  const anchorBasePosition = basePositions[anchorId];
-  const anchorDesiredPosition = desiredPositions[anchorId];
-
-  if (!anchorBasePosition || !anchorDesiredPosition) {
-    return desiredPositions;
-  }
-
-  const relativeOffsets = dragNodeIds.reduce<Record<string, Point>>((offsets, nodeId) => {
-    const basePosition = basePositions[nodeId];
-
-    if (basePosition) {
-      offsets[nodeId] = {
-        x: basePosition.x - anchorBasePosition.x,
-        y: basePosition.y - anchorBasePosition.y,
-      };
-    }
-
-    return offsets;
-  }, {});
-  const stationaryBounds = stationaryNodes.map((node) =>
-    getNodeBoundsWithSize(node.position, node.size),
-  );
-
-  for (const anchorCandidate of buildCandidateAnchors(anchorDesiredPosition)) {
-    const candidatePositions = dragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
-      const offset = relativeOffsets[nodeId] ?? { x: 0, y: 0 };
-
-      positions[nodeId] = {
-        x: clampToCanvas(anchorCandidate.x + offset.x),
-        y: clampToCanvas(anchorCandidate.y + offset.y),
-      };
-
-      return positions;
-    }, {});
-    const candidateBounds = dragNodeIds.map((nodeId) =>
-      getNodeBoundsWithSize(
-        candidatePositions[nodeId],
-        nodeSizes[nodeId] ?? { widthUnits: 1, heightUnits: 1 },
-      ),
-    );
-    const collidesWithStationary = candidateBounds.some((bounds) =>
-      stationaryBounds.some((stationary) => boundsOverlap(bounds, stationary)),
-    );
-
-    if (collidesWithStationary) {
-      continue;
-    }
-
-    const collidesWithinGroup = candidateBounds.some((bounds, index) =>
-      candidateBounds.some(
-        (otherBounds, otherIndex) =>
-          index !== otherIndex && boundsOverlap(bounds, otherBounds),
-      ),
-    );
-
-    if (!collidesWithinGroup) {
-      return candidatePositions;
-    }
-  }
-
-  return desiredPositions;
-}
-
-const NODE_META = {
-  folder: {
-    icon: FolderIcon,
-    eyebrow: 'Folder',
-    className: 'border-slate-200/80 bg-white/95',
-  },
-  file: {
-    icon: FileTextIcon,
-    eyebrow: 'File',
-    className: 'border-slate-200/80 bg-white/98',
-  },
-  element: {
-    icon: SparklesIcon,
-    eyebrow: 'Element',
-    className: 'border-slate-200/80 bg-white/95',
-  },
-} satisfies Record<
-  FilePageNode['kind'],
-  {
-    icon: typeof FolderIcon;
-    eyebrow: string;
-    className: string;
-  }
->;
-
-const ELEMENT_ICON_META: Record<
-  FilePageElementIcon,
-  {
-    icon: typeof SparklesIcon;
-    label: string;
-  }
-> = {
-  sparkles: {
-    icon: SparklesIcon,
-    label: 'Sparkles',
-  },
-  lightbulb: {
-    icon: LightbulbIcon,
-    label: 'Lightbulb',
-  },
-  shapes: {
-    icon: ShapesIcon,
-    label: 'Shapes',
-  },
-  'message-square': {
-    icon: MessageSquareIcon,
-    label: 'Message',
-  },
-  target: {
-    icon: TargetIcon,
-    label: 'Target',
-  },
-};
-
-const RESIZE_OPTIONS = [
-  { widthUnits: 1, heightUnits: 1 },
-  { widthUnits: 2, heightUnits: 1 },
-  { widthUnits: 3, heightUnits: 1 },
-  { widthUnits: 1, heightUnits: 2 },
-  { widthUnits: 2, heightUnits: 2 },
-  { widthUnits: 3, heightUnits: 2 },
-  { widthUnits: 1, heightUnits: 3 },
-  { widthUnits: 2, heightUnits: 3 },
-  { widthUnits: 3, heightUnits: 3 },
-] satisfies FilePageNode['size'][];
-
-function ResizeOptionSwatch({ size }: { size: FilePageNode['size'] }) {
-  return (
-    <span className="grid grid-cols-3 grid-rows-3 gap-0.5">
-      {Array.from({ length: 9 }, (_, index) => {
-        const column = (index % 3) + 1;
-        const row = Math.floor(index / 3) + 1;
-        const isActive = column <= size.widthUnits && row <= size.heightUnits;
-
-        return (
-          <span
-            key={`${column}-${row}`}
-            className={cn(
-              'size-2 rounded-[3px] border transition-colors',
-              isActive
-                ? 'border-sky-300/80 bg-sky-300/75'
-                : 'border-slate-200/80 bg-slate-100/90',
-            )}
-          />
-        );
-      })}
-    </span>
-  );
-}
-
 export function FileCanvasView({
   nodes,
   selectedNodeIds,
@@ -386,6 +86,7 @@ export function FileCanvasView({
   onAddNode,
   onUpdateNode,
   onDeleteNode,
+  onHoverNodeChange,
   onSelectNodes,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -405,6 +106,7 @@ export function FileCanvasView({
   const [draftSizes, setDraftSizes] = useState<Record<string, FilePageNode['size']>>({});
   const [draftIcons, setDraftIcons] = useState<Record<string, FilePageElementIcon>>({});
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
+  const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
@@ -449,6 +151,7 @@ export function FileCanvasView({
 
   useEffect(() => {
     return () => {
+      onHoverNodeChange(null);
       if (releaseTimerRef.current !== null) {
         window.clearTimeout(releaseTimerRef.current);
       }
@@ -456,7 +159,7 @@ export function FileCanvasView({
         window.cancelAnimationFrame(frameRef.current);
       }
     };
-  }, []);
+  }, [onHoverNodeChange]);
 
   useEffect(() => {
     const handlePointerMove = (event: PointerEvent) => {
@@ -833,6 +536,11 @@ export function FileCanvasView({
         <div
           ref={canvasRef}
           onContextMenu={handleCanvasContextMenu}
+          onPointerLeave={() => {
+            if (!contextMenuNodeId) {
+              onHoverNodeChange(null);
+            }
+          }}
           onPointerDown={(event) => {
             if (event.button !== 0) {
               return;
@@ -895,15 +603,124 @@ export function FileCanvasView({
             const displayPosition = draftPositions[node.id] ?? node.position;
             const snapPreviewPosition = snapPreviewPositions[node.id];
             const isCompactNode = displaySize.widthUnits === 1;
+            const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
             const showNodeLabel = displaySize.widthUnits >= 2;
             const showNodeDescription =
               displaySize.widthUnits >= 3 && node.description.trim().length > 0;
             const isEditing = editingNodeId === node.id;
+            const buttonNode = (
+              <button
+                type="button"
+                onPointerDown={(event) => handleNodePointerDown(event, node)}
+                onPointerEnter={() => onHoverNodeChange(node)}
+                onPointerLeave={() => {
+                  if (contextMenuNodeId !== node.id) {
+                    onHoverNodeChange(null);
+                  }
+                }}
+                onContextMenu={(event) => {
+                  event.stopPropagation();
+                  setContextMenuNodeId(node.id);
+                  onHoverNodeChange(node);
+                  onSelectNodes([node.id]);
+                  setDraftSelectedNodeIds([node.id]);
+                }}
+                className={cn(
+                  NODE_CARD_CLASS,
+                  'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
+                  meta.className,
+                  dragState?.nodeIds.includes(node.id) &&
+                    'z-20 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
+                  !dragState?.nodeIds.includes(node.id) &&
+                    'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
+                  snapPreviewPosition && dragState?.nodeIds.includes(node.id) && 'opacity-94',
+                  isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
+                )}
+                style={{
+                  width: dimensions.width,
+                  height: dimensions.height,
+                  transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
+                }}
+              >
+                <div
+                  className={cn(
+                    'flex h-full items-start justify-between gap-3',
+                    isCompactNode && 'items-center justify-center p-0',
+                  )}
+                >
+                  <div
+                    className={cn(
+                      'flex items-center gap-2.5',
+                      isCompactNode && 'h-full w-full items-center justify-center gap-0',
+                    )}
+                  >
+                    <span
+                      className={cn(
+                        'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
+                        isCompactNode &&
+                          'size-12 rounded-none border-transparent bg-transparent shadow-none',
+                      )}
+                    >
+                      <Icon
+                        className={cn(
+                          'size-4 text-slate-600',
+                          isCompactNode && 'size-7 text-slate-500',
+                        )}
+                      />
+                    </span>
+                    {!isCompactNode ? (
+                      <div className="min-w-0">
+                        {isEditing ? (
+                          <input
+                            autoFocus
+                            value={editingLabel}
+                            onChange={(event) => setEditingLabel(event.target.value)}
+                            onBlur={() => commitNodeRename(node)}
+                            onKeyDown={(event) => {
+                              if (event.key === 'Enter') {
+                                commitNodeRename(node);
+                              }
+                              if (event.key === 'Escape') {
+                                setEditingNodeId(null);
+                                setEditingLabel('');
+                              }
+                            }}
+                            onPointerDown={(event) => event.stopPropagation()}
+                            className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
+                          />
+                        ) : showNodeLabel ? (
+                          <div className="truncate text-sm font-medium text-slate-950">
+                            {node.label}
+                          </div>
+                        ) : null}
+                        {showNodeDescription ? (
+                          <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                            {node.description}
+                          </div>
+                        ) : (
+                          <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                            {elementMeta?.label ?? meta.eyebrow}
+                          </div>
+                        )}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              </button>
+            );
 
             return (
               <ContextMenu
                 key={node.id}
                 onOpenChange={(open) => {
+                  if (open) {
+                    setContextMenuNodeId(node.id);
+                    onHoverNodeChange(node);
+                  } else {
+                    setContextMenuNodeId((current) => (current === node.id ? null : current));
+                    onHoverNodeChange(null);
+                  }
+
                   if (!open) {
                     clearNodeSizePreview(node.id);
                     clearNodeIconPreview(node.id);
@@ -925,98 +742,20 @@ export function FileCanvasView({
                       }}
                     />
                   ) : null}
-                  <ContextMenuTrigger asChild>
-                    <button
-                      type="button"
-                      onPointerDown={(event) => handleNodePointerDown(event, node)}
-                      onContextMenu={(event) => {
-                        event.stopPropagation();
-                        onSelectNodes([node.id]);
-                        setDraftSelectedNodeIds([node.id]);
-                      }}
-                      className={cn(
-                        NODE_CARD_CLASS,
-                        'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
-                        meta.className,
-                        dragState?.nodeIds.includes(node.id) &&
-                          'z-20 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
-                        !dragState?.nodeIds.includes(node.id) &&
-                          'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
-                        snapPreviewPosition && dragState?.nodeIds.includes(node.id) && 'opacity-94',
-                        isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
-                      )}
-                      style={{
-                        width: dimensions.width,
-                        height: dimensions.height,
-                        transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
-                      }}
-                    >
-                      <div
-                        className={cn(
-                          'flex h-full items-start justify-between gap-3',
-                          isCompactNode && 'items-center justify-center p-0',
-                        )}
-                      >
-                        <div
-                          className={cn(
-                            'flex items-center gap-2.5',
-                            isCompactNode && 'h-full w-full items-center justify-center gap-0',
-                          )}
-                        >
-                          <span
-                            className={cn(
-                              'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
-                              isCompactNode &&
-                                'size-12 rounded-none border-transparent bg-transparent shadow-none',
-                            )}
-                          >
-                            <Icon
-                              className={cn(
-                                'size-4 text-slate-600',
-                                isCompactNode && 'size-7 text-slate-500',
-                              )}
-                            />
-                          </span>
-                          {!isCompactNode ? (
-                            <div className="min-w-0">
-                              {isEditing ? (
-                                <input
-                                  autoFocus
-                                  value={editingLabel}
-                                  onChange={(event) => setEditingLabel(event.target.value)}
-                                  onBlur={() => commitNodeRename(node)}
-                                  onKeyDown={(event) => {
-                                    if (event.key === 'Enter') {
-                                      commitNodeRename(node);
-                                    }
-                                    if (event.key === 'Escape') {
-                                      setEditingNodeId(null);
-                                      setEditingLabel('');
-                                    }
-                                  }}
-                                  onPointerDown={(event) => event.stopPropagation()}
-                                  className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
-                                />
-                              ) : showNodeLabel ? (
-                                <div className="truncate text-sm font-medium text-slate-950">
-                                  {node.label}
-                                </div>
-                              ) : null}
-                              {showNodeDescription ? (
-                                <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                                  {node.description}
-                                </div>
-                              ) : (
-                                <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                                  {elementMeta?.label ?? meta.eyebrow}
-                                </div>
-                              )}
-                            </div>
-                          ) : null}
-                        </div>
-                      </div>
-                    </button>
-                  </ContextMenuTrigger>
+                  {showCompactElementTooltip ? (
+                    <TooltipProvider openDelay={0}>
+                      <Tooltip side="bottom" sideOffset={8}>
+                        <TooltipTrigger asChild>
+                          <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
+                        </TooltipTrigger>
+                        <TooltipContent className="rounded-md border border-slate-200/80 bg-white/95 text-slate-700 shadow-[0_10px_28px_-18px_rgba(15,23,42,0.35)]">
+                          {node.label}
+                        </TooltipContent>
+                      </Tooltip>
+                    </TooltipProvider>
+                  ) : (
+                    <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
+                  )}
                   <ContextMenuContent side="right" className="ml-2 w-52">
                     <ContextMenuItem
                       onSelect={() => startNodeRename(node)}

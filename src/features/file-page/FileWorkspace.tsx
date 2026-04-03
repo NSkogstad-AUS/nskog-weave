@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { FileTextIcon, LayoutGridIcon, ListIcon } from 'lucide-react';
 
 import {
@@ -61,6 +61,14 @@ interface FileWorkspaceProps {
   ) => void;
   onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
+  onHoveredSidebarItemChange: (
+    item:
+      | {
+          type: 'folder' | 'file';
+          id: string;
+        }
+      | null,
+  ) => void;
   onViewChange: (view: FilePageView) => void;
 }
 
@@ -76,6 +84,7 @@ export function FileWorkspace({
   onUpdateNode,
   onDeleteNode,
   onSelectNodes,
+  onHoveredSidebarItemChange,
   onViewChange,
 }: FileWorkspaceProps) {
   const folderNodes = useMemo<FilePageNode[]>(() => {
@@ -161,6 +170,33 @@ export function FileWorkspace({
     : [];
   const displayNodes = activeFile ? nodes : activeFolderNodes;
   const displaySelectedNodeIds = activeFile ? selectedNodeIds : activeFolderSelectedNodeIds;
+  const handleHoverNodeChange = useCallback(
+    (node: FilePageNode | null) => {
+      if (!node) {
+        onHoveredSidebarItemChange(null);
+        return;
+      }
+
+      if (node.id.startsWith('folder:')) {
+        onHoveredSidebarItemChange({
+          type: 'folder',
+          id: node.id.slice('folder:'.length),
+        });
+        return;
+      }
+
+      if (node.id.startsWith('file:')) {
+        onHoveredSidebarItemChange({
+          type: 'file',
+          id: node.id.slice('file:'.length),
+        });
+        return;
+      }
+
+      onHoveredSidebarItemChange(null);
+    },
+    [onHoveredSidebarItemChange],
+  );
 
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
@@ -336,6 +372,7 @@ export function FileWorkspace({
                       }));
                     }
               }
+              onHoverNodeChange={handleHoverNodeChange}
               onSelectNodes={
                 activeFile
                   ? onSelectNodes

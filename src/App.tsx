@@ -19,6 +19,13 @@ function App() {
   const [openFileId, setOpenFileId] = useState<string | null>(null);
   const [openFolderId, setOpenFolderId] = useState<string | null>('general-knowledge');
   const [folderView, setFolderView] = useState<'canvas' | 'explorer'>('canvas');
+  const [hoveredSidebarItem, setHoveredSidebarItem] = useState<
+    | {
+        type: 'folder' | 'file';
+        id: string;
+      }
+    | null
+  >(null);
   const activeFile = useMemo(
     () => (openFileId ? findFileById(folders, openFileId)?.file ?? null : null),
     [folders, openFileId],
@@ -39,6 +46,7 @@ function App() {
     setSelectedNodeIds,
     setView,
   } = useFilePages(activeFile);
+  const activeView = activeFile ? activePage?.view ?? null : activeFolder ? folderView : null;
 
   const handleFileDelete = useCallback(
     (fileId: string) => {
@@ -60,6 +68,12 @@ function App() {
     }
   }, [folders, openFolderId]);
 
+  useEffect(() => {
+    if (activeView !== 'canvas') {
+      setHoveredSidebarItem(null);
+    }
+  }, [activeView, activeFile?.id, activeFolder?.id]);
+
   return (
     <SidebarProvider
       defaultOpen
@@ -72,6 +86,7 @@ function App() {
       className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.10),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.08),_transparent_28%),linear-gradient(180deg,_#f8fbff_0%,_#f3f6fb_100%)]"
     >
       <WorkspaceSidebar
+        highlightedItem={hoveredSidebarItem}
         onFoldersChange={setFolders}
         onOpenFile={(fileId) => {
           setOpenFileId(fileId);
@@ -88,7 +103,7 @@ function App() {
           <FileWorkspace
             activeFile={activeFile}
             activeFolder={activeFolder}
-            activeView={activeFile ? activePage?.view ?? null : activeFolder ? folderView : null}
+            activeView={activeView}
             nodes={activePage?.nodes ?? []}
             selectedNodeIds={selectedNodeIds}
             onMoveNodes={moveNodes}
@@ -97,6 +112,7 @@ function App() {
             onUpdateNode={updateNode}
             onDeleteNode={deleteNode}
             onSelectNodes={setSelectedNodeIds}
+            onHoveredSidebarItemChange={setHoveredSidebarItem}
             onViewChange={(view) => {
               if (activeFile) {
                 setView(view);

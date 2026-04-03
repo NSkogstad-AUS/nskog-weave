@@ -118,6 +118,9 @@ function getFileRowPaddingLeft(level: number) {
   return getRowPaddingLeft(level);
 }
 
+const SIDEBAR_HIGHLIGHT_CLASS =
+  'bg-sidebar-accent/30 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
+
 function TreeElbow({ level }: { level: number }) {
   if (level === 0) {
     return null;
@@ -174,6 +177,7 @@ function EditingRow({
 function FileRow({
   file,
   isActive,
+  isHighlighted,
   isEditing,
   editValue,
   level,
@@ -186,6 +190,7 @@ function FileRow({
 }: {
   file: WorkspaceFile;
   isActive: boolean;
+  isHighlighted: boolean;
   isEditing: boolean;
   editValue: string;
   level: number;
@@ -216,7 +221,10 @@ function FileRow({
               onClick={onSelect}
               onDoubleClick={() => onBeginRename()}
               onContextMenu={() => onSelect()}
-              className="w-full pr-10 data-[active=true]:bg-sidebar-accent/45"
+              className={cn(
+                'w-full pr-10 data-[active=true]:bg-sidebar-accent/45',
+                isHighlighted && !isActive && SIDEBAR_HIGHLIGHT_CLASS,
+              )}
               style={{ paddingLeft: `${getFileRowPaddingLeft(level)}px` }}
             >
               <span className="w-0 shrink-0" />
@@ -272,6 +280,7 @@ function FolderRow({
   searchActive,
   expandedFolderIds,
   activeItem,
+  highlightedItem,
   editingItem,
   onBeginRename,
   onCancelRename,
@@ -290,6 +299,7 @@ function FolderRow({
   searchActive: boolean;
   expandedFolderIds: Set<string>;
   activeItem: ActiveItem;
+  highlightedItem: ActiveItem;
   editingItem: EditingItem;
   onBeginRename: (item: EditingItem) => void;
   onCancelRename: () => void;
@@ -307,6 +317,7 @@ function FolderRow({
   const hasChildren = folder.children.length > 0 || folder.files.length > 0;
   const isEditing = editingItem?.type === 'folder' && editingItem.id === folder.id;
   const isActive = activeItem?.type === 'folder' && activeItem.id === folder.id;
+  const isHighlighted = highlightedItem?.type === 'folder' && highlightedItem.id === folder.id;
   const descendantCounts = getFolderDescendantCounts(folder);
   const totalDescendants = descendantCounts.folders + descendantCounts.files;
 
@@ -337,7 +348,10 @@ function FolderRow({
                   })
                 }
                 onContextMenu={() => onSelectFolder(folder.id)}
-                className="w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45"
+                className={cn(
+                  'w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45',
+                  isHighlighted && !isActive && SIDEBAR_HIGHLIGHT_CLASS,
+                )}
                 style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
                 tooltip={folder.label}
               >
@@ -473,6 +487,7 @@ function FolderRow({
                   searchActive={searchActive}
                   expandedFolderIds={expandedFolderIds}
                   activeItem={activeItem}
+                  highlightedItem={highlightedItem}
                   editingItem={editingItem}
                   onBeginRename={onBeginRename}
                   onCancelRename={onCancelRename}
@@ -493,6 +508,9 @@ function FolderRow({
                   key={file.id}
                   file={file}
                   isActive={activeItem?.type === 'file' && activeItem.id === file.id}
+                  isHighlighted={
+                    highlightedItem?.type === 'file' && highlightedItem.id === file.id
+                  }
                   isEditing={editingItem?.type === 'file' && editingItem.id === file.id}
                   editValue={
                     editingItem?.type === 'file' && editingItem.id === file.id
@@ -523,6 +541,7 @@ function FolderRow({
 }
 
 interface WorkspaceSidebarProps {
+  highlightedItem?: ActiveItem;
   onFileDelete?: (fileId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
   onOpenFile?: (fileId: string) => void;
@@ -530,6 +549,7 @@ interface WorkspaceSidebarProps {
 }
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
+  highlightedItem = null,
   onFileDelete,
   onFoldersChange,
   onOpenFile,
@@ -720,6 +740,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                         searchActive={searchActive}
                         expandedFolderIds={expandedFolderIds}
                         activeItem={activeItem}
+                        highlightedItem={highlightedItem}
                         editingItem={editingItem}
                         onBeginRename={setEditingItem}
                         onCancelRename={() => setEditingItem(null)}

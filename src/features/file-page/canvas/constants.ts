@@ -1,0 +1,9 @@
+export const GRID_SIZE = 64;
+export const CANVAS_PADDING = 32;
+export const NODE_UNIT = 96;
+export const SLOT_GAP_X = 16;
+export const SLOT_GAP_Y = 16;
+export const SLOT_STEP_X = NODE_UNIT + SLOT_GAP_X;
+export const SLOT_STEP_Y = NODE_UNIT + SLOT_GAP_Y;
+export const COLLISION_GAP = 10;
+export const NODE_CARD_CLASS = 'absolute rounded-2xl border px-4 py-3 text-left';

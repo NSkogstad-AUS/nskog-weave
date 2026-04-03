@@ -1,0 +1,303 @@
+import type { PointerEvent as ReactPointerEvent } from 'react';
+import {
+  ExpandIcon,
+  PencilLineIcon,
+  Trash2Icon,
+} from 'lucide-react';
+
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/animate-ui/components/animate/tooltip';
+import { NODE_CARD_CLASS } from './constants';
+import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
+import { getNodeDimensions } from './utils';
+import { cn } from '@/lib/utils';
+import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
+import type { Point } from '@/types/geometry';
+
+interface FileCanvasNodeProps {
+  draftIcon?: FilePageElementIcon;
+  displayPosition: Point;
+  displaySize: FilePageNode['size'];
+  editingLabel: string;
+  isDragging: boolean;
+  isEditing: boolean;
+  isSelected: boolean;
+  node: FilePageNode;
+  snapPreviewPosition?: Point;
+  onApplyIcon: (icon: FilePageElementIcon) => void;
+  onApplyResize: (size: FilePageNode['size']) => void;
+  onClearIconPreview: () => void;
+  onClearSizePreview: () => void;
+  onCommitRename: () => void;
+  onDelete: () => void;
+  onEditingLabelChange: (value: string) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
+  onPreviewIcon: (icon: FilePageElementIcon) => void;
+  onPreviewResize: (size: FilePageNode['size']) => void;
+  onSelect: () => void;
+  onStartRename: () => void;
+  onStopRename: () => void;
+  canResize: (size: FilePageNode['size']) => boolean;
+}
+
+export function FileCanvasNode({
+  draftIcon,
+  displayPosition,
+  displaySize,
+  editingLabel,
+  isDragging,
+  isEditing,
+  isSelected,
+  node,
+  snapPreviewPosition,
+  onApplyIcon,
+  onApplyResize,
+  onClearIconPreview,
+  onClearSizePreview,
+  onCommitRename,
+  onDelete,
+  onEditingLabelChange,
+  onPointerDown,
+  onPreviewIcon,
+  onPreviewResize,
+  onSelect,
+  onStartRename,
+  onStopRename,
+  canResize,
+}: FileCanvasNodeProps) {
+  const meta = NODE_META[node.kind];
+  const elementIcon = draftIcon ?? node.icon;
+  const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[elementIcon] : null;
+  const Icon = elementMeta?.icon ?? meta.icon;
+  const dimensions = getNodeDimensions(displaySize);
+  const isCompactNode = displaySize.widthUnits === 1;
+  const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
+  const showNodeLabel = displaySize.widthUnits >= 2;
+  const showNodeDescription = displaySize.widthUnits >= 3 && node.description.trim().length > 0;
+
+  const buttonNode = (
+    <button
+      type="button"
+      onPointerDown={onPointerDown}
+      onContextMenu={(event) => {
+        event.stopPropagation();
+        onSelect();
+      }}
+      className={cn(
+        NODE_CARD_CLASS,
+        'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
+        meta.className,
+        isDragging && 'z-20 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
+        !isDragging &&
+          'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
+        snapPreviewPosition && isDragging && 'opacity-94',
+        isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
+      )}
+      style={{
+        width: dimensions.width,
+        height: dimensions.height,
+        transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
+      }}
+    >
+      <div
+        className={cn(
+          'flex h-full items-start justify-between gap-3',
+          isCompactNode && 'items-center justify-center p-0',
+        )}
+      >
+        <div
+          className={cn(
+            'flex items-center gap-2.5',
+            isCompactNode && 'h-full w-full items-center justify-center gap-0',
+          )}
+        >
+          <span
+            className={cn(
+              'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
+              isCompactNode && 'size-12 rounded-none border-transparent bg-transparent shadow-none',
+            )}
+          >
+            <Icon
+              className={cn(
+                'size-4 text-slate-600',
+                isCompactNode && 'size-7 text-slate-500',
+              )}
+            />
+          </span>
+          {!isCompactNode ? (
+            <div className="min-w-0">
+              {isEditing ? (
+                <input
+                  autoFocus
+                  value={editingLabel}
+                  onChange={(event) => onEditingLabelChange(event.target.value)}
+                  onBlur={onCommitRename}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') {
+                      onCommitRename();
+                    }
+                    if (event.key === 'Escape') {
+                      onStopRename();
+                    }
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
+                />
+              ) : showNodeLabel ? (
+                <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
+              ) : null}
+              {showNodeDescription ? (
+                <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                  {node.description}
+                </div>
+              ) : (
+                <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                  {elementMeta?.label ?? meta.eyebrow}
+                </div>
+              )}
+            </div>
+          ) : null}
+        </div>
+      </div>
+    </button>
+  );
+
+  return (
+    <ContextMenu
+      onOpenChange={(open) => {
+        if (!open) {
+          onClearSizePreview();
+          onClearIconPreview();
+        }
+      }}
+    >
+      <>
+        {isDragging && snapPreviewPosition ? (
+          <div
+            aria-hidden="true"
+            className={cn(
+              NODE_CARD_CLASS,
+              'pointer-events-none border-sky-300/70 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.15)] transition-[transform,opacity] duration-150 ease-out',
+            )}
+            style={{
+              width: dimensions.width,
+              height: dimensions.height,
+              transform: `translate3d(${snapPreviewPosition.x}px, ${snapPreviewPosition.y}px, 0)`,
+            }}
+          />
+        ) : null}
+        {showCompactElementTooltip ? (
+          <TooltipProvider openDelay={0}>
+            <Tooltip side="bottom" sideOffset={8}>
+              <TooltipTrigger asChild>
+                <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
+              </TooltipTrigger>
+              <TooltipContent className="rounded-md border border-slate-200/80 bg-white/95 text-slate-700 shadow-[0_10px_28px_-18px_rgba(15,23,42,0.35)]">
+                {node.label}
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        ) : (
+          <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
+        )}
+        <ContextMenuContent side="right" className="ml-2 w-52">
+          <ContextMenuItem onSelect={onStartRename}>
+            <PencilLineIcon className="size-4" />
+            Rename
+          </ContextMenuItem>
+          {node.kind === 'element' ? (
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Icon className="size-4" />
+                Change icon
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="w-48" onPointerLeave={onClearIconPreview}>
+                <div className="grid grid-cols-2 gap-1.5 p-1">
+                  {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
+                    const IconOption = iconMeta.icon;
+
+                    return (
+                      <ContextMenuItem
+                        key={iconKey}
+                        onFocus={() => onPreviewIcon(iconKey as FilePageElementIcon)}
+                        onPointerEnter={() => onPreviewIcon(iconKey as FilePageElementIcon)}
+                        onSelect={() => onApplyIcon(iconKey as FilePageElementIcon)}
+                        className={cn(
+                          'min-h-0 rounded-xl p-2',
+                          elementIcon === iconKey && 'bg-sidebar-accent/55',
+                        )}
+                      >
+                        <span className="flex w-full items-center gap-2">
+                          <span className="flex size-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
+                            <IconOption className="size-4 text-slate-600" />
+                          </span>
+                          <span className="text-sm text-slate-700">{iconMeta.label}</span>
+                        </span>
+                      </ContextMenuItem>
+                    );
+                  })}
+                </div>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          ) : null}
+          <ContextMenuSub>
+            <ContextMenuSubTrigger>
+              <ExpandIcon className="size-4" />
+              Resize
+            </ContextMenuSubTrigger>
+            <ContextMenuSubContent className="w-[15rem]" onPointerLeave={onClearSizePreview}>
+              <div className="grid grid-cols-3 gap-1.5 p-1">
+                {RESIZE_OPTIONS.map((size) => {
+                  const isAvailable = canResize(size);
+                  const isCurrent =
+                    node.size.widthUnits === size.widthUnits &&
+                    node.size.heightUnits === size.heightUnits;
+
+                  return (
+                    <ContextMenuItem
+                      key={`${size.widthUnits}x${size.heightUnits}`}
+                      disabled={!isAvailable}
+                      onFocus={() => onPreviewResize(size)}
+                      onPointerEnter={() => onPreviewResize(size)}
+                      onSelect={() => onApplyResize(size)}
+                      className={cn(
+                        'min-h-0 flex-col items-start gap-1.5 rounded-xl p-2',
+                        isCurrent && 'bg-sidebar-accent/55',
+                      )}
+                    >
+                      <span className="flex h-12 w-full items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
+                        <ResizeOptionSwatch size={size} />
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-600">
+                        {size.widthUnits} x {size.heightUnits}
+                      </span>
+                    </ContextMenuItem>
+                  );
+                })}
+              </div>
+            </ContextMenuSubContent>
+          </ContextMenuSub>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2Icon className="size-4" />
+            Delete
+          </ContextMenuItem>
+        </ContextMenuContent>
+      </>
+    </ContextMenu>
+  );
+}
