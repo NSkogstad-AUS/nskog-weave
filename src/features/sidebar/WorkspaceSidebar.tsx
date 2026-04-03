@@ -211,7 +211,7 @@ function FileRow({
           </SidebarMenuButton>
         )}
 
-        <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuContent align="start" className="w-56 overflow-hidden">
           <DropdownMenuLabel>File actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -421,7 +421,12 @@ function FolderRow({
           )}
         >
           <div className="overflow-hidden">
-            <SidebarMenuSub className={cn(!isExpanded && 'pointer-events-none')}>
+            <SidebarMenuSub
+              className={cn(
+                'mr-0 px-0 pl-2.5 pr-0',
+                !isExpanded && 'pointer-events-none',
+              )}
+            >
               {folder.children.map((childFolder) => (
                 <FolderRow
                   key={childFolder.id}
@@ -562,11 +567,11 @@ export function WorkspaceSidebar() {
         <div className="flex h-full bg-sidebar/95">
           <div className="flex w-[4.25rem] shrink-0 flex-col border-r border-sidebar-border/80">
             <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80">
-              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-[0_18px_34px_-24px_rgba(15,23,42,0.7)]">
+              <div className="flex h-16 w-16 items-center justify-center rounded-2xl">
                 <img
                   src="/weave2.svg"
                   alt="Weave"
-                  className="size-4.5"
+                  className="size-[1.625rem]"
                 />
               </div>
             </div>
