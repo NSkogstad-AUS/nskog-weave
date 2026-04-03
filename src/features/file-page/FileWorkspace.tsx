@@ -5,7 +5,7 @@ import {
   ToggleGroupItem,
 } from '@/components/animate-ui/components/radix/toggle-group';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
-import type { FilePageView } from '@/types/filePage';
+import type { FilePageElementIcon, FilePageView } from '@/types/filePage';
 import { FileCanvasView } from './FileCanvasView';
 import { FileExplorerView } from './FileExplorerView';
 
@@ -15,7 +15,9 @@ interface FileWorkspaceProps {
   nodes: Array<{
     id: string;
     label: string;
+    description: string;
     kind: 'folder' | 'file' | 'element';
+    icon: FilePageElementIcon;
     position: { x: number; y: number };
     size: {
       widthUnits: 1 | 2 | 3;
@@ -34,13 +36,28 @@ interface FileWorkspaceProps {
   onAddNode: (node: {
     id: string;
     label: string;
+    description: string;
     kind: 'folder' | 'file' | 'element';
+    icon: FilePageElementIcon;
     position: { x: number; y: number };
     size: {
       widthUnits: 1 | 2 | 3;
       heightUnits: 1 | 2 | 3;
     };
   }) => void;
+  onUpdateNode: (
+    nodeId: string,
+    updates: Partial<{
+      label: string;
+      description: string;
+      icon: FilePageElementIcon;
+      size: {
+        widthUnits: 1 | 2 | 3;
+        heightUnits: 1 | 2 | 3;
+      };
+    }>,
+  ) => void;
+  onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   onViewChange: (view: FilePageView) => void;
 }
@@ -53,6 +70,8 @@ export function FileWorkspace({
   onMoveNodes,
   onResizeNode,
   onAddNode,
+  onUpdateNode,
+  onDeleteNode,
   onSelectNodes,
   onViewChange,
 }: FileWorkspaceProps) {
@@ -132,6 +151,8 @@ export function FileWorkspace({
             onMoveNodes={onMoveNodes}
             onResizeNode={onResizeNode}
             onAddNode={onAddNode}
+            onUpdateNode={onUpdateNode}
+            onDeleteNode={onDeleteNode}
             onSelectNodes={onSelectNodes}
           />
         ) : (

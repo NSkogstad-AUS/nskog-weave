@@ -2,23 +2,30 @@ import { useEffect, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   ExpandIcon,
+  LightbulbIcon,
+  MessageSquareIcon,
   PlusIcon,
   FileTextIcon,
   FolderIcon,
   SparklesIcon,
+  TargetIcon,
+  PencilLineIcon,
+  ShapesIcon,
+  Trash2Icon,
 } from 'lucide-react';
 
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuSub,
   ContextMenuSubContent,
   ContextMenuSubTrigger,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
-import type { FilePageNode } from '@/types/filePage';
+import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
 import type { Point } from '@/types/workspace';
 
 interface FileCanvasViewProps {
@@ -33,6 +40,11 @@ interface FileCanvasViewProps {
     },
   ) => void;
   onAddNode: (node: FilePageNode) => void;
+  onUpdateNode: (
+    nodeId: string,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
+  ) => void;
+  onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
 }
 
@@ -301,6 +313,35 @@ const NODE_META = {
   }
 >;
 
+const ELEMENT_ICON_META: Record<
+  FilePageElementIcon,
+  {
+    icon: typeof SparklesIcon;
+    label: string;
+  }
+> = {
+  sparkles: {
+    icon: SparklesIcon,
+    label: 'Sparkles',
+  },
+  lightbulb: {
+    icon: LightbulbIcon,
+    label: 'Lightbulb',
+  },
+  shapes: {
+    icon: ShapesIcon,
+    label: 'Shapes',
+  },
+  'message-square': {
+    icon: MessageSquareIcon,
+    label: 'Message',
+  },
+  target: {
+    icon: TargetIcon,
+    label: 'Target',
+  },
+};
+
 const RESIZE_OPTIONS = [
   { widthUnits: 1, heightUnits: 1 },
   { widthUnits: 2, heightUnits: 1 },
@@ -343,6 +384,8 @@ export function FileCanvasView({
   onMoveNodes,
   onResizeNode,
   onAddNode,
+  onUpdateNode,
+  onDeleteNode,
   onSelectNodes,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
@@ -361,6 +404,8 @@ export function FileCanvasView({
   const [snapPreviewPositions, setSnapPreviewPositions] = useState<Record<string, Point>>({});
   const [draftSizes, setDraftSizes] = useState<Record<string, FilePageNode['size']>>({});
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
+  const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
+  const [editingLabel, setEditingLabel] = useState('');
   const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
   const selectedIdSet = new Set(displaySelectedNodeIds);
 
@@ -387,6 +432,19 @@ export function FileCanvasView({
   useEffect(() => {
     draftSelectedNodeIdsRef.current = draftSelectedNodeIds;
   }, [draftSelectedNodeIds]);
+
+  useEffect(() => {
+    if (!editingNodeId) {
+      return;
+    }
+
+    const node = nodes.find((entry) => entry.id === editingNodeId);
+
+    if (!node) {
+      setEditingNodeId(null);
+      setEditingLabel('');
+    }
+  }, [editingNodeId, nodes]);
 
   useEffect(() => {
     return () => {
@@ -644,7 +702,9 @@ export function FileCanvasView({
     const nextNode: FilePageNode = {
       id: `element-${Date.now()}`,
       label: 'Basic element',
+      description: 'Freeform canvas object for quick thinking and placement.',
       kind: 'element',
+      icon: 'sparkles',
       position: nextPosition,
       size: {
         widthUnits: 1,
@@ -709,6 +769,25 @@ export function FileCanvasView({
     onSelectNodes([node.id]);
   }
 
+  function startNodeRename(node: FilePageNode) {
+    setEditingNodeId(node.id);
+    setEditingLabel(node.label);
+    onSelectNodes([node.id]);
+  }
+
+  function commitNodeRename(node: FilePageNode) {
+    const nextLabel = editingLabel.trim();
+
+    if (nextLabel) {
+      onUpdateNode(node.id, {
+        label: nextLabel,
+      });
+    }
+
+    setEditingNodeId(null);
+    setEditingLabel('');
+  }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -768,12 +847,17 @@ export function FileCanvasView({
 
           {nodes.map((node) => {
             const meta = NODE_META[node.kind];
-            const Icon = meta.icon;
+            const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[node.icon] : null;
+            const Icon = elementMeta?.icon ?? meta.icon;
             const isSelected = selectedIdSet.has(node.id);
             const displaySize = draftSizes[node.id] ?? node.size;
             const dimensions = getNodeDimensions(displaySize);
             const displayPosition = draftPositions[node.id] ?? node.position;
             const snapPreviewPosition = snapPreviewPositions[node.id];
+            const isCompactElement = node.kind === 'element' && displaySize.widthUnits === 1;
+            const showElementLabel = node.kind !== 'element' || displaySize.widthUnits >= 2;
+            const showElementDescription = node.kind === 'element' && displaySize.widthUnits >= 3;
+            const isEditing = editingNodeId === node.id;
 
             return (
               <ContextMenu
@@ -825,24 +909,100 @@ export function FileCanvasView({
                         transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
                       }}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-center gap-2.5">
+                      <div
+                        className={cn(
+                          'flex h-full items-start justify-between gap-3',
+                          isCompactElement && 'items-center justify-center',
+                        )}
+                      >
+                        <div className={cn('flex items-center gap-2.5', isCompactElement && 'gap-0')}>
                           <span className="flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75">
                             <Icon className="size-4 text-slate-600" />
                           </span>
-                          <div className="min-w-0">
-                            <div className="truncate text-sm font-medium text-slate-950">
-                              {node.label}
+                          {!isCompactElement ? (
+                            <div className="min-w-0">
+                              {isEditing ? (
+                                <input
+                                  autoFocus
+                                  value={editingLabel}
+                                  onChange={(event) => setEditingLabel(event.target.value)}
+                                  onBlur={() => commitNodeRename(node)}
+                                  onKeyDown={(event) => {
+                                    if (event.key === 'Enter') {
+                                      commitNodeRename(node);
+                                    }
+                                    if (event.key === 'Escape') {
+                                      setEditingNodeId(null);
+                                      setEditingLabel('');
+                                    }
+                                  }}
+                                  onPointerDown={(event) => event.stopPropagation()}
+                                  className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
+                                />
+                              ) : showElementLabel ? (
+                                <div className="truncate text-sm font-medium text-slate-950">
+                                  {node.label}
+                                </div>
+                              ) : null}
+                              {showElementDescription ? (
+                                <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
+                                  {node.description}
+                                </div>
+                              ) : (
+                                <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                                  {elementMeta?.label ?? meta.eyebrow}
+                                </div>
+                              )}
                             </div>
-                            <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                              {meta.eyebrow}
-                            </div>
-                          </div>
+                          ) : null}
                         </div>
                       </div>
                     </button>
                   </ContextMenuTrigger>
                   <ContextMenuContent side="right" className="ml-2 w-52">
+                    <ContextMenuItem
+                      onSelect={() => startNodeRename(node)}
+                    >
+                      <PencilLineIcon className="size-4" />
+                      Rename
+                    </ContextMenuItem>
+                    {node.kind === 'element' ? (
+                      <ContextMenuSub>
+                        <ContextMenuSubTrigger>
+                          <Icon className="size-4" />
+                          Change icon
+                        </ContextMenuSubTrigger>
+                        <ContextMenuSubContent className="w-48">
+                          <div className="grid grid-cols-2 gap-1.5 p-1">
+                            {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
+                              const IconOption = iconMeta.icon;
+
+                              return (
+                                <ContextMenuItem
+                                  key={iconKey}
+                                  onSelect={() =>
+                                    onUpdateNode(node.id, {
+                                      icon: iconKey as FilePageElementIcon,
+                                    })
+                                  }
+                                  className={cn(
+                                    'min-h-0 rounded-xl p-2',
+                                    node.icon === iconKey && 'bg-sidebar-accent/55',
+                                  )}
+                                >
+                                  <span className="flex w-full items-center gap-2">
+                                    <span className="flex size-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
+                                      <IconOption className="size-4 text-slate-600" />
+                                    </span>
+                                    <span className="text-sm text-slate-700">{iconMeta.label}</span>
+                                  </span>
+                                </ContextMenuItem>
+                              );
+                            })}
+                          </div>
+                        </ContextMenuSubContent>
+                      </ContextMenuSub>
+                    ) : null}
                     <ContextMenuSub>
                       <ContextMenuSubTrigger>
                         <ExpandIcon className="size-4" />
@@ -883,6 +1043,14 @@ export function FileCanvasView({
                         </div>
                       </ContextMenuSubContent>
                     </ContextMenuSub>
+                    <ContextMenuSeparator />
+                    <ContextMenuItem
+                      variant="destructive"
+                      onSelect={() => onDeleteNode(node.id)}
+                    >
+                      <Trash2Icon className="size-4" />
+                      Delete
+                    </ContextMenuItem>
                   </ContextMenuContent>
                 </>
               </ContextMenu>

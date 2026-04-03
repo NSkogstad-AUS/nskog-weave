@@ -26,6 +26,8 @@ function App() {
     removeFilePage,
     resizeNode,
     addNode,
+    updateNode,
+    deleteNode,
     selectedNodeIds,
     setSelectedNodeIds,
     setView,
@@ -71,6 +73,8 @@ function App() {
             onMoveNodes={moveNodes}
             onResizeNode={resizeNode}
             onAddNode={addNode}
+            onUpdateNode={updateNode}
+            onDeleteNode={deleteNode}
             onSelectNodes={setSelectedNodeIds}
             onViewChange={setView}
           />

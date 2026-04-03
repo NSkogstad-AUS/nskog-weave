@@ -16,8 +16,18 @@ const ELEMENT_LABELS: Record<WorkspaceFile['kind'], string> = {
   outline: 'Outline point',
 };
 
+const ELEMENT_DESCRIPTIONS: Record<WorkspaceFile['kind'], string> = {
+  canvas: 'Freeform canvas object for quick thinking and placement.',
+  brief: 'Condensed block for key points, framing, and takeaways.',
+  memo: 'Short-form working note for capturing context and decisions.',
+  outline: 'Structured outline item for sequencing ideas and sections.',
+};
+
 export function createDefaultFilePage(file: WorkspaceFile): FilePageState {
   const baseLabel = file.label.trim() || 'Untitled file';
+  const elementNode = createNode(`${file.id}-element-core`, ELEMENT_LABELS[file.kind], 'element', 250, 428);
+
+  elementNode.description = ELEMENT_DESCRIPTIONS[file.kind];
 
   return {
     view: 'canvas',
@@ -26,7 +36,7 @@ export function createDefaultFilePage(file: WorkspaceFile): FilePageState {
       createNode(`${file.id}-folder-assets`, 'Assets', 'folder', 332, 104),
       createNode(`${file.id}-file-primary`, baseLabel, 'file', 112, 248),
       createNode(`${file.id}-file-references`, 'References', 'file', 396, 286),
-      createNode(`${file.id}-element-core`, ELEMENT_LABELS[file.kind], 'element', 250, 428),
+      elementNode,
     ],
   };
 }
@@ -48,7 +58,9 @@ function createNode(
   return {
     id,
     label,
+    description: kind === 'element' ? 'Freeform canvas object.' : '',
     kind,
+    icon: kind === 'folder' ? 'shapes' : kind === 'file' ? 'message-square' : 'sparkles',
     position: { x, y },
     size: {
       widthUnits: 1,

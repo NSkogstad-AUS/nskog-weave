@@ -5,13 +5,22 @@ import {
   createDefaultFilePage,
   FILE_PAGES_STORAGE_KEY,
 } from '@/lib/filePages';
-import type { FilePageState, FilePageView } from '@/types/filePage';
+import type { FilePageElementIcon, FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
 import type { Point } from '@/types/workspace';
 
 type FilePagesStore = Record<string, FilePageState>;
 
 function normalizeUnit(value: unknown): 1 | 2 | 3 {
   return value === 2 || value === 3 ? value : 1;
+}
+
+function normalizeIcon(value: unknown): FilePageElementIcon {
+  return value === 'lightbulb' ||
+    value === 'shapes' ||
+    value === 'message-square' ||
+    value === 'target'
+    ? value
+    : 'sparkles';
 }
 
 function hydrateFilePages(): FilePagesStore {
@@ -49,7 +58,9 @@ function hydrateFilePages(): FilePagesStore {
             {
               id: node.id,
               label: node.label,
+              description: typeof node.description === 'string' ? node.description : '',
               kind: node.kind,
+              icon: normalizeIcon(node.icon),
               position: {
                 x: node.position.x,
                 y: node.position.y,
@@ -176,6 +187,31 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     }));
   }
 
+  function updateNode(
+    nodeId: string,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
+  ) {
+    updateActivePage((page) => ({
+      ...page,
+      nodes: page.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              ...updates,
+            }
+          : node,
+      ),
+    }));
+  }
+
+  function deleteNode(nodeId: string) {
+    updateActivePage((page) => ({
+      ...page,
+      nodes: page.nodes.filter((node) => node.id !== nodeId),
+    }));
+    setSelectedNodeIds((current) => current.filter((id) => id !== nodeId));
+  }
+
   function removeFilePage(fileId: string) {
     setPages((current) => {
       if (!current[fileId]) {
@@ -197,6 +233,8 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     moveNodes,
     resizeNode,
     addNode,
+    updateNode,
+    deleteNode,
     removeFilePage,
   };
 }
