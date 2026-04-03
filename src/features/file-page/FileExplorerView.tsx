@@ -1,0 +1,82 @@
+import {
+  FileTextIcon,
+  FolderIcon,
+  SparklesIcon,
+} from 'lucide-react';
+
+import { sortFilePageNodes } from '@/lib/filePages';
+import { cn } from '@/lib/utils';
+import type { FilePageNode } from '@/types/filePage';
+
+interface FileExplorerViewProps {
+  nodes: FilePageNode[];
+  selectedNodeId: string | null;
+  onSelectNode: (nodeId: string) => void;
+}
+
+const NODE_META = {
+  folder: {
+    icon: FolderIcon,
+    label: 'Folder',
+  },
+  file: {
+    icon: FileTextIcon,
+    label: 'File',
+  },
+  element: {
+    icon: SparklesIcon,
+    label: 'Element',
+  },
+} satisfies Record<
+  FilePageNode['kind'],
+  {
+    icon: typeof FolderIcon;
+    label: string;
+  }
+>;
+
+export function FileExplorerView({
+  nodes,
+  selectedNodeId,
+  onSelectNode,
+}: FileExplorerViewProps) {
+  const orderedNodes = sortFilePageNodes(nodes);
+
+  return (
+    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/88 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]">
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] border-b border-slate-200/80 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
+        <span>Name</span>
+        <span>Type</span>
+      </div>
+
+      <div className="divide-y divide-slate-100/90">
+        {orderedNodes.map((node) => {
+          const meta = NODE_META[node.kind];
+          const Icon = meta.icon;
+
+          return (
+            <button
+              key={node.id}
+              type="button"
+              onClick={() => onSelectNode(node.id)}
+              className={cn(
+                'grid w-full grid-cols-[minmax(0,1fr)_auto] items-center gap-4 px-5 py-4 text-left transition hover:bg-slate-50/90',
+                selectedNodeId === node.id && 'bg-slate-50',
+              )}
+            >
+              <span className="flex min-w-0 items-center gap-3">
+                <span className="flex size-9 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/90">
+                  <Icon className="size-4 text-slate-600" />
+                </span>
+                <span className="truncate text-sm font-medium text-slate-950">{node.label}</span>
+              </span>
+              <span className="rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                {meta.label}
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}

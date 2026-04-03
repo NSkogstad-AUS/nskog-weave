@@ -24,17 +24,6 @@ import {
   AlertDialogTitle,
 } from '@/components/animate-ui/components/base/alert-dialog';
 import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
-  DropdownMenuTrigger,
-} from '@/components/animate-ui/components/radix/dropdown-menu';
-import {
   Sidebar,
   SidebarContent,
   SidebarGroup,
@@ -50,6 +39,17 @@ import {
   SidebarTrigger,
 } from '@/components/animate-ui/components/radix/sidebar';
 import { Button } from '@/components/ui/button';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuSub,
+  ContextMenuSubContent,
+  ContextMenuSubTrigger,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   addFileToFolderById,
   createWorkspaceFolders,
@@ -99,10 +99,6 @@ const sidebarSections = [
     active: false,
   },
 ] as const;
-
-function fileKindLabel(kind: WorkspaceFile['kind']) {
-  return kind.charAt(0).toUpperCase();
-}
 
 function formatCountLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -200,89 +196,72 @@ function FileRow({
   onDelete: () => void;
   onSelect: () => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
-
   return (
     <SidebarMenuItem className="relative w-full">
       <TreeElbow level={level} />
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 w-px opacity-0"
+      {isEditing ? (
+        <div className="px-2 py-1">
+          <EditingRow
+            value={editValue}
+            onCancel={onCancelRename}
+            onChange={onChangeRename}
+            onCommit={onCommitRename}
           />
-        </DropdownMenuTrigger>
-
-        {isEditing ? (
-          <div className="px-2 py-1">
-            <EditingRow
-              value={editValue}
-              onCancel={onCancelRename}
-              onChange={onChangeRename}
-              onCommit={onCommitRename}
-            />
-          </div>
-        ) : (
-          <SidebarMenuButton
-            isActive={isActive}
-            onClick={onSelect}
-            onDoubleClick={() => onBeginRename()}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              onSelect();
-              setMenuOpen(true);
-            }}
-            className="w-full pr-10 data-[active=true]:bg-sidebar-accent/45"
-            style={{ paddingLeft: `${getFileRowPaddingLeft(level)}px` }}
+        </div>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <SidebarMenuButton
+              isActive={isActive}
+              onClick={onSelect}
+              onDoubleClick={() => onBeginRename()}
+              onContextMenu={() => onSelect()}
+              className="w-full pr-10 data-[active=true]:bg-sidebar-accent/45"
+              style={{ paddingLeft: `${getFileRowPaddingLeft(level)}px` }}
+            >
+              <span className="w-0 shrink-0" />
+              <FileTextIcon className="ml-[-4px]" />
+              <span>{file.label}</span>
+            </SidebarMenuButton>
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            side="right"
+            className="ml-2 w-56 overflow-hidden"
+            onCloseAutoFocus={(event) => event.preventDefault()}
           >
-            <span className="w-0 shrink-0" />
-            <FileTextIcon className="ml-[-4px]" />
-            <span>{file.label}</span>
-          </SidebarMenuButton>
-        )}
-
-        <DropdownMenuContent
-          side="right"
-          align="start"
-          sideOffset={10}
-          className="w-56 overflow-hidden"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
-          <DropdownMenuLabel>File actions</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              setMenuOpen(false);
-              onBeginRename();
-            }}
-          >
-            <PencilIcon />
-            Rename
-          </DropdownMenuItem>
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger>
-              <Trash2Icon className="size-4 shrink-0" />
-              Delete
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent className="w-52">
-              <DropdownMenuLabel>Are you sure you want to delete</DropdownMenuLabel>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                variant="destructive"
-                onSelect={() => {
-                  onDelete();
-                  setMenuOpen(false);
-                }}
-              >
-                Yes
-              </DropdownMenuItem>
-              <DropdownMenuItem onSelect={() => setMenuOpen(false)}>No</DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-        </DropdownMenuContent>
-      </DropdownMenu>
+            <ContextMenuLabel>File actions</ContextMenuLabel>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => {
+                onSelect();
+                queueAfterMenuClose(onBeginRename);
+              }}
+            >
+              <PencilIcon />
+              Rename
+            </ContextMenuItem>
+            <ContextMenuSub>
+              <ContextMenuSubTrigger>
+                <Trash2Icon className="size-4 shrink-0" />
+                Delete
+              </ContextMenuSubTrigger>
+              <ContextMenuSubContent className="ml-2 w-52">
+                <ContextMenuLabel>Are you sure you want to delete</ContextMenuLabel>
+                <ContextMenuSeparator />
+                <ContextMenuItem
+                  variant="destructive"
+                  onSelect={() => {
+                    onDelete();
+                  }}
+                >
+                  Yes
+                </ContextMenuItem>
+                <ContextMenuItem>No</ContextMenuItem>
+              </ContextMenuSubContent>
+            </ContextMenuSub>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
     </SidebarMenuItem>
   );
 }
@@ -324,7 +303,6 @@ function FolderRow({
   onSelectFolder: (folderId: string) => void;
   onToggleExpanded: (folderId: string) => void;
 }) {
-  const [menuOpen, setMenuOpen] = useState(false);
   const isExpanded = searchActive || expandedFolderIds.has(folder.id);
   const hasChildren = folder.children.length > 0 || folder.files.length > 0;
   const isEditing = editingItem?.type === 'folder' && editingItem.id === folder.id;
@@ -335,151 +313,138 @@ function FolderRow({
   return (
     <SidebarMenuItem className="relative w-full">
       <TreeElbow level={level} />
-      <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
-        <DropdownMenuTrigger asChild>
-          <button
-            type="button"
-            tabIndex={-1}
-            aria-hidden="true"
-            className="pointer-events-none absolute inset-y-0 right-0 w-px opacity-0"
+      {isEditing ? (
+        <div className="px-2 py-1">
+          <EditingRow
+            value={editingItem.value}
+            onCancel={onCancelRename}
+            onChange={onChangeRename}
+            onCommit={onCommitRename}
           />
-        </DropdownMenuTrigger>
+        </div>
+      ) : (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>
+            <div className="relative w-full">
+              <SidebarMenuButton
+                isActive={isActive}
+                onClick={() => onToggleExpanded(folder.id)}
+                onDoubleClick={() =>
+                  onBeginRename({
+                    type: 'folder',
+                    id: folder.id,
+                    value: folder.label,
+                  })
+                }
+                onContextMenu={() => onSelectFolder(folder.id)}
+                className="w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45"
+                style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
+                tooltip={folder.label}
+              >
+                <button
+                  type="button"
+                  className={cn(
+                    'flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition',
+                    hasChildren ? 'hover:bg-sidebar-accent' : 'opacity-45',
+                  )}
+                  onClick={(event) => {
+                    event.stopPropagation();
 
-        {isEditing ? (
-          <div className="px-2 py-1">
-            <EditingRow
-              value={editingItem.value}
-              onCancel={onCancelRename}
-              onChange={onChangeRename}
-              onCommit={onCommitRename}
-            />
-          </div>
-        ) : (
-          <div className="relative w-full">
-            <SidebarMenuButton
-              isActive={isActive}
-              onClick={() => onToggleExpanded(folder.id)}
-              onDoubleClick={() =>
-                onBeginRename({
-                  type: 'folder',
-                  id: folder.id,
-                  value: folder.label,
-                })
-              }
-              onContextMenu={(event) => {
-                event.preventDefault();
-                onSelectFolder(folder.id);
-                setMenuOpen(true);
-              }}
-              className="w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45"
-              style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
-              tooltip={folder.label}
-            >
-              <button
-                type="button"
-                className={cn(
-                  'flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition',
-                  hasChildren ? 'hover:bg-sidebar-accent' : 'opacity-45',
+                    if (hasChildren) {
+                      onToggleExpanded(folder.id);
+                    }
+                  }}
+                >
+                  <ChevronDownIcon
+                    className={cn(
+                      'ml-[1px] size-3.5 transition-transform',
+                      !isExpanded && '-rotate-90',
+                    )}
+                  />
+                </button>
+                {isExpanded ? (
+                  <FolderOpenIcon className="ml-[0px]" />
+                ) : (
+                  <FolderIcon className="ml-[0px]" />
                 )}
-                onClick={(event) => {
-                  event.stopPropagation();
+                <span>{folder.label}</span>
+                <span className="group/count absolute inset-y-0 right-1 z-10 w-0">
+                  <span className="absolute right-0 top-1/2 -translate-y-1/2 px-1 text-[11px] font-medium text-sidebar-foreground/70">
+                    {totalDescendants}
+                  </span>
 
-                  if (hasChildren) {
-                    onToggleExpanded(folder.id);
-                  }
+                  <span className="pointer-events-none absolute left-2 top-0 z-30 min-w-28 translate-x-1 rounded-xl border border-sidebar-border/80 bg-background/98 px-3 py-2 text-xs text-foreground opacity-0 shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)] transition duration-150 ease-out group-hover/count:translate-x-0 group-hover/count:opacity-100 group-hover/count:duration-200 group-focus-within/count:translate-x-0 group-focus-within/count:opacity-100">
+                    <span className="block whitespace-nowrap">
+                      {formatCountLabel(descendantCounts.folders, 'folder', 'folders')}
+                    </span>
+                    <span className="block whitespace-nowrap text-muted-foreground">
+                      {formatCountLabel(descendantCounts.files, 'file', 'files')}
+                    </span>
+                  </span>
+                </span>
+              </SidebarMenuButton>
+            </div>
+          </ContextMenuTrigger>
+          <ContextMenuContent
+            side="right"
+            className="ml-2 w-56"
+            onCloseAutoFocus={(event) => event.preventDefault()}
+          >
+            <ContextMenuLabel>Folder actions</ContextMenuLabel>
+            <ContextMenuSeparator />
+            <ContextMenuItem
+              onSelect={() => {
+                onSelectFolder(folder.id);
+                onCreateFile(folder.id);
+              }}
+            >
+              <FilePlus2Icon />
+              Add file
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                onSelectFolder(folder.id);
+                queueAfterMenuClose(() =>
+                  onBeginRename({
+                    type: 'folder',
+                    id: folder.id,
+                    value: folder.label,
+                  }),
+                );
+              }}
+            >
+              <PencilIcon />
+              Rename
+            </ContextMenuItem>
+            {hasChildren ? (
+              <ContextMenuItem
+                onSelect={() => {
+                  onToggleExpanded(folder.id);
                 }}
               >
-                <ChevronDownIcon
-                  className={cn(
-                    'ml-[1px] size-3.5 transition-transform',
-                    !isExpanded && '-rotate-90',
-                  )}
-                />
-              </button>
-              {isExpanded ? (
-                <FolderOpenIcon className="ml-[0px]" />
-              ) : (
-                <FolderIcon className="ml-[0px]" />
-              )}
-              <span>{folder.label}</span>
-              <span className="group/count absolute inset-y-0 right-1 z-10 w-0">
-                <span className="absolute right-0 top-1/2 -translate-y-1/2 px-1 text-[11px] font-medium text-sidebar-foreground/70">
-                  {totalDescendants}
-                </span>
-
-                <span className="pointer-events-none absolute left-2 top-0 z-30 min-w-28 translate-x-1 rounded-xl border border-sidebar-border/80 bg-background/98 px-3 py-2 text-xs text-foreground opacity-0 shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)] transition duration-150 ease-out group-hover/count:translate-x-0 group-hover/count:opacity-100 group-hover/count:duration-200 group-focus-within/count:translate-x-0 group-focus-within/count:opacity-100">
-                  <span className="block whitespace-nowrap">
-                    {formatCountLabel(descendantCounts.folders, 'folder', 'folders')}
-                  </span>
-                  <span className="block whitespace-nowrap text-muted-foreground">
-                    {formatCountLabel(descendantCounts.files, 'file', 'files')}
-                  </span>
-                </span>
-              </span>
-            </SidebarMenuButton>
-          </div>
-        )}
-
-        <DropdownMenuContent
-          side="right"
-          align="start"
-          sideOffset={10}
-          className="w-56"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
-          <DropdownMenuLabel>Folder actions</DropdownMenuLabel>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onSelect={() => {
-              setMenuOpen(false);
-              onCreateFile(folder.id);
-            }}
-          >
-            <FilePlus2Icon />
-            Add file
-          </DropdownMenuItem>
-          <DropdownMenuItem
-            onSelect={() => {
-              setMenuOpen(false);
-              onBeginRename({
-                type: 'folder',
-                id: folder.id,
-                value: folder.label,
-              });
-            }}
-          >
-            <PencilIcon />
-            Rename
-          </DropdownMenuItem>
-          {hasChildren ? (
-            <DropdownMenuItem
+                {isExpanded ? <FolderIcon /> : <FolderOpenIcon />}
+                {isExpanded ? 'Collapse' : 'Expand'}
+              </ContextMenuItem>
+            ) : null}
+            <ContextMenuItem
+              variant="destructive"
               onSelect={() => {
-                onToggleExpanded(folder.id);
-                setMenuOpen(false);
+                onSelectFolder(folder.id);
+
+                if (folderHasContents(folder)) {
+                  onRequestDeleteFolder(folder);
+                  return;
+                }
+
+                onDeleteFolder(folder.id);
               }}
             >
-              {isExpanded ? <FolderIcon /> : <FolderOpenIcon />}
-              {isExpanded ? 'Collapse' : 'Expand'}
-            </DropdownMenuItem>
-          ) : null}
-          <DropdownMenuItem
-            variant="destructive"
-            onSelect={() => {
-              setMenuOpen(false);
-
-              if (folderHasContents(folder)) {
-                onRequestDeleteFolder(folder);
-                return;
-              }
-
-              onDeleteFolder(folder.id);
-            }}
-          >
-            <Trash2Icon />
-            Delete
-          </DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>
+              <Trash2Icon />
+              Delete
+            </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+      )}
 
       {hasChildren ? (
         <div
@@ -557,7 +522,17 @@ function FolderRow({
   );
 }
 
-export function WorkspaceSidebar() {
+interface WorkspaceSidebarProps {
+  onFileDelete?: (fileId: string) => void;
+  onFoldersChange?: (folders: WorkspaceFolder[]) => void;
+  onOpenFile?: (fileId: string) => void;
+}
+
+export function WorkspaceSidebar({
+  onFileDelete,
+  onFoldersChange,
+  onOpenFile,
+}: WorkspaceSidebarProps) {
   const [folders, setFolders] = useState<WorkspaceFolder[]>(createWorkspaceFolders);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeItem, setActiveItem] = useState<ActiveItem>({
@@ -575,6 +550,10 @@ export function WorkspaceSidebar() {
     () => filterWorkspaceFolders(folders, searchQuery),
     [folders, searchQuery],
   );
+
+  useEffect(() => {
+    onFoldersChange?.(folders);
+  }, [folders, onFoldersChange]);
 
   function resetSidebar() {
     const nextFolders = createWorkspaceFolders();
@@ -625,6 +604,7 @@ export function WorkspaceSidebar() {
   function deleteFile(fileId: string) {
     setFolders((current) => deleteFileById(current, fileId));
     setEditingItem(null);
+    onFileDelete?.(fileId);
 
     if (activeItem?.type === 'file' && activeItem.id === fileId) {
       setActiveItem(null);
@@ -643,6 +623,7 @@ export function WorkspaceSidebar() {
     setFolders((current) => addFileToFolderById(current, folderId, nextFile));
     setExpandedFolderIds((current) => new Set(current).add(folderId));
     setActiveItem({ type: 'file', id: fileId });
+    onOpenFile?.(fileId);
     queueAfterMenuClose(() =>
       setEditingItem({
         type: 'file',
@@ -760,7 +741,10 @@ export function WorkspaceSidebar() {
                             label: folderToDelete.label,
                           })
                         }
-                        onSelectFile={(fileId) => setActiveItem({ type: 'file', id: fileId })}
+                        onSelectFile={(fileId) => {
+                          setActiveItem({ type: 'file', id: fileId });
+                          onOpenFile?.(fileId);
+                        }}
                         onSelectFolder={(folderId) =>
                           setActiveItem({ type: 'folder', id: folderId })
                         }
