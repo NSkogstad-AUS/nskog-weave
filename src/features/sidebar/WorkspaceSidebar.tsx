@@ -43,7 +43,6 @@ import {
   SidebarHeader,
   SidebarInput,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -60,7 +59,7 @@ import {
   findFolderById,
   folderHasContents,
   getAllFolderIds,
-  getFolderItemCount,
+  getFolderDescendantCounts,
   renameFileById,
   renameFolderById,
   type WorkspaceFile,
@@ -102,6 +101,10 @@ const sidebarSections = [
 
 function fileKindLabel(kind: WorkspaceFile['kind']) {
   return kind.charAt(0).toUpperCase();
+}
+
+function formatCountLabel(count: number, singular: string, plural: string) {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 function EditingRow({
@@ -172,7 +175,7 @@ function FileRow({
   const [menuOpen, setMenuOpen] = useState(false);
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className="relative w-full">
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -201,7 +204,7 @@ function FileRow({
               onSelect();
               setMenuOpen(true);
             }}
-            className="pr-10"
+            className="w-full pr-10"
             style={{ paddingLeft: `${level * 14 + 10}px` }}
           >
             <FileTextIcon />
@@ -287,9 +290,11 @@ function FolderRow({
   const hasChildren = folder.children.length > 0 || folder.files.length > 0;
   const isEditing = editingItem?.type === 'folder' && editingItem.id === folder.id;
   const isActive = activeItem?.type === 'folder' && activeItem.id === folder.id;
+  const descendantCounts = getFolderDescendantCounts(folder);
+  const totalDescendants = descendantCounts.folders + descendantCounts.files;
 
   return (
-    <SidebarMenuItem>
+    <SidebarMenuItem className="relative w-full">
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -310,43 +315,57 @@ function FolderRow({
             />
           </div>
         ) : (
-          <SidebarMenuButton
-            isActive={isActive}
-            onClick={() => onToggleExpanded(folder.id)}
-            onContextMenu={(event) => {
-              event.preventDefault();
-              onSelectFolder(folder.id);
-              setMenuOpen(true);
-            }}
-            className="pr-10"
-            style={{ paddingLeft: `${level * 14 + 10}px` }}
-            tooltip={folder.label}
-          >
-            {hasChildren ? (
-              <button
-                type="button"
-                className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent"
-                onClick={(event) => {
-                  event.stopPropagation();
-                  onToggleExpanded(folder.id);
-                }}
-              >
-                <ChevronDownIcon
-                  className={cn(
-                    'size-3.5 transition-transform',
-                    !isExpanded && '-rotate-90',
-                  )}
-                />
-              </button>
-            ) : (
-              <span className="w-5" />
-            )}
-            {isExpanded ? <FolderOpenIcon /> : <FolderIcon />}
-            <span>{folder.label}</span>
-          </SidebarMenuButton>
-        )}
+          <div className="relative w-full">
+            <SidebarMenuButton
+              isActive={isActive}
+              onClick={() => onToggleExpanded(folder.id)}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                onSelectFolder(folder.id);
+                setMenuOpen(true);
+              }}
+              className="w-full overflow-visible pr-14"
+              style={{ paddingLeft: `${level * 14 + 10}px` }}
+              tooltip={folder.label}
+            >
+              {hasChildren ? (
+                <button
+                  type="button"
+                  className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onToggleExpanded(folder.id);
+                  }}
+                >
+                  <ChevronDownIcon
+                    className={cn(
+                      'size-3.5 transition-transform',
+                      !isExpanded && '-rotate-90',
+                    )}
+                  />
+                </button>
+              ) : (
+                <span className="w-5" />
+              )}
+              {isExpanded ? <FolderOpenIcon /> : <FolderIcon />}
+              <span>{folder.label}</span>
+              <span className="group/count absolute inset-y-0 right-1 z-10 w-0">
+                <span className="absolute right-0 top-1/2 -translate-y-1/2 px-1 text-[11px] font-medium text-sidebar-foreground/70">
+                  {totalDescendants}
+                </span>
 
-        {!isEditing ? <SidebarMenuBadge>{getFolderItemCount(folder)}</SidebarMenuBadge> : null}
+                <span className="pointer-events-none absolute left-2 top-0 z-30 min-w-28 translate-x-1 rounded-xl border border-sidebar-border/80 bg-background/98 px-3 py-2 text-xs text-foreground opacity-0 shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)] transition duration-150 ease-out group-hover/count:translate-x-0 group-hover/count:opacity-100 group-hover/count:duration-200 group-focus-within/count:translate-x-0 group-focus-within/count:opacity-100">
+                  <span className="block whitespace-nowrap">
+                    {formatCountLabel(descendantCounts.folders, 'folder', 'folders')}
+                  </span>
+                  <span className="block whitespace-nowrap text-muted-foreground">
+                    {formatCountLabel(descendantCounts.files, 'file', 'files')}
+                  </span>
+                </span>
+              </span>
+            </SidebarMenuButton>
+          </div>
+        )}
 
         <DropdownMenuContent align="start" className="w-56">
           <DropdownMenuLabel>Folder actions</DropdownMenuLabel>

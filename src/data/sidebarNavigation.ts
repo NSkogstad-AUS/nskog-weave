@@ -137,13 +137,23 @@ export function getAllFolderIds(folders: WorkspaceFolder[]): string[] {
   return folders.flatMap((folder) => [folder.id, ...getAllFolderIds(folder.children)]);
 }
 
-export function getFolderItemCount(folder: WorkspaceFolder): number {
-  return (
-    folder.files.length +
-    folder.children.reduce(
-      (total, child) => total + 1 + getFolderItemCount(child),
-      0,
-    )
+export function getFolderDescendantCounts(folder: WorkspaceFolder): {
+  folders: number;
+  files: number;
+} {
+  return folder.children.reduce(
+    (totals, child) => {
+      const nestedCounts = getFolderDescendantCounts(child);
+
+      return {
+        folders: totals.folders + 1 + nestedCounts.folders,
+        files: totals.files + child.files.length + nestedCounts.files,
+      };
+    },
+    {
+      folders: 0,
+      files: folder.files.length,
+    },
   );
 }
 
