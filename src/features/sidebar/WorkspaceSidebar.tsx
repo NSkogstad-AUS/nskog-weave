@@ -109,7 +109,9 @@ function formatCountLabel(count: number, singular: string, plural: string) {
 }
 
 function queueAfterMenuClose(callback: () => void) {
-  window.setTimeout(callback, 0);
+  window.requestAnimationFrame(() => {
+    window.requestAnimationFrame(callback);
+  });
 }
 
 function getRowPaddingLeft(level: number) {
@@ -209,7 +211,7 @@ function FileRow({
             type="button"
             tabIndex={-1}
             aria-hidden="true"
-            className="pointer-events-none absolute left-0 top-0 h-0 w-0 opacity-0"
+            className="pointer-events-none absolute inset-y-0 right-0 w-px opacity-0"
           />
         </DropdownMenuTrigger>
 
@@ -241,7 +243,13 @@ function FileRow({
           </SidebarMenuButton>
         )}
 
-        <DropdownMenuContent align="start" className="w-56 overflow-hidden">
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          sideOffset={10}
+          className="w-56 overflow-hidden"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <DropdownMenuLabel>File actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -255,7 +263,7 @@ function FileRow({
           </DropdownMenuItem>
           <DropdownMenuSub>
             <DropdownMenuSubTrigger>
-              <Trash2Icon />
+              <Trash2Icon className="size-4 shrink-0" />
               Delete
             </DropdownMenuSubTrigger>
             <DropdownMenuSubContent className="w-52">
@@ -333,7 +341,7 @@ function FolderRow({
             type="button"
             tabIndex={-1}
             aria-hidden="true"
-            className="pointer-events-none absolute left-0 top-0 h-0 w-0 opacity-0"
+            className="pointer-events-none absolute inset-y-0 right-0 w-px opacity-0"
           />
         </DropdownMenuTrigger>
 
@@ -412,7 +420,13 @@ function FolderRow({
           </div>
         )}
 
-        <DropdownMenuContent align="start" className="w-56">
+        <DropdownMenuContent
+          side="right"
+          align="start"
+          sideOffset={10}
+          className="w-56"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
           <DropdownMenuLabel>Folder actions</DropdownMenuLabel>
           <DropdownMenuSeparator />
           <DropdownMenuItem
