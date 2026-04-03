@@ -106,6 +106,23 @@ function formatCountLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
 }
 
+function getRowPaddingLeft(level: number) {
+  return level === 0 ? 10 : 14;
+}
+
+function TreeElbow({ level }: { level: number }) {
+  if (level === 0) {
+    return null;
+  }
+
+  return (
+    <span
+      aria-hidden="true"
+      className="pointer-events-none absolute left-[-11px] top-0 h-4 w-4 rounded-bl-[10px] border-b border-l border-sidebar-border/80"
+    />
+  );
+}
+
 function EditingRow({
   value,
   onCancel,
@@ -175,6 +192,7 @@ function FileRow({
 
   return (
     <SidebarMenuItem className="relative w-full">
+      <TreeElbow level={level} />
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -204,7 +222,7 @@ function FileRow({
               setMenuOpen(true);
             }}
             className="w-full pr-10"
-            style={{ paddingLeft: `${level * 14 + 10}px` }}
+            style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
           >
             <FileTextIcon />
             <span>{file.label}</span>
@@ -294,6 +312,7 @@ function FolderRow({
 
   return (
     <SidebarMenuItem className="relative w-full">
+      <TreeElbow level={level} />
       <DropdownMenu open={menuOpen} onOpenChange={setMenuOpen}>
         <DropdownMenuTrigger asChild>
           <button
@@ -324,7 +343,7 @@ function FolderRow({
                 setMenuOpen(true);
               }}
               className="w-full overflow-visible pr-14"
-              style={{ paddingLeft: `${level * 14 + 10}px` }}
+              style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
               tooltip={folder.label}
             >
               {hasChildren ? (
