@@ -9,7 +9,6 @@ import {
   PencilIcon,
   RefreshCcwIcon,
   SearchIcon,
-  SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
 
@@ -564,7 +563,11 @@ export function WorkspaceSidebar() {
           <div className="flex w-[4.25rem] shrink-0 flex-col border-r border-sidebar-border/80">
             <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80">
               <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-slate-950 text-white shadow-[0_18px_34px_-24px_rgba(15,23,42,0.7)]">
-                <SparklesIcon className="size-4.5" />
+                <img
+                  src="/weave2.svg"
+                  alt="Weave"
+                  className="size-4.5"
+                />
               </div>
             </div>
 
