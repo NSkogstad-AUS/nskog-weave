@@ -24,6 +24,8 @@ function App() {
     activePage,
     moveNodes,
     removeFilePage,
+    resizeNode,
+    addNode,
     selectedNodeIds,
     setSelectedNodeIds,
     setView,
@@ -67,6 +69,8 @@ function App() {
             nodes={activePage?.nodes ?? []}
             selectedNodeIds={selectedNodeIds}
             onMoveNodes={moveNodes}
+            onResizeNode={resizeNode}
+            onAddNode={addNode}
             onSelectNodes={setSelectedNodeIds}
             onViewChange={setView}
           />

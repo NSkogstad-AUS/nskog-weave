@@ -11,6 +11,10 @@ export interface FilePageNode {
   label: string;
   kind: FilePageNodeKind;
   position: Point;
+  size: {
+    widthUnits: 1 | 2 | 3;
+    heightUnits: 1 | 2 | 3;
+  };
 }
 
 export interface FilePageState {

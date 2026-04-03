@@ -17,9 +17,30 @@ interface FileWorkspaceProps {
     label: string;
     kind: 'folder' | 'file' | 'element';
     position: { x: number; y: number };
+    size: {
+      widthUnits: 1 | 2 | 3;
+      heightUnits: 1 | 2 | 3;
+    };
   }>;
   selectedNodeIds: string[];
   onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void;
+  onResizeNode: (
+    nodeId: string,
+    size: {
+      widthUnits: 1 | 2 | 3;
+      heightUnits: 1 | 2 | 3;
+    },
+  ) => void;
+  onAddNode: (node: {
+    id: string;
+    label: string;
+    kind: 'folder' | 'file' | 'element';
+    position: { x: number; y: number };
+    size: {
+      widthUnits: 1 | 2 | 3;
+      heightUnits: 1 | 2 | 3;
+    };
+  }) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   onViewChange: (view: FilePageView) => void;
 }
@@ -30,6 +51,8 @@ export function FileWorkspace({
   nodes,
   selectedNodeIds,
   onMoveNodes,
+  onResizeNode,
+  onAddNode,
   onSelectNodes,
   onViewChange,
 }: FileWorkspaceProps) {
@@ -107,6 +130,8 @@ export function FileWorkspace({
             nodes={nodes}
             selectedNodeIds={selectedNodeIds}
             onMoveNodes={onMoveNodes}
+            onResizeNode={onResizeNode}
+            onAddNode={onAddNode}
             onSelectNodes={onSelectNodes}
           />
         ) : (

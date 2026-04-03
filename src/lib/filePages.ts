@@ -50,5 +50,9 @@ function createNode(
     label,
     kind,
     position: { x, y },
+    size: {
+      widthUnits: 1,
+      heightUnits: 1,
+    },
   };
 }

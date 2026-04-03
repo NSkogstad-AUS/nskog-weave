@@ -10,6 +10,10 @@ import type { Point } from '@/types/workspace';
 
 type FilePagesStore = Record<string, FilePageState>;
 
+function normalizeUnit(value: unknown): 1 | 2 | 3 {
+  return value === 2 || value === 3 ? value : 1;
+}
+
 function hydrateFilePages(): FilePagesStore {
   if (typeof window === 'undefined') {
     return {};
@@ -30,21 +34,40 @@ function hydrateFilePages(): FilePagesStore {
           return [];
         }
 
+        const nodes = page.nodes.flatMap((node) => {
+          if (
+            typeof node?.id !== 'string' ||
+            typeof node?.label !== 'string' ||
+            (node?.kind !== 'folder' && node?.kind !== 'file' && node?.kind !== 'element') ||
+            !Number.isFinite(node?.position?.x) ||
+            !Number.isFinite(node?.position?.y)
+          ) {
+            return [];
+          }
+
+          return [
+            {
+              id: node.id,
+              label: node.label,
+              kind: node.kind,
+              position: {
+                x: node.position.x,
+                y: node.position.y,
+              },
+              size: {
+                widthUnits: normalizeUnit(node?.size?.widthUnits),
+                heightUnits: normalizeUnit(node?.size?.heightUnits),
+              },
+            },
+          ];
+        });
+
         return [
           [
             fileId,
             {
               view: page.view === 'explorer' ? 'explorer' : 'canvas',
-              nodes: page.nodes.filter(
-                (node): node is FilePageState['nodes'][number] =>
-                  typeof node?.id === 'string' &&
-                  typeof node?.label === 'string' &&
-                  (node?.kind === 'folder' ||
-                    node?.kind === 'file' ||
-                    node?.kind === 'element') &&
-                  Number.isFinite(node?.position?.x) &&
-                  Number.isFinite(node?.position?.y),
-              ),
+              nodes,
             },
           ],
         ];
@@ -124,6 +147,35 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     }));
   }
 
+  function resizeNode(
+    nodeId: string,
+    size: {
+      widthUnits: 1 | 2 | 3;
+      heightUnits: 1 | 2 | 3;
+    },
+  ) {
+    updateActivePage((page) => ({
+      ...page,
+      nodes: page.nodes.map((node) =>
+        node.id === nodeId
+          ? {
+              ...node,
+              size,
+            }
+          : node,
+      ),
+    }));
+  }
+
+  function addNode(
+    node: FilePageState['nodes'][number],
+  ) {
+    updateActivePage((page) => ({
+      ...page,
+      nodes: [...page.nodes, node],
+    }));
+  }
+
   function removeFilePage(fileId: string) {
     setPages((current) => {
       if (!current[fileId]) {
@@ -143,6 +195,8 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     setSelectedNodeIds,
     setView,
     moveNodes,
+    resizeNode,
+    addNode,
     removeFilePage,
   };
 }
