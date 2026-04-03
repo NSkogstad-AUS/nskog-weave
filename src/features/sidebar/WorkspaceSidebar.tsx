@@ -351,25 +351,27 @@ function FolderRow({
               style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
               tooltip={folder.label}
             >
-              {hasChildren ? (
-                <button
-                  type="button"
-                  className="flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition hover:bg-sidebar-accent"
-                  onClick={(event) => {
-                    event.stopPropagation();
+              <button
+                type="button"
+                className={cn(
+                  'flex h-5 w-5 items-center justify-center rounded-md text-muted-foreground transition',
+                  hasChildren ? 'hover:bg-sidebar-accent' : 'opacity-45',
+                )}
+                onClick={(event) => {
+                  event.stopPropagation();
+
+                  if (hasChildren) {
                     onToggleExpanded(folder.id);
-                  }}
-                >
-                  <ChevronDownIcon
-                    className={cn(
-                      'size-3.5 transition-transform',
-                      !isExpanded && '-rotate-90',
-                    )}
-                  />
-                </button>
-              ) : (
-                <span className="w-5" />
-              )}
+                  }
+                }}
+              >
+                <ChevronDownIcon
+                  className={cn(
+                    'size-3.5 transition-transform',
+                    !isExpanded && '-rotate-90',
+                  )}
+                />
+              </button>
               {isExpanded ? (
                 <FolderOpenIcon className="ml-[5px]" />
               ) : (
