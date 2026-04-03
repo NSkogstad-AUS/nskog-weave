@@ -328,7 +328,7 @@ function FolderRow({
             <div className="relative w-full">
               <SidebarMenuButton
                 isActive={isActive}
-                onClick={() => onToggleExpanded(folder.id)}
+                onClick={() => onSelectFolder(folder.id)}
                 onDoubleClick={() =>
                   onBeginRename({
                     type: 'folder',
@@ -526,12 +526,14 @@ interface WorkspaceSidebarProps {
   onFileDelete?: (fileId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
   onOpenFile?: (fileId: string) => void;
+  onOpenFolder?: (folderId: string) => void;
 }
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   onFileDelete,
   onFoldersChange,
   onOpenFile,
+  onOpenFolder,
 }: WorkspaceSidebarProps) {
   const [folders, setFolders] = useState<WorkspaceFolder[]>(createWorkspaceFolders);
   const [searchQuery, setSearchQuery] = useState('');
@@ -745,9 +747,10 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                           setActiveItem({ type: 'file', id: fileId });
                           onOpenFile?.(fileId);
                         }}
-                        onSelectFolder={(folderId) =>
-                          setActiveItem({ type: 'folder', id: folderId })
-                        }
+                        onSelectFolder={(folderId) => {
+                          setActiveItem({ type: 'folder', id: folderId });
+                          onOpenFolder?.(folderId);
+                        }}
                         onToggleExpanded={(folderId) =>
                           setExpandedFolderIds((current) => {
                             const next = new Set(current);

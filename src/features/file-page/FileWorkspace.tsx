@@ -1,16 +1,18 @@
+import { useEffect, useMemo, useState } from 'react';
 import { FileTextIcon, LayoutGridIcon, ListIcon } from 'lucide-react';
 
 import {
   ToggleGroup,
   ToggleGroupItem,
 } from '@/components/animate-ui/components/radix/toggle-group';
-import type { WorkspaceFile } from '@/data/sidebarNavigation';
-import type { FilePageElementIcon, FilePageView } from '@/types/filePage';
+import type { WorkspaceFile, WorkspaceFolder } from '@/data/sidebarNavigation';
+import type { FilePageElementIcon, FilePageNode, FilePageView } from '@/types/filePage';
 import { FileCanvasView } from './FileCanvasView';
 import { FileExplorerView } from './FileExplorerView';
 
 interface FileWorkspaceProps {
   activeFile: WorkspaceFile | null;
+  activeFolder: WorkspaceFolder | null;
   activeView: FilePageView | null;
   nodes: Array<{
     id: string;
@@ -64,6 +66,7 @@ interface FileWorkspaceProps {
 
 export function FileWorkspace({
   activeFile,
+  activeFolder,
   activeView,
   nodes,
   selectedNodeIds,
@@ -75,7 +78,91 @@ export function FileWorkspace({
   onSelectNodes,
   onViewChange,
 }: FileWorkspaceProps) {
-  if (!activeFile || !activeView) {
+  const folderNodes = useMemo<FilePageNode[]>(() => {
+    if (!activeFolder) {
+      return [];
+    }
+
+    const childFolderNodes = activeFolder.children.map((folder, index) => ({
+      id: `folder:${folder.id}`,
+      label: folder.label,
+      description: `${folder.children.length} folders · ${folder.files.length} files`,
+      kind: 'folder' as const,
+      icon: 'shapes' as const,
+      position: {
+        x: 72 + (index % 3) * 224,
+        y: 104 + Math.floor(index / 3) * 112,
+      },
+      size: {
+        widthUnits: 1 as const,
+        heightUnits: 1 as const,
+      },
+    }));
+    const fileNodes = activeFolder.files.map((file, index) => ({
+      id: `file:${file.id}`,
+      label: file.label,
+      description: file.description,
+      kind: 'file' as const,
+      icon: 'message-square' as const,
+      position: {
+        x: 72 + ((childFolderNodes.length + index) % 3) * 224,
+        y: 104 + Math.floor((childFolderNodes.length + index) / 3) * 112,
+      },
+      size: {
+        widthUnits: 2 as const,
+        heightUnits: 1 as const,
+      },
+    }));
+
+    return [...childFolderNodes, ...fileNodes];
+  }, [activeFolder]);
+  const [folderCanvasNodes, setFolderCanvasNodes] = useState<Record<string, FilePageNode[]>>({});
+  const [folderSelectedNodeIds, setFolderSelectedNodeIds] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    if (!activeFolder) {
+      return;
+    }
+
+    setFolderCanvasNodes((current) => {
+      const existingNodes = current[activeFolder.id];
+
+      if (!existingNodes) {
+        return {
+          ...current,
+          [activeFolder.id]: folderNodes,
+        };
+      }
+
+      const existingById = new Map(existingNodes.map((node) => [node.id, node]));
+      const mergedNodes = folderNodes.map((node) => {
+        const existingNode = existingById.get(node.id);
+
+        return existingNode
+          ? {
+              ...node,
+              position: existingNode.position,
+              size: existingNode.size,
+              icon: existingNode.icon,
+            }
+          : node;
+      });
+
+      return {
+        ...current,
+        [activeFolder.id]: mergedNodes,
+      };
+    });
+  }, [activeFolder, folderNodes]);
+
+  const activeFolderNodes = activeFolder ? folderCanvasNodes[activeFolder.id] ?? folderNodes : [];
+  const activeFolderSelectedNodeIds = activeFolder
+    ? folderSelectedNodeIds[activeFolder.id] ?? []
+    : [];
+  const displayNodes = activeFile ? nodes : activeFolderNodes;
+  const displaySelectedNodeIds = activeFile ? selectedNodeIds : activeFolderSelectedNodeIds;
+
+  if ((!activeFile && !activeFolder) || !activeView) {
     return (
       <div className="flex h-full min-h-[34rem] items-center justify-center rounded-[32px] border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)]">
         <div className="max-w-sm">
@@ -106,10 +193,12 @@ export function FileWorkspace({
             </span>
             <div className="min-w-0">
               <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-950">
-                {activeFile.label}
+                {activeFile?.label ?? activeFolder?.label}
               </h1>
               <p className="mt-1 text-sm text-slate-500">
-                Switch between a freeform canvas and a structured file explorer.
+                {activeFile
+                  ? 'Switch between a freeform canvas and a structured file explorer.'
+                  : 'Browse the selected folder in either a canvas layout or structured explorer.'}
               </p>
             </div>
           </div>
@@ -143,26 +232,142 @@ export function FileWorkspace({
         </ToggleGroup>
       </div>
 
-      <div className="min-h-0 flex-1">
-        {activeView === 'canvas' ? (
-          <FileCanvasView
-            nodes={nodes}
-            selectedNodeIds={selectedNodeIds}
-            onMoveNodes={onMoveNodes}
-            onResizeNode={onResizeNode}
-            onAddNode={onAddNode}
-            onUpdateNode={onUpdateNode}
-            onDeleteNode={onDeleteNode}
-            onSelectNodes={onSelectNodes}
-          />
-        ) : (
-          <FileExplorerView
-            nodes={nodes}
-            selectedNodeIds={selectedNodeIds}
-            onSelectNode={(nodeId) => onSelectNodes([nodeId])}
-          />
-        )}
+        <div className="min-h-0 flex-1">
+          {activeView === 'canvas' ? (
+            <FileCanvasView
+              nodes={displayNodes}
+              selectedNodeIds={displaySelectedNodeIds}
+              onMoveNodes={
+                activeFile
+                  ? onMoveNodes
+                  : (positions) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderCanvasNodes((current) => ({
+                        ...current,
+                        [activeFolder.id]: (current[activeFolder.id] ?? folderNodes).map((node) =>
+                          positions[node.id]
+                            ? {
+                                ...node,
+                                position: positions[node.id],
+                              }
+                            : node,
+                        ),
+                      }));
+                    }
+              }
+              onResizeNode={
+                activeFile
+                  ? onResizeNode
+                  : (nodeId, size) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderCanvasNodes((current) => ({
+                        ...current,
+                        [activeFolder.id]: (current[activeFolder.id] ?? folderNodes).map((node) =>
+                          node.id === nodeId
+                            ? {
+                                ...node,
+                                size,
+                              }
+                            : node,
+                        ),
+                      }));
+                    }
+              }
+              onAddNode={
+                activeFile
+                  ? onAddNode
+                  : (node) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderCanvasNodes((current) => ({
+                        ...current,
+                        [activeFolder.id]: [...(current[activeFolder.id] ?? folderNodes), node],
+                      }));
+                    }
+              }
+              onUpdateNode={
+                activeFile
+                  ? onUpdateNode
+                  : (nodeId, updates) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderCanvasNodes((current) => ({
+                        ...current,
+                        [activeFolder.id]: (current[activeFolder.id] ?? folderNodes).map((node) =>
+                          node.id === nodeId
+                            ? {
+                                ...node,
+                                ...updates,
+                              }
+                            : node,
+                        ),
+                      }));
+                    }
+              }
+              onDeleteNode={
+                activeFile
+                  ? onDeleteNode
+                  : (nodeId) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderCanvasNodes((current) => ({
+                        ...current,
+                        [activeFolder.id]: (current[activeFolder.id] ?? folderNodes).filter(
+                          (node) => node.id !== nodeId,
+                        ),
+                      }));
+                      setFolderSelectedNodeIds((current) => ({
+                        ...current,
+                        [activeFolder.id]: (current[activeFolder.id] ?? []).filter(
+                          (id) => id !== nodeId,
+                        ),
+                      }));
+                    }
+              }
+              onSelectNodes={
+                activeFile
+                  ? onSelectNodes
+                  : (nodeIds) => {
+                      if (!activeFolder) {
+                        return;
+                      }
+
+                      setFolderSelectedNodeIds((current) => ({
+                        ...current,
+                        [activeFolder.id]: nodeIds,
+                      }));
+                    }
+              }
+            />
+          ) : (
+            <FileExplorerView
+              nodes={displayNodes}
+              selectedNodeIds={displaySelectedNodeIds}
+              onSelectNode={(nodeId) =>
+                activeFile
+                  ? onSelectNodes([nodeId])
+                  : activeFolder
+                    ? setFolderSelectedNodeIds((current) => ({
+                        ...current,
+                        [activeFolder.id]: [nodeId],
+                      }))
+                    : undefined
+              }
+            />
+          )}
+        </div>
       </div>
-    </div>
   );
 }

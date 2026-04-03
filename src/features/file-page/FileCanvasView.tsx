@@ -894,9 +894,10 @@ export function FileCanvasView({
             const dimensions = getNodeDimensions(displaySize);
             const displayPosition = draftPositions[node.id] ?? node.position;
             const snapPreviewPosition = snapPreviewPositions[node.id];
-            const isCompactElement = node.kind === 'element' && displaySize.widthUnits === 1;
-            const showElementLabel = node.kind !== 'element' || displaySize.widthUnits >= 2;
-            const showElementDescription = node.kind === 'element' && displaySize.widthUnits >= 3;
+            const isCompactNode = displaySize.widthUnits === 1;
+            const showNodeLabel = displaySize.widthUnits >= 2;
+            const showNodeDescription =
+              displaySize.widthUnits >= 3 && node.description.trim().length > 0;
             const isEditing = editingNodeId === node.id;
 
             return (
@@ -953,30 +954,30 @@ export function FileCanvasView({
                       <div
                         className={cn(
                           'flex h-full items-start justify-between gap-3',
-                          isCompactElement && 'items-center justify-center p-0',
+                          isCompactNode && 'items-center justify-center p-0',
                         )}
                       >
                         <div
                           className={cn(
                             'flex items-center gap-2.5',
-                            isCompactElement && 'h-full w-full items-center justify-center gap-0',
+                            isCompactNode && 'h-full w-full items-center justify-center gap-0',
                           )}
                         >
                           <span
                             className={cn(
                               'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
-                              isCompactElement &&
+                              isCompactNode &&
                                 'size-12 rounded-none border-transparent bg-transparent shadow-none',
                             )}
                           >
                             <Icon
                               className={cn(
                                 'size-4 text-slate-600',
-                                isCompactElement && 'size-7 text-slate-500',
+                                isCompactNode && 'size-7 text-slate-500',
                               )}
                             />
                           </span>
-                          {!isCompactElement ? (
+                          {!isCompactNode ? (
                             <div className="min-w-0">
                               {isEditing ? (
                                 <input
@@ -996,12 +997,12 @@ export function FileCanvasView({
                                   onPointerDown={(event) => event.stopPropagation()}
                                   className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
                                 />
-                              ) : showElementLabel ? (
+                              ) : showNodeLabel ? (
                                 <div className="truncate text-sm font-medium text-slate-950">
                                   {node.label}
                                 </div>
                               ) : null}
-                              {showElementDescription ? (
+                              {showNodeDescription ? (
                                 <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                                   {node.description}
                                 </div>
