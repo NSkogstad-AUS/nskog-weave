@@ -261,6 +261,24 @@ export function deleteFileById(
   }));
 }
 
+export function addFileToFolderById(
+  folders: WorkspaceFolder[],
+  folderId: string,
+  file: WorkspaceFile,
+): WorkspaceFolder[] {
+  return folders.map((folder) =>
+    folder.id === folderId
+      ? {
+          ...folder,
+          files: [...folder.files, file],
+        }
+      : {
+          ...folder,
+          children: addFileToFolderById(folder.children, folderId, file),
+        },
+  );
+}
+
 export function filterWorkspaceFolders(
   folders: WorkspaceFolder[],
   rawQuery: string,

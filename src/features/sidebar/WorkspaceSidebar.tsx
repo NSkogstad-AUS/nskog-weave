@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
   FileTextIcon,
+  FilePlus2Icon,
   FolderIcon,
   FolderOpenIcon,
   HomeIcon,
@@ -50,6 +51,7 @@ import {
 } from '@/components/animate-ui/components/radix/sidebar';
 import { Button } from '@/components/ui/button';
 import {
+  addFileToFolderById,
   createWorkspaceFolders,
   deleteFileById,
   deleteFolderById,
@@ -104,6 +106,10 @@ function fileKindLabel(kind: WorkspaceFile['kind']) {
 
 function formatCountLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
+}
+
+function queueAfterMenuClose(callback: () => void) {
+  window.setTimeout(callback, 0);
 }
 
 function getRowPaddingLeft(level: number) {
@@ -284,6 +290,7 @@ function FolderRow({
   onCancelRename,
   onChangeRename,
   onCommitRename,
+  onCreateFile,
   onDeleteFolder,
   onDeleteFile,
   onRequestDeleteFolder,
@@ -301,6 +308,7 @@ function FolderRow({
   onCancelRename: () => void;
   onChangeRename: (value: string) => void;
   onCommitRename: () => void;
+  onCreateFile: (folderId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
@@ -410,6 +418,15 @@ function FolderRow({
           <DropdownMenuItem
             onSelect={() => {
               setMenuOpen(false);
+              onCreateFile(folder.id);
+            }}
+          >
+            <FilePlus2Icon />
+            Add file
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => {
+              setMenuOpen(false);
               onBeginRename({
                 type: 'folder',
                 id: folder.id,
@@ -482,6 +499,7 @@ function FolderRow({
                   onCancelRename={onCancelRename}
                   onChangeRename={onChangeRename}
                   onCommitRename={onCommitRename}
+                  onCreateFile={onCreateFile}
                   onDeleteFolder={onDeleteFolder}
                   onDeleteFile={onDeleteFile}
                   onRequestDeleteFolder={onRequestDeleteFolder}
@@ -599,6 +617,27 @@ export function WorkspaceSidebar() {
     }
   }
 
+  function createFileInFolder(folderId: string) {
+    const fileId = `file-${Date.now()}`;
+    const nextFile: WorkspaceFile = {
+      id: fileId,
+      label: 'Untitled file',
+      description: '',
+      kind: 'brief',
+    };
+
+    setFolders((current) => addFileToFolderById(current, folderId, nextFile));
+    setExpandedFolderIds((current) => new Set(current).add(folderId));
+    setActiveItem({ type: 'file', id: fileId });
+    queueAfterMenuClose(() =>
+      setEditingItem({
+        type: 'file',
+        id: fileId,
+        value: nextFile.label,
+      }),
+    );
+  }
+
   return (
     <>
       <Sidebar
@@ -698,6 +737,7 @@ export function WorkspaceSidebar() {
                           )
                         }
                         onCommitRename={commitRename}
+                        onCreateFile={createFileInFolder}
                         onDeleteFolder={deleteFolder}
                         onDeleteFile={deleteFile}
                         onRequestDeleteFolder={(folderToDelete) =>
