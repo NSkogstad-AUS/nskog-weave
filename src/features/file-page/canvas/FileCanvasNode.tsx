@@ -33,6 +33,7 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
+  isContextMenuOpen: boolean;
   isDragging: boolean;
   isEditing: boolean;
   isSelected: boolean;
@@ -43,8 +44,11 @@ interface FileCanvasNodeProps {
   onClearIconPreview: () => void;
   onClearSizePreview: () => void;
   onCommitRename: () => void;
+  onContextMenu: () => void;
+  onContextMenuOpenChange: (open: boolean) => void;
   onDelete: () => void;
   onEditingLabelChange: (value: string) => void;
+  onHoverChange: (hovered: boolean) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPreviewIcon: (icon: FilePageElementIcon) => void;
   onPreviewResize: (size: FilePageNode['size']) => void;
@@ -59,6 +63,7 @@ export function FileCanvasNode({
   displayPosition,
   displaySize,
   editingLabel,
+  isContextMenuOpen,
   isDragging,
   isEditing,
   isSelected,
@@ -69,8 +74,11 @@ export function FileCanvasNode({
   onClearIconPreview,
   onClearSizePreview,
   onCommitRename,
+  onContextMenu,
+  onContextMenuOpenChange,
   onDelete,
   onEditingLabelChange,
+  onHoverChange,
   onPointerDown,
   onPreviewIcon,
   onPreviewResize,
@@ -92,9 +100,17 @@ export function FileCanvasNode({
   const buttonNode = (
     <button
       type="button"
+      data-canvas-node="true"
       onPointerDown={onPointerDown}
+      onPointerEnter={() => onHoverChange(true)}
+      onPointerLeave={() => {
+        if (!isContextMenuOpen) {
+          onHoverChange(false);
+        }
+      }}
       onContextMenu={(event) => {
         event.stopPropagation();
+        onContextMenu();
         onSelect();
       }}
       className={cn(
@@ -179,6 +195,8 @@ export function FileCanvasNode({
   return (
     <ContextMenu
       onOpenChange={(open) => {
+        onContextMenuOpenChange(open);
+
         if (!open) {
           onClearSizePreview();
           onClearIconPreview();

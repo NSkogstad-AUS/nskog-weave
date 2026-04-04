@@ -1,4 +1,4 @@
-import type { Point } from './workspace';
+import type { Point } from './geometry';
 
 export const FILE_PAGE_VIEWS = ['canvas', 'explorer'] as const;
 export type FilePageView = (typeof FILE_PAGE_VIEWS)[number];

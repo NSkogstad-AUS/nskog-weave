@@ -6,7 +6,7 @@ import {
   FILE_PAGES_STORAGE_KEY,
 } from '@/lib/filePages';
 import type { FilePageElementIcon, FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
-import type { Point } from '@/types/workspace';
+import type { Point } from '@/types/geometry';
 
 type FilePagesStore = Record<string, FilePageState>;
 
