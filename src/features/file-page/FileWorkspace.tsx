@@ -226,13 +226,13 @@ export function FileWorkspace({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="relative min-h-0 flex-1">
-        <div className="pointer-events-none absolute inset-x-5 top-5 z-20 flex items-start justify-between gap-4">
+        <div className="pointer-events-none absolute inset-x-5 top-5 z-20 flex items-center justify-between gap-4">
           <div
             className={cn(
-              'pointer-events-auto min-w-56 max-w-[min(42rem,calc(100%-16rem))] rounded-[22px] border border-white/75 bg-white/84 px-4 py-3 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.4)] backdrop-blur-md',
+              'pointer-events-auto min-w-56 max-w-[min(42rem,calc(100%-16rem))] rounded-[20px] border border-sidebar-border/80 bg-sidebar/96 p-1 shadow-[0_20px_50px_-22px_rgba(15,23,42,0.45),0_8px_24px_-18px_rgba(15,23,42,0.28)] backdrop-blur-md',
             )}
           >
-            <div className="flex items-start gap-2.5">
+            <div className="flex h-9 items-center gap-2.5 rounded-2xl px-3.5">
               <div className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
                 <span className="shrink-0">{pageEyebrow}</span>
                 <span className="ml-1.5 min-w-0 truncate normal-case tracking-normal text-slate-500">
@@ -241,7 +241,7 @@ export function FileWorkspace({
               </div>
               <h1
                 className={cn(
-                  'shrink-0 text-lg leading-none font-semibold tracking-tight text-slate-950',
+                  'shrink-0 text-sm font-medium text-slate-950',
                   activeView === 'canvas' &&
                     'underline decoration-slate-500/60 underline-offset-3',
                 )}
@@ -260,7 +260,7 @@ export function FileWorkspace({
               }
             }}
             variant="outline"
-            className="pointer-events-auto grid w-52 grid-cols-2 rounded-[20px] border border-white/75 bg-white/84 p-1 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.4)] backdrop-blur-md sm:w-56"
+            className="pointer-events-auto grid w-52 grid-cols-2 rounded-[20px] border border-sidebar-border/80 bg-sidebar/96 p-1 shadow-[0_20px_50px_-22px_rgba(15,23,42,0.45),0_8px_24px_-18px_rgba(15,23,42,0.28)] backdrop-blur-md sm:w-56"
           >
             <ToggleGroupItem
               value="canvas"
