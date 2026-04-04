@@ -576,22 +576,13 @@ export function FileCanvasView({
               }
             }
           }}
-          className="relative h-full min-h-[34rem] overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none"
+          className="relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none"
           style={{
             backgroundImage:
               'radial-gradient(circle, rgba(148,163,184,0.28) 1.15px, transparent 1.2px)',
             backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
           }}
         >
-          <div className="pointer-events-none absolute inset-x-0 top-0 flex items-center justify-between px-5 py-4 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
-            <span>Canvas</span>
-            <span>
-              {displaySelectedNodeIds.length > 1
-                ? `${displaySelectedNodeIds.length} selected · marquee or drag`
-                : 'Drag folders and items · snaps to grid'}
-            </span>
-          </div>
-
           {nodes.map((node) => {
             const meta = NODE_META[node.kind];
             const elementIcon = draftIcons[node.id] ?? node.icon;

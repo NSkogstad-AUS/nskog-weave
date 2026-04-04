@@ -6,8 +6,9 @@ import {
 } from '@/components/animate-ui/components/radix/sidebar';
 import {
   createWorkspaceFolders,
-  findFileById,
+  findFilePathById,
   findFolderById,
+  findFolderPathById,
   type WorkspaceFolder,
 } from '@/data/sidebarNavigation';
 import { FileWorkspace } from '@/features/file-page/FileWorkspace';
@@ -26,13 +27,25 @@ function App() {
       }
     | null
   >(null);
-  const activeFile = useMemo(
-    () => (openFileId ? findFileById(folders, openFileId)?.file ?? null : null),
+  const activeFileMatch = useMemo(
+    () => (openFileId ? findFilePathById(folders, openFileId) : null),
     [folders, openFileId],
   );
+  const activeFile = activeFileMatch?.file ?? null;
   const activeFolder = useMemo(
     () => (openFolderId ? findFolderById(folders, openFolderId) : null),
     [folders, openFolderId],
+  );
+  const activeFolderPath = useMemo(
+    () => (openFolderId ? findFolderPathById(folders, openFolderId) : null),
+    [folders, openFolderId],
+  );
+  const locationSegments = useMemo(
+    () =>
+      activeFileMatch
+        ? [...activeFileMatch.folders.map((folder) => folder.label), activeFileMatch.file.label]
+        : activeFolderPath?.map((folder) => folder.label) ?? [],
+    [activeFileMatch, activeFolderPath],
   );
   const {
     activePage,
@@ -57,7 +70,7 @@ function App() {
   );
 
   useEffect(() => {
-    if (openFileId && !findFileById(folders, openFileId)) {
+    if (openFileId && !findFilePathById(folders, openFileId)) {
       setOpenFileId(null);
     }
   }, [folders, openFileId]);
@@ -98,12 +111,13 @@ function App() {
         }}
         onFileDelete={handleFileDelete}
       />
-      <SidebarInset className="min-h-screen bg-transparent">
-        <div className="flex h-full min-h-screen flex-col p-4 md:p-5">
+      <SidebarInset className="min-h-screen bg-transparent md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
+        <div className="flex h-full min-h-screen flex-col">
           <FileWorkspace
             activeFile={activeFile}
             activeFolder={activeFolder}
             activeView={activeView}
+            locationSegments={locationSegments}
             nodes={activePage?.nodes ?? []}
             selectedNodeIds={selectedNodeIds}
             onMoveNodes={moveNodes}

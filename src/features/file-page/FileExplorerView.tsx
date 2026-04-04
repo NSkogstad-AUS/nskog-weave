@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 import type { FilePageNode } from '@/types/filePage';
 
 interface FileExplorerViewProps {
+  className?: string;
   nodes: FilePageNode[];
   selectedNodeIds: string[];
   onSelectNode: (nodeId: string) => void;
@@ -36,6 +37,7 @@ const NODE_META = {
 >;
 
 export function FileExplorerView({
+  className,
   nodes,
   selectedNodeIds,
   onSelectNode,
@@ -44,7 +46,12 @@ export function FileExplorerView({
   const selectedIdSet = new Set(selectedNodeIds);
 
   return (
-    <div className="overflow-hidden rounded-[28px] border border-slate-200/80 bg-white/88 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]">
+    <div
+      className={cn(
+        'overflow-hidden rounded-none border border-slate-200/80 bg-white/88 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]',
+        className,
+      )}
+    >
       <div className="grid grid-cols-[minmax(0,1fr)_auto] border-b border-slate-200/80 px-5 py-3 text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
         <span>Name</span>
         <span>Type</span>

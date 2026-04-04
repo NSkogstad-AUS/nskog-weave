@@ -201,6 +201,51 @@ export function findFileById(
   return null;
 }
 
+export function findFolderPathById(
+  folders: WorkspaceFolder[],
+  folderId: string,
+  ancestors: WorkspaceFolder[] = [],
+): WorkspaceFolder[] | null {
+  for (const folder of folders) {
+    const nextAncestors = [...ancestors, folder];
+
+    if (folder.id === folderId) {
+      return nextAncestors;
+    }
+
+    const nestedPath = findFolderPathById(folder.children, folderId, nextAncestors);
+
+    if (nestedPath) {
+      return nestedPath;
+    }
+  }
+
+  return null;
+}
+
+export function findFilePathById(
+  folders: WorkspaceFolder[],
+  fileId: string,
+  ancestors: WorkspaceFolder[] = [],
+): { file: WorkspaceFile; folders: WorkspaceFolder[] } | null {
+  for (const folder of folders) {
+    const nextAncestors = [...ancestors, folder];
+    const file = folder.files.find((candidate) => candidate.id === fileId);
+
+    if (file) {
+      return { file, folders: nextAncestors };
+    }
+
+    const nestedPath = findFilePathById(folder.children, fileId, nextAncestors);
+
+    if (nestedPath) {
+      return nestedPath;
+    }
+  }
+
+  return null;
+}
+
 export function renameFolderById(
   folders: WorkspaceFolder[],
   folderId: string,

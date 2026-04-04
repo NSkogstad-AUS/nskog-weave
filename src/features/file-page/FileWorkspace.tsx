@@ -6,6 +6,7 @@ import {
   ToggleGroupItem,
 } from '@/components/animate-ui/components/radix/toggle-group';
 import type { WorkspaceFile, WorkspaceFolder } from '@/data/sidebarNavigation';
+import { cn } from '@/lib/utils';
 import type { FilePageElementIcon, FilePageNode, FilePageView } from '@/types/filePage';
 import { FileCanvasView } from './FileCanvasView';
 import { FileExplorerView } from './FileExplorerView';
@@ -14,6 +15,7 @@ interface FileWorkspaceProps {
   activeFile: WorkspaceFile | null;
   activeFolder: WorkspaceFolder | null;
   activeView: FilePageView | null;
+  locationSegments: string[];
   nodes: Array<{
     id: string;
     label: string;
@@ -76,6 +78,7 @@ export function FileWorkspace({
   activeFile,
   activeFolder,
   activeView,
+  locationSegments,
   nodes,
   selectedNodeIds,
   onMoveNodes,
@@ -170,6 +173,10 @@ export function FileWorkspace({
     : [];
   const displayNodes = activeFile ? nodes : activeFolderNodes;
   const displaySelectedNodeIds = activeFile ? selectedNodeIds : activeFolderSelectedNodeIds;
+  const pageTitle = activeFile?.label ?? activeFolder?.label ?? 'Workspace';
+  const pageEyebrow = activeFile ? 'File' : 'Folder';
+  const breadcrumbPrefix = locationSegments.slice(0, -1).join('/');
+  const breadcrumbCurrent = locationSegments.at(-1) ?? '';
   const handleHoverNodeChange = useCallback(
     (node: FilePageNode | null) => {
       if (!node) {
@@ -200,7 +207,7 @@ export function FileWorkspace({
 
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
-      <div className="flex h-full min-h-[34rem] items-center justify-center rounded-[32px] border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)]">
+      <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)]">
         <div className="max-w-sm">
           <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm">
             <FileTextIcon className="size-6 text-slate-500" />
@@ -217,59 +224,62 @@ export function FileWorkspace({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col gap-4">
-      <div className="flex flex-col gap-4 rounded-[30px] border border-slate-200/80 bg-white/78 px-5 py-4 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] md:flex-row md:items-center md:justify-between">
-        <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-slate-400">
-            File Page
-          </div>
-          <div className="mt-2 flex items-center gap-3">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/95">
-              <FileTextIcon className="size-4 text-slate-600" />
-            </span>
-            <div className="min-w-0">
-              <h1 className="truncate text-2xl font-semibold tracking-tight text-slate-950">
-                {activeFile?.label ?? activeFolder?.label}
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="relative min-h-0 flex-1">
+        <div className="pointer-events-none absolute inset-x-5 top-5 z-20 flex items-start justify-between gap-4">
+          <div
+            className={cn(
+              'pointer-events-auto min-w-56 max-w-[min(42rem,calc(100%-16rem))] rounded-[22px] border border-white/75 bg-white/84 px-4 py-3 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.4)] backdrop-blur-md',
+            )}
+          >
+            <div className="flex items-start gap-2.5">
+              <div className="min-w-0 flex-1 text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                <span className="shrink-0">{pageEyebrow}</span>
+                <span className="ml-1.5 min-w-0 truncate normal-case tracking-normal text-slate-500">
+                  {breadcrumbPrefix ? `/${breadcrumbPrefix}/` : '/'}
+                </span>
+              </div>
+              <h1
+                className={cn(
+                  'shrink-0 text-lg leading-none font-semibold tracking-tight text-slate-950',
+                  activeView === 'canvas' &&
+                    'underline decoration-slate-500/60 underline-offset-3',
+                )}
+              >
+                {breadcrumbCurrent}
               </h1>
-              <p className="mt-1 text-sm text-slate-500">
-                {activeFile
-                  ? 'Switch between a freeform canvas and a structured file explorer.'
-                  : 'Browse the selected folder in either a canvas layout or structured explorer.'}
-              </p>
             </div>
           </div>
+
+          <ToggleGroup
+            type="single"
+            value={activeView}
+            onValueChange={(value) => {
+              if (value === 'canvas' || value === 'explorer') {
+                onViewChange(value);
+              }
+            }}
+            variant="outline"
+            className="pointer-events-auto grid w-52 grid-cols-2 rounded-[20px] border border-white/75 bg-white/84 p-1 shadow-[0_18px_48px_-28px_rgba(15,23,42,0.4)] backdrop-blur-md sm:w-56"
+          >
+            <ToggleGroupItem
+              value="canvas"
+              className="gap-2 justify-center rounded-2xl px-3.5 text-slate-600 data-[state=on]:bg-white/95 data-[state=on]:text-slate-950"
+            >
+              <LayoutGridIcon className="size-4" />
+              Canvas
+            </ToggleGroupItem>
+            <ToggleGroupItem
+              value="explorer"
+              className="gap-2 justify-center rounded-2xl px-3.5 text-slate-600 data-[state=on]:bg-white/95 data-[state=on]:text-slate-950"
+            >
+              <ListIcon className="size-4" />
+              Explorer
+            </ToggleGroupItem>
+          </ToggleGroup>
         </div>
 
-        <ToggleGroup
-          type="single"
-          value={activeView}
-          onValueChange={(value) => {
-            if (value === 'canvas' || value === 'explorer') {
-              onViewChange(value);
-            }
-          }}
-          variant="outline"
-          className="rounded-xl border border-slate-200/80 bg-white/90 p-1"
-        >
-          <ToggleGroupItem
-            value="canvas"
-            className="gap-2 rounded-lg px-3 text-slate-600 data-[state=on]:text-slate-950"
-          >
-            <LayoutGridIcon className="size-4" />
-            Canvas
-          </ToggleGroupItem>
-          <ToggleGroupItem
-            value="explorer"
-            className="gap-2 rounded-lg px-3 text-slate-600 data-[state=on]:text-slate-950"
-          >
-            <ListIcon className="size-4" />
-            Explorer
-          </ToggleGroupItem>
-        </ToggleGroup>
-      </div>
-
-        <div className="min-h-0 flex-1">
-          {activeView === 'canvas' ? (
+        {activeView === 'canvas' ? (
             <FileCanvasView
               nodes={displayNodes}
               selectedNodeIds={displaySelectedNodeIds}
@@ -390,6 +400,7 @@ export function FileWorkspace({
             />
           ) : (
             <FileExplorerView
+              className="pt-24"
               nodes={displayNodes}
               selectedNodeIds={displaySelectedNodeIds}
               onSelectNode={(nodeId) =>
@@ -404,7 +415,7 @@ export function FileWorkspace({
               }
             />
           )}
-        </div>
       </div>
+    </div>
   );
 }
