@@ -78,6 +78,12 @@ type MarqueeState = {
   additive: boolean;
   initialSelection: string[];
 };
+
+type PanState = {
+  origin: Point;
+  baseViewport: Point;
+};
+
 export function FileCanvasView({
   nodes,
   selectedNodeIds,
@@ -94,13 +100,17 @@ export function FileCanvasView({
   const frameRef = useRef<number | null>(null);
   const dragStateRef = useRef<DragState | null>(null);
   const marqueeStateRef = useRef<MarqueeState | null>(null);
+  const panStateRef = useRef<PanState | null>(null);
   const draftPositionsRef = useRef<Record<string, Point>>({});
   const snapPreviewPositionsRef = useRef<Record<string, Point>>({});
   const draftSelectedNodeIdsRef = useRef<string[] | null>(null);
   const contextMenuPointRef = useRef<Point | null>(null);
   const nodesRef = useRef(nodes);
+  const viewportRef = useRef<Point>({ x: 0, y: 0 });
   const [dragState, setDragState] = useState<DragState | null>(null);
   const [marqueeState, setMarqueeState] = useState<MarqueeState | null>(null);
+  const [panState, setPanState] = useState<PanState | null>(null);
+  const [viewport, setViewport] = useState<Point>({ x: 0, y: 0 });
   const [draftPositions, setDraftPositions] = useState<Record<string, Point>>({});
   const [snapPreviewPositions, setSnapPreviewPositions] = useState<Record<string, Point>>({});
   const [draftSizes, setDraftSizes] = useState<Record<string, FilePageNode['size']>>({});
@@ -125,6 +135,10 @@ export function FileCanvasView({
   }, [marqueeState]);
 
   useEffect(() => {
+    panStateRef.current = panState;
+  }, [panState]);
+
+  useEffect(() => {
     draftPositionsRef.current = draftPositions;
   }, [draftPositions]);
 
@@ -135,6 +149,10 @@ export function FileCanvasView({
   useEffect(() => {
     draftSelectedNodeIdsRef.current = draftSelectedNodeIds;
   }, [draftSelectedNodeIds]);
+
+  useEffect(() => {
+    viewportRef.current = viewport;
+  }, [viewport]);
 
   useEffect(() => {
     if (!editingNodeId) {
@@ -165,8 +183,17 @@ export function FileCanvasView({
     const handlePointerMove = (event: PointerEvent) => {
       const liveDragState = dragStateRef.current;
       const liveMarqueeState = marqueeStateRef.current;
+      const livePanState = panStateRef.current;
 
-      if (!liveDragState && !liveMarqueeState) {
+      if (!liveDragState && !liveMarqueeState && !livePanState) {
+        return;
+      }
+
+      if (livePanState) {
+        setViewport({
+          x: livePanState.baseViewport.x + (event.clientX - livePanState.origin.x),
+          y: livePanState.baseViewport.y + (event.clientY - livePanState.origin.y),
+        });
         return;
       }
 
@@ -285,6 +312,8 @@ export function FileCanvasView({
         );
       }
 
+      panStateRef.current = null;
+      setPanState(null);
       dragStateRef.current = null;
       marqueeStateRef.current = null;
       draftSelectedNodeIdsRef.current = null;
@@ -323,8 +352,8 @@ export function FileCanvasView({
     const rect = canvasRef.current.getBoundingClientRect();
 
     return {
-      x: clientX - rect.left,
-      y: clientY - rect.top,
+      x: clientX - rect.left - viewportRef.current.x,
+      y: clientY - rect.top - viewportRef.current.y,
     };
   }
 
@@ -368,7 +397,7 @@ export function FileCanvasView({
   }
 
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
-    if (event.target !== event.currentTarget) {
+    if ((event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
       return;
     }
 
@@ -546,44 +575,56 @@ export function FileCanvasView({
               return;
             }
 
-            if (event.target === event.currentTarget) {
-              const localPoint = getLocalPoint(event.clientX, event.clientY);
+            if (!(event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
+              if (event.shiftKey) {
+                const localPoint = getLocalPoint(event.clientX, event.clientY);
 
-              if (!localPoint) {
-                onSelectNodes([]);
+                if (!localPoint) {
+                  onSelectNodes([]);
+                  return;
+                }
+
+                setMarqueeState({
+                  origin: localPoint,
+                  current: localPoint,
+                  additive: true,
+                  initialSelection: selectedNodeIds,
+                });
+                marqueeStateRef.current = {
+                  origin: localPoint,
+                  current: localPoint,
+                  additive: true,
+                  initialSelection: selectedNodeIds,
+                };
+                draftSelectedNodeIdsRef.current = selectedNodeIds;
+                setDraftSelectedNodeIds(selectedNodeIds);
                 return;
               }
 
-              setMarqueeState({
-                origin: localPoint,
-                current: localPoint,
-                additive: event.shiftKey,
-                initialSelection: selectedNodeIds,
-              });
-              marqueeStateRef.current = {
-                origin: localPoint,
-                current: localPoint,
-                additive: event.shiftKey,
-                initialSelection: selectedNodeIds,
+              const nextPanState = {
+                origin: { x: event.clientX, y: event.clientY },
+                baseViewport: viewport,
               };
-
-              if (!event.shiftKey) {
-                draftSelectedNodeIdsRef.current = [];
-                setDraftSelectedNodeIds([]);
-              } else {
-                draftSelectedNodeIdsRef.current = selectedNodeIds;
-                setDraftSelectedNodeIds(selectedNodeIds);
-              }
+              panStateRef.current = nextPanState;
+              setPanState(nextPanState);
             }
           }}
-          className="relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/78 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none"
+          className={cn(
+            'relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-[#fffdf7]/92 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none',
+            panState ? 'cursor-grabbing' : 'cursor-grab',
+          )}
           style={{
             backgroundImage:
-              'radial-gradient(circle, rgba(148,163,184,0.28) 1.15px, transparent 1.2px)',
+              'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)',
             backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+            backgroundPosition: `${viewport.x}px ${viewport.y}px`,
           }}
         >
-          {nodes.map((node) => {
+          <div
+            className="absolute inset-0"
+            style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
+          >
+            {nodes.map((node) => {
             const meta = NODE_META[node.kind];
             const elementIcon = draftIcons[node.id] ?? node.icon;
             const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[elementIcon] : null;
@@ -602,6 +643,7 @@ export function FileCanvasView({
             const buttonNode = (
               <button
                 type="button"
+                data-canvas-node="true"
                 onPointerDown={(event) => handleNodePointerDown(event, node)}
                 onPointerEnter={() => onHoverNodeChange(node)}
                 onPointerLeave={() => {
@@ -852,22 +894,23 @@ export function FileCanvasView({
             );
           })}
 
-          {marqueeState ? (
-            <div
-              aria-hidden="true"
-              className="pointer-events-none absolute rounded-2xl border border-sky-400/50 bg-sky-400/10 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18)]"
-              style={{
-                left: normalizeRectangle(marqueeState.origin, marqueeState.current).left,
-                top: normalizeRectangle(marqueeState.origin, marqueeState.current).top,
-                width:
-                  normalizeRectangle(marqueeState.origin, marqueeState.current).right -
-                  normalizeRectangle(marqueeState.origin, marqueeState.current).left,
-                height:
-                  normalizeRectangle(marqueeState.origin, marqueeState.current).bottom -
-                  normalizeRectangle(marqueeState.origin, marqueeState.current).top,
-              }}
-            />
-          ) : null}
+            {marqueeState ? (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute rounded-2xl border border-sky-400/50 bg-sky-400/10 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18)]"
+                style={{
+                  left: normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+                  top: normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+                  width:
+                    normalizeRectangle(marqueeState.origin, marqueeState.current).right -
+                    normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+                  height:
+                    normalizeRectangle(marqueeState.origin, marqueeState.current).bottom -
+                    normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+                }}
+              />
+            ) : null}
+          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="ml-2 w-52">
