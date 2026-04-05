@@ -126,7 +126,8 @@ function FileCanvasNodeComponent({
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
   const showNodeLabel = displaySize.widthUnits >= 2;
   const showNodeDescription = displaySize.widthUnits >= 3 && node.description.trim().length > 0;
-  const showResizeHandle = isGroupNode && onResizeHandlePointerDown;
+  const showOverlayGroupShell = isGroupNode && !showGroupHeader;
+  const showResizeHandle = isGroupNode && !showOverlayGroupShell && onResizeHandlePointerDown;
   const groupResizeAccentClass =
     isResizing || isSelected ? 'bg-sky-300/80' : 'bg-slate-300/70';
   const groupResizeHandleClass =
@@ -153,16 +154,18 @@ function FileCanvasNodeComponent({
       className={cn(
         NODE_CARD_CLASS,
         'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
-        meta.className,
+        showOverlayGroupShell ? 'border-transparent bg-transparent shadow-none' : meta.className,
         isGroupNode && 'overflow-hidden',
         isDragging && 'z-40 transition-none',
-        isDragging && isGroupNode && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
+        isDragging &&
+          isGroupNode &&
+          (showOverlayGroupShell ? 'shadow-none' : 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]'),
         isDragging && !isGroupNode && 'shadow-none',
         !isDragging &&
           'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
         snapPreviewPosition && isDragging && 'opacity-94',
-        isSelected && 'border-slate-900/25 ring-2 ring-slate-900/8',
-        isResizing && 'border-sky-300/85 ring-2 ring-sky-200/80',
+        isSelected && !showOverlayGroupShell && 'border-slate-900/25 ring-2 ring-slate-900/8',
+        isResizing && !showOverlayGroupShell && 'border-sky-300/85 ring-2 ring-sky-200/80',
       )}
       style={{
         width: dimensions.width,
@@ -172,30 +175,34 @@ function FileCanvasNodeComponent({
     >
       {isGroupNode ? (
         <>
-          <span
-            aria-hidden="true"
-            className={cn(
-              'pointer-events-none absolute bottom-[18px] transition-colors duration-150',
-              groupResizeAccentClass,
-            )}
-            style={{
-              left: GROUP_CONTENT_INSET_LEFT,
-              right: GROUP_CONTENT_INSET_RIGHT + 22,
-              height: 1,
-            }}
-          />
-          <span
-            aria-hidden="true"
-            className={cn(
-              'pointer-events-none absolute right-[18px] transition-colors duration-150',
-              groupResizeAccentClass,
-            )}
-            style={{
-              top: GROUP_CONTENT_INSET_TOP,
-              bottom: GROUP_CONTENT_INSET_BOTTOM + 22,
-              width: 1,
-            }}
-          />
+          {!showOverlayGroupShell ? (
+            <>
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'pointer-events-none absolute bottom-[18px] transition-colors duration-150',
+                  groupResizeAccentClass,
+                )}
+                style={{
+                  left: GROUP_CONTENT_INSET_LEFT,
+                  right: GROUP_CONTENT_INSET_RIGHT + 22,
+                  height: 1,
+                }}
+              />
+              <span
+                aria-hidden="true"
+                className={cn(
+                  'pointer-events-none absolute right-[18px] transition-colors duration-150',
+                  groupResizeAccentClass,
+                )}
+                style={{
+                  top: GROUP_CONTENT_INSET_TOP,
+                  bottom: GROUP_CONTENT_INSET_BOTTOM + 22,
+                  width: 1,
+                }}
+              />
+            </>
+          ) : null}
           {showGroupHeader ? (
             <div className="relative z-10 h-full">
               <div

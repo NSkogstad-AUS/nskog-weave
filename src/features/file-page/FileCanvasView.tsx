@@ -94,8 +94,9 @@ type SharedOuterSnapTarget = {
 
 type ResizeState = {
   nodeId: string;
-  axis: 'x' | 'y' | 'both';
+  axis: 'x' | 'y' | 'both' | 'top-left';
   origin: Point;
+  basePosition: Point;
   baseSize: FilePageNode['size'];
   minimumSize: FilePageNode['size'];
 };
@@ -508,6 +509,7 @@ export function FileCanvasView({
         const widthChromeInset = 0;
         const heightChromeInset = 0;
         const currentSize = draftSizesRef.current[resizingNode.id] ?? resizingNode.size;
+        const isTopLeftResize = liveResizeState.axis === 'top-left';
         const candidateSize = {
           widthUnits:
             liveResizeState.axis === 'y'
@@ -515,7 +517,9 @@ export function FileCanvasView({
               : getUnitsForDimension(
                   baseDimensions.width -
                     widthChromeInset +
-                    (localPoint.x - liveResizeState.origin.x),
+                    (isTopLeftResize
+                      ? liveResizeState.origin.x - localPoint.x
+                      : localPoint.x - liveResizeState.origin.x),
                   SLOT_STEP_X,
                   liveResizeState.minimumSize.widthUnits,
                 ),
@@ -525,7 +529,9 @@ export function FileCanvasView({
               : getUnitsForDimension(
                   baseDimensions.height -
                     heightChromeInset +
-                    (localPoint.y - liveResizeState.origin.y),
+                    (isTopLeftResize
+                      ? liveResizeState.origin.y - localPoint.y
+                      : localPoint.y - liveResizeState.origin.y),
                   SLOT_STEP_Y,
                   liveResizeState.minimumSize.heightUnits,
                 ),
@@ -541,18 +547,48 @@ export function FileCanvasView({
             heightUnits: candidateSize.heightUnits,
           },
         ];
-        const nextSize = fallbackSizes.find(
-          (size) =>
-            areSizesEqual(size, currentSize) || canResizeNode(resizingNode.id, size),
-        );
+        const nextSize = fallbackSizes.find((size) => {
+          const nextPosition =
+            isTopLeftResize
+              ? {
+                  x:
+                    liveResizeState.basePosition.x +
+                    (baseDimensions.width - getNodeDimensionsForKind(size, resizingNode.kind).width),
+                  y:
+                    liveResizeState.basePosition.y +
+                    (baseDimensions.height - getNodeDimensionsForKind(size, resizingNode.kind).height),
+                }
+              : liveResizeState.basePosition;
+
+          return (
+            areSizesEqual(size, currentSize) ||
+            canResizeNode(resizingNode.id, size, nextPosition)
+          );
+        });
 
         if (!nextSize || areSizesEqual(nextSize, currentSize)) {
           return;
         }
 
+        const nextPosition =
+          isTopLeftResize
+            ? {
+                x:
+                  liveResizeState.basePosition.x +
+                  (baseDimensions.width - getNodeDimensionsForKind(nextSize, resizingNode.kind).width),
+                y:
+                  liveResizeState.basePosition.y +
+                  (baseDimensions.height - getNodeDimensionsForKind(nextSize, resizingNode.kind).height),
+              }
+            : liveResizeState.basePosition;
+
         setDraftSizes((current) => ({
           ...current,
           [resizingNode.id]: nextSize,
+        }));
+        setDraftPositions((current) => ({
+          ...current,
+          [resizingNode.id]: nextPosition,
         }));
         return;
       }
@@ -1050,8 +1086,16 @@ export function FileCanvasView({
 
       if (liveResizeState) {
         const nextSize = draftSizesRef.current[liveResizeState.nodeId] ?? liveResizeState.baseSize;
+        const nextPosition =
+          draftPositionsRef.current[liveResizeState.nodeId] ?? liveResizeState.basePosition;
 
         if (!areSizesEqual(nextSize, liveResizeState.baseSize)) {
+          if (!arePointsEqual(nextPosition, liveResizeState.basePosition)) {
+            onMoveNodesRef.current({
+              [liveResizeState.nodeId]: nextPosition,
+            });
+          }
+
           onResizeNodeRef.current(liveResizeState.nodeId, nextSize);
         }
 
@@ -1909,43 +1953,27 @@ export function FileCanvasView({
       }
 
       const targetBounds = getSnapSpaceBounds(targetNode, targetPosition);
+      const targetSnapPosition = getSnapSpacePosition(targetNode, targetPosition);
+      const targetSize = draftSizesRef.current[nearbyTarget.nodeId] ?? targetNode.size;
       const triggerSize = draftSizesRef.current[triggerNodeId] ?? triggerNode.size;
-      const triggerDimensions = getNodeDimensionsForKind(triggerSize, triggerNode.kind);
       const offsetX = triggerBaseSnapPosition.x - baseAnchorSnapPosition.x;
       const offsetY = triggerBaseSnapPosition.y - baseAnchorSnapPosition.y;
       const needsEdgeCandidates =
         triggerNode.kind === 'group' || targetNode.kind === 'group';
-      const buildAxisCandidates = (
-        start: number,
-        end: number,
-        step: number,
-      ) => {
-        if (end <= start) {
-          return [start];
-        }
-
-        const values: number[] = [];
-
-        for (let value = start; value <= end; value += step) {
-          values.push(value);
-        }
-
-        if (values[values.length - 1] !== end) {
-          values.push(end);
-        }
-
-        return values;
-      };
-      const horizontalAnchorCandidates = buildAxisCandidates(
-        targetBounds.left - offsetX,
-        targetBounds.right - triggerDimensions.width - offsetX,
+      const buildSlotCandidates = (startOffset: number, endOffset: number, step: number) =>
+        Array.from({ length: endOffset - startOffset + 1 }, (_, index) =>
+          (startOffset + index) * step,
+        );
+      const horizontalAnchorCandidates = buildSlotCandidates(
+        -(triggerSize.widthUnits - 1),
+        targetSize.widthUnits - 1,
         SLOT_STEP_X,
-      );
-      const verticalAnchorCandidates = buildAxisCandidates(
-        targetBounds.top - offsetY,
-        targetBounds.bottom - triggerDimensions.height - offsetY,
+      ).map((offset) => targetSnapPosition.x + offset - offsetX);
+      const verticalAnchorCandidates = buildSlotCandidates(
+        -(triggerSize.heightUnits - 1),
+        targetSize.heightUnits - 1,
         SLOT_STEP_Y,
-      );
+      ).map((offset) => targetSnapPosition.y + offset - offsetY);
 
       return {
         gridOrigin: {
@@ -1956,18 +1984,18 @@ export function FileCanvasView({
           ? [
               ...horizontalAnchorCandidates.map((x) => ({
                 x,
-                y: targetBounds.top - triggerDimensions.height - SLOT_GAP_Y - offsetY,
+                y: targetSnapPosition.y - triggerSize.heightUnits * SLOT_STEP_Y - offsetY,
               })),
               ...horizontalAnchorCandidates.map((x) => ({
                 x,
-                y: targetBounds.bottom + SLOT_GAP_Y - offsetY,
+                y: targetSnapPosition.y + targetSize.heightUnits * SLOT_STEP_Y - offsetY,
               })),
               ...verticalAnchorCandidates.map((y) => ({
-                x: targetBounds.left - triggerDimensions.width - SLOT_GAP_X - offsetX,
+                x: targetSnapPosition.x - triggerSize.widthUnits * SLOT_STEP_X - offsetX,
                 y,
               })),
               ...verticalAnchorCandidates.map((y) => ({
-                x: targetBounds.right + SLOT_GAP_X - offsetX,
+                x: targetSnapPosition.x + targetSize.widthUnits * SLOT_STEP_X - offsetX,
                 y,
               })),
             ]
@@ -2192,15 +2220,21 @@ export function FileCanvasView({
     });
   }, []);
 
-  const canResizeNode = useCallback((nodeId: string, size: FilePageNode['size']) => {
+  const canResizeNode = useCallback((
+    nodeId: string,
+    size: FilePageNode['size'],
+    positionOverride?: Point,
+  ) => {
     const resizingNode = getNodeById(nodeId);
 
     if (!resizingNode) {
       return false;
     }
 
+    const resizedPosition = positionOverride ?? resizingNode.position;
+
     if (resizingNode.kind === 'group') {
-      const resizedContentBounds = getGroupContentBounds(resizingNode.position, size);
+      const resizedContentBounds = getGroupContentBounds(resizedPosition, size);
       const childFitsWithinGroup = nodesRef.current
         .filter((node) => node.groupId === resizingNode.id)
         .every((node) => {
@@ -2221,7 +2255,7 @@ export function FileCanvasView({
       }
     }
 
-    const resizedBounds = getNodeBoundsWithSize(resizingNode.position, size, resizingNode.kind);
+    const resizedBounds = getNodeBoundsWithSize(resizedPosition, size, resizingNode.kind);
 
     return !nodesRef.current
       .filter((node) => node.id !== nodeId)
@@ -2384,7 +2418,7 @@ export function FileCanvasView({
   const beginNodeResize = useCallback((
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
-    axis: 'x' | 'y' | 'both',
+    axis: 'x' | 'y' | 'both' | 'top-left',
   ) => {
     if (event.button !== 0) {
       return;
@@ -2403,6 +2437,7 @@ export function FileCanvasView({
       nodeId: node.id,
       axis,
       origin: localPoint,
+      basePosition: draftPositionsRef.current[node.id] ?? node.position,
       baseSize: draftSizesRef.current[node.id] ?? node.size,
       minimumSize: getMinimumNodeSize(node),
     };
@@ -2414,6 +2449,10 @@ export function FileCanvasView({
     setDraftSizes((current) => ({
       ...current,
       [node.id]: nextResizeState.baseSize,
+    }));
+    setDraftPositions((current) => ({
+      ...current,
+      [node.id]: nextResizeState.basePosition,
     }));
   }, [getLocalPoint, selectSingleNode]);
 
@@ -2431,6 +2470,15 @@ export function FileCanvasView({
     const isResizing = resizeState?.nodeId === node.id;
     const resizeAccentClass =
       isResizing || isSelected ? 'bg-sky-300/80' : 'bg-slate-300/70';
+    const resizeAxis = isResizing ? resizeState?.axis : null;
+    const topAccentClass =
+      resizeAxis === 'top-left' ? 'bg-sky-300/80' : 'bg-slate-300/80';
+    const leftAccentClass =
+      resizeAxis === 'top-left' ? 'bg-sky-300/80' : resizeAccentClass;
+    const rightAccentClass =
+      resizeAxis === 'top-left' ? 'bg-slate-300/70' : resizeAccentClass;
+    const bottomAccentClass =
+      resizeAxis === 'top-left' ? 'bg-slate-300/70' : resizeAccentClass;
     const resizeHandleClass =
       isResizing || isSelected
         ? 'border-sky-300/80 bg-sky-50/95 text-sky-600 shadow-[0_10px_24px_-16px_rgba(14,165,233,0.55)]'
@@ -2450,12 +2498,12 @@ export function FileCanvasView({
       >
         <div
           className={cn(
-            'absolute inset-0 rounded-2xl border bg-transparent shadow-[0_10px_26px_-22px_rgba(15,23,42,0.28)]',
+            'absolute inset-0 rounded-2xl border bg-transparent shadow-[0_10px_26px_-22px_rgba(15,23,42,0.28)] transition-colors duration-150',
             isResizing
               ? 'border-sky-300/85 ring-2 ring-sky-200/80'
               : isSelected
                 ? 'border-slate-900/25 ring-2 ring-slate-900/8'
-                : 'border-slate-400/95',
+                : 'border-slate-300/85',
           )}
         />
         <div className="absolute inset-x-0 top-0 rounded-t-2xl bg-[#fffbf1]/95" style={{ height: topShellHeight }} />
@@ -2465,49 +2513,61 @@ export function FileCanvasView({
         <div className="absolute left-4 right-4 top-4" style={{ height: GROUP_HEADER_HEIGHT - 16 }}>
           <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
           <span
-            className="absolute bottom-0 h-px bg-slate-300/80"
+            className={cn('absolute bottom-0 h-px transition-colors duration-150', topAccentClass)}
             style={{
-              left: GROUP_TITLE_UNDERLINE_INSET,
-              right: GROUP_TITLE_UNDERLINE_INSET,
+              left: 52,
+              right: 52,
             }}
           />
         </div>
         <span
-          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          className={cn('absolute transition-colors duration-150', bottomAccentClass)}
           style={{
-            left: leftShellWidth,
-            right: leftShellWidth + 22,
+            left: 52,
+            right: 52,
             bottom: 18,
             height: 1,
           }}
         />
         <span
-          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          className={cn('absolute transition-colors duration-150', leftAccentClass)}
           style={{
-            top: topShellHeight,
-            bottom: bottomShellHeight + 22,
+            top: topShellHeight + 18,
+            bottom: 52,
             left: 18,
             width: 1,
           }}
         />
         <span
-          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          className={cn('absolute transition-colors duration-150', rightAccentClass)}
           style={{
-            top: topShellHeight,
-            bottom: bottomShellHeight + 22,
+            top: topShellHeight + 18,
+            bottom: 52,
             right: 18,
             width: 1,
           }}
         />
         <span
           role="presentation"
+          onPointerDown={(event) => beginNodeResize(event, node, 'top-left')}
+          className={cn(
+            'pointer-events-auto absolute left-2 top-11 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
+            resizeHandleClass,
+          )}
+        >
+          <span className="size-3 rounded-tl-[7px] border-l-2 border-t-2 border-current" />
+        </span>
+        <span
+          role="presentation"
           onPointerDown={(event) => beginNodeResize(event, node, 'x')}
-          className="pointer-events-auto absolute inset-y-0 right-0 w-5 cursor-ew-resize"
+          className="pointer-events-auto absolute right-0 top-0 w-5 cursor-ew-resize"
+          style={{ bottom: 44 }}
         />
         <span
           role="presentation"
           onPointerDown={(event) => beginNodeResize(event, node, 'y')}
-          className="pointer-events-auto absolute bottom-0 left-0 right-0 h-5 cursor-ns-resize"
+          className="pointer-events-auto absolute bottom-0 left-0 h-5 cursor-ns-resize"
+          style={{ right: 44 }}
         />
         <span
           role="presentation"
