@@ -29,8 +29,6 @@ import {
   GROUP_HEADER_HEIGHT,
   GROUP_TITLE_UNDERLINE_INSET,
   NODE_CARD_CLASS,
-  SLOT_STEP_X,
-  SLOT_STEP_Y,
 } from './constants';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
@@ -173,19 +171,6 @@ function FileCanvasNodeComponent({
     >
       {isGroupNode ? (
         <>
-          <span
-            aria-hidden="true"
-            className="pointer-events-none absolute opacity-70"
-            style={{
-              left: GROUP_CONTENT_INSET_X,
-              right: GROUP_CONTENT_INSET_X,
-              top: GROUP_CONTENT_INSET_TOP,
-              bottom: GROUP_CONTENT_INSET_BOTTOM,
-              backgroundImage:
-                'linear-gradient(to right, rgba(148,163,184,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.14) 1px, transparent 1px)',
-              backgroundSize: `${SLOT_STEP_X}px ${SLOT_STEP_Y}px`,
-            }}
-          />
           <span
             aria-hidden="true"
             className={cn(
