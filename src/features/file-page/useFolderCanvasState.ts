@@ -7,7 +7,15 @@ import {
   type WorkspaceFile,
   type WorkspaceFolder,
 } from '@/data/sidebarNavigation';
-import { GROUP_MIN_GRID_UNITS, SLOT_STEP_X, SLOT_STEP_Y } from './canvas/constants';
+import {
+  GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_RIGHT,
+  GROUP_CONTENT_INSET_TOP,
+  GROUP_MIN_GRID_UNITS,
+  SLOT_STEP_X,
+  SLOT_STEP_Y,
+} from './canvas/constants';
 import {
   clampNodePositionToBounds,
   clampToCanvas,
@@ -187,17 +195,32 @@ function getExpandedGroupSize(
         ),
       };
     },
-    getNodeDimensionsForKind(currentSize),
+    (() => {
+      const currentContentBounds = getGroupContentBounds(basePosition, currentSize);
+
+      return {
+        width: currentContentBounds.right - currentContentBounds.left,
+        height: currentContentBounds.bottom - currentContentBounds.top,
+      };
+    })(),
   );
 
   return {
     widthUnits: Math.max(
       currentSize.widthUnits,
-      getUnitsForDimension(requiredDimensions.width, SLOT_STEP_X, GROUP_MIN_GRID_UNITS),
+      getUnitsForDimension(
+        requiredDimensions.width + GROUP_CONTENT_INSET_LEFT + GROUP_CONTENT_INSET_RIGHT,
+        SLOT_STEP_X,
+        GROUP_MIN_GRID_UNITS,
+      ),
     ),
     heightUnits: Math.max(
       currentSize.heightUnits,
-      getUnitsForDimension(requiredDimensions.height, SLOT_STEP_Y, GROUP_MIN_GRID_UNITS),
+      getUnitsForDimension(
+        requiredDimensions.height + GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM,
+        SLOT_STEP_Y,
+        GROUP_MIN_GRID_UNITS,
+      ),
     ),
   };
 }

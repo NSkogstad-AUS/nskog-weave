@@ -24,8 +24,9 @@ import {
 } from '@/components/animate-ui/components/animate/tooltip';
 import {
   GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
-  GROUP_CONTENT_INSET_X,
   GROUP_HEADER_HEIGHT,
   GROUP_TITLE_UNDERLINE_INSET,
   NODE_CARD_CLASS,
@@ -178,8 +179,8 @@ function FileCanvasNodeComponent({
               groupResizeAccentClass,
             )}
             style={{
-              left: GROUP_CONTENT_INSET_X,
-              right: GROUP_CONTENT_INSET_X + 22,
+              left: GROUP_CONTENT_INSET_LEFT,
+              right: GROUP_CONTENT_INSET_RIGHT + 22,
               height: 1,
             }}
           />

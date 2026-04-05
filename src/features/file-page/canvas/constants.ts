@@ -1,5 +1,6 @@
 export const GRID_SIZE = 64;
 export const CANVAS_PADDING = 32;
+export const CANVAS_WORLD_LIMIT = 200000;
 export const NODE_UNIT = 96;
 export const SLOT_GAP_X = 16;
 export const SLOT_GAP_Y = 16;
@@ -8,7 +9,8 @@ export const SLOT_STEP_Y = NODE_UNIT + SLOT_GAP_Y;
 export const COLLISION_GAP = 10;
 export const MAX_NODE_GRID_UNITS = 12;
 export const GROUP_MIN_GRID_UNITS = 2;
-export const GROUP_CONTENT_INSET_X = 20;
+export const GROUP_CONTENT_INSET_LEFT = 20;
+export const GROUP_CONTENT_INSET_RIGHT = 0;
 export const GROUP_HEADER_HEIGHT = 56;
 export const GROUP_CONTENT_INSET_TOP = GROUP_HEADER_HEIGHT + 6;
 export const GROUP_CONTENT_INSET_BOTTOM = 18;

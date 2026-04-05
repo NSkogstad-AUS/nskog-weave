@@ -1,9 +1,11 @@
 import {
   CANVAS_PADDING,
+  CANVAS_WORLD_LIMIT,
   COLLISION_GAP,
   GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
-  GROUP_CONTENT_INSET_X,
   MAX_NODE_GRID_UNITS,
   NODE_UNIT,
   SLOT_STEP_X,
@@ -13,7 +15,7 @@ import type { FilePageNode, FilePageNodeSize } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 export function clampToCanvas(value: number) {
-  return Math.max(CANVAS_PADDING, value);
+  return Math.max(-CANVAS_WORLD_LIMIT, Math.min(CANVAS_WORLD_LIMIT, value));
 }
 
 export function clampGridUnits(value: number, minimum = 1, maximum = MAX_NODE_GRID_UNITS) {
@@ -63,18 +65,9 @@ export function getNodeDimensionsForKind(
   size: FilePageNodeSize,
   kind: FilePageNode['kind'] = 'element',
 ) {
-  const baseDimensions = {
+  return {
     width: NODE_UNIT + (size.widthUnits - 1) * SLOT_STEP_X,
     height: NODE_UNIT + (size.heightUnits - 1) * SLOT_STEP_Y,
-  };
-
-  if (kind !== 'group') {
-    return baseDimensions;
-  }
-
-  return {
-    width: baseDimensions.width + GROUP_CONTENT_INSET_X * 2,
-    height: baseDimensions.height + GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM,
   };
 }
 
@@ -84,7 +77,7 @@ export function getNodeBoundsWithSize(
   kind: FilePageNode['kind'] = 'element',
 ) {
   const dimensions = getNodeDimensionsForKind(size, kind);
-  const left = kind === 'group' ? position.x - GROUP_CONTENT_INSET_X : position.x;
+  const left = kind === 'group' ? position.x - GROUP_CONTENT_INSET_LEFT : position.x;
   const top = kind === 'group' ? position.y - GROUP_CONTENT_INSET_TOP : position.y;
 
   return {
@@ -96,7 +89,17 @@ export function getNodeBoundsWithSize(
 }
 
 export function getGroupContentBounds(position: Point, size: FilePageNodeSize) {
-  const innerDimensions = getNodeDimensions(size);
+  const outerDimensions = getNodeDimensionsForKind(size, 'group');
+  const innerDimensions = {
+    width: Math.max(
+      0,
+      outerDimensions.width - GROUP_CONTENT_INSET_LEFT - GROUP_CONTENT_INSET_RIGHT,
+    ),
+    height: Math.max(
+      0,
+      outerDimensions.height - GROUP_CONTENT_INSET_TOP - GROUP_CONTENT_INSET_BOTTOM,
+    ),
+  };
 
   return {
     left: position.x,
@@ -200,8 +203,11 @@ function buildCandidateAnchors(origin: Point, gridOrigin: Point = { x: CANVAS_PA
 
 interface ResolveSnapOptions {
   anchorGridOrigin?: Point;
+  preferredAnchorCandidates?: Point[];
   constrainPosition?: (position: Point, nodeId: string) => Point | null;
   getNodeKind?: (nodeId: string) => FilePageNode['kind'] | undefined;
+  toSnapPosition?: (position: Point, nodeId: string) => Point;
+  fromSnapPosition?: (position: Point, nodeId: string) => Point;
 }
 
 export function resolveSnapPositions(
@@ -214,15 +220,24 @@ export function resolveSnapPositions(
   options?: ResolveSnapOptions,
 ) {
   const anchorId = dragNodeIds[0];
-  const anchorBasePosition = basePositions[anchorId];
-  const anchorDesiredPosition = desiredPositions[anchorId];
+  const anchorBasePositionRaw = basePositions[anchorId];
+  const anchorDesiredPositionRaw = desiredPositions[anchorId];
+  const anchorBasePosition =
+    anchorBasePositionRaw &&
+    (options?.toSnapPosition?.(anchorBasePositionRaw, anchorId) ?? anchorBasePositionRaw);
+  const anchorDesiredPosition =
+    anchorDesiredPositionRaw &&
+    (options?.toSnapPosition?.(anchorDesiredPositionRaw, anchorId) ?? anchorDesiredPositionRaw);
 
   if (!anchorBasePosition || !anchorDesiredPosition) {
     return desiredPositions;
   }
 
   const relativeOffsets = dragNodeIds.reduce<Record<string, Point>>((offsets, nodeId) => {
-    const basePosition = basePositions[nodeId];
+    const basePositionRaw = basePositions[nodeId];
+    const basePosition =
+      basePositionRaw &&
+      (options?.toSnapPosition?.(basePositionRaw, nodeId) ?? basePositionRaw);
 
     if (basePosition) {
       offsets[nodeId] = {
@@ -238,17 +253,29 @@ export function resolveSnapPositions(
     bounds: getNodeBoundsWithSize(node.position, node.size, node.kind),
   }));
 
-  for (const anchorCandidate of buildCandidateAnchors(
-    anchorDesiredPosition,
-    options?.anchorGridOrigin,
-  )) {
+  const preferredAnchorCandidates = [...(options?.preferredAnchorCandidates ?? [])].sort(
+    (left, right) =>
+      Math.hypot(left.x - anchorDesiredPosition.x, left.y - anchorDesiredPosition.y) -
+      Math.hypot(right.x - anchorDesiredPosition.x, right.y - anchorDesiredPosition.y),
+  );
+  const anchorCandidates = [
+    ...preferredAnchorCandidates,
+    ...buildCandidateAnchors(
+      anchorDesiredPosition,
+      options?.anchorGridOrigin,
+    ),
+  ];
+
+  for (const anchorCandidate of anchorCandidates) {
     let hasInvalidCandidate = false;
     const candidatePositions = dragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
       const offset = relativeOffsets[nodeId] ?? { x: 0, y: 0 };
-      const unclampedPosition = {
+      const unclampedSnapPosition = {
         x: anchorCandidate.x + offset.x,
         y: anchorCandidate.y + offset.y,
       };
+      const unclampedPosition =
+        options?.fromSnapPosition?.(unclampedSnapPosition, nodeId) ?? unclampedSnapPosition;
       const constrainedPosition = options?.constrainPosition?.(unclampedPosition, nodeId);
 
       if (constrainedPosition === null) {

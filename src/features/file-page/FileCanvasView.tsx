@@ -11,13 +11,17 @@ import {
 import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
+  CANVAS_WORLD_LIMIT,
   GRID_SIZE,
   GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
-  GROUP_CONTENT_INSET_X,
   GROUP_HEADER_HEIGHT,
   GROUP_MIN_GRID_UNITS,
   GROUP_TITLE_UNDERLINE_INSET,
+  SLOT_GAP_X,
+  SLOT_GAP_Y,
   SLOT_STEP_X,
   SLOT_STEP_Y,
 } from './canvas/constants';
@@ -76,6 +80,16 @@ type MarqueeState = {
 type PanState = {
   origin: Point;
   baseViewport: Point;
+};
+
+type OuterSnapTarget = {
+  nodeId: string;
+  origin: Point;
+};
+
+type SharedOuterSnapTarget = {
+  gridOrigin: Point;
+  preferredAnchorCandidates?: Point[];
 };
 
 type ResizeState = {
@@ -491,11 +505,8 @@ export function FileCanvasView({
           liveResizeState.baseSize,
           resizingNode.kind,
         );
-        const widthChromeInset = resizingNode.kind === 'group' ? GROUP_CONTENT_INSET_X * 2 : 0;
-        const heightChromeInset =
-          resizingNode.kind === 'group'
-            ? GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM
-            : 0;
+        const widthChromeInset = 0;
+        const heightChromeInset = 0;
         const currentSize = draftSizesRef.current[resizingNode.id] ?? resizingNode.size;
         const candidateSize = {
           widthUnits:
@@ -561,7 +572,7 @@ export function FileCanvasView({
       }
 
       if (liveDragState) {
-        const rawNextPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
+        let rawNextPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
           (positions, nodeId) => {
             const basePosition = liveDragState.basePositions[nodeId];
             const nextX = basePosition.x + (localPoint.x - liveDragState.origin.x);
@@ -576,6 +587,62 @@ export function FileCanvasView({
           },
           {},
         );
+        const dragNodeIdSet = new Set(liveDragState.nodeIds);
+        const draggedBranchNodeIds = liveDragState.nodeIds.reduce<Map<string, string[]>>(
+          (branches, nodeId) => {
+            let currentNode = getNodeById(nodeId);
+            let branchRootId = nodeId;
+
+            while (currentNode?.parentNodeId && dragNodeIdSet.has(currentNode.parentNodeId)) {
+              branchRootId = currentNode.parentNodeId;
+              currentNode = getNodeById(currentNode.parentNodeId);
+            }
+
+            const existingNodeIds = branches.get(branchRootId) ?? [];
+            existingNodeIds.push(nodeId);
+            branches.set(branchRootId, existingNodeIds);
+            return branches;
+          },
+          new Map(),
+        );
+
+        draggedBranchNodeIds.forEach((branchNodeIds) => {
+          const branchGroupId = branchNodeIds.reduce<string | null>((groupId, nodeId) => {
+            if (groupId) {
+              return groupId;
+            }
+
+            return getNodeById(nodeId)?.groupId ?? null;
+          }, null);
+
+          if (!branchGroupId) {
+            return;
+          }
+
+          const groupNode = getNodeById(branchGroupId);
+          const groupContentBounds = getGroupBounds(branchGroupId, rawNextPositions);
+
+          if (!groupNode || !groupContentBounds) {
+            return;
+          }
+
+          const groupOuterBounds = getNodeBoundsWithSize(
+            rawNextPositions[groupNode.id] ?? groupNode.position,
+            draftSizesRef.current[groupNode.id] ?? groupNode.size,
+            groupNode.kind,
+          );
+          const layoutBounds = getLayoutBounds(rawNextPositions, branchNodeIds);
+
+          if (!layoutBounds || !rectanglesIntersect(layoutBounds, groupOuterBounds)) {
+            return;
+          }
+
+          rawNextPositions = constrainNodeLayoutToBounds(
+            rawNextPositions,
+            branchNodeIds,
+            groupContentBounds,
+          );
+        });
         const nextDraftPositions = { ...rawNextPositions };
         const candidateGroupIds = new Map<string, string | null>();
 
@@ -639,6 +706,53 @@ export function FileCanvasView({
           candidateGroupIds.set(nodeId, nextGroupId);
 
         });
+        const draggedBranchNodeIdsByGroup = liveDragState.nodeIds.reduce<Map<string, string[]>>(
+          (branches, nodeId) => {
+            let currentNode = getNodeById(nodeId);
+            let branchRootId = nodeId;
+
+            while (currentNode?.parentNodeId && dragNodeIdSet.has(currentNode.parentNodeId)) {
+              branchRootId = currentNode.parentNodeId;
+              currentNode = getNodeById(currentNode.parentNodeId);
+            }
+
+            const existingNodeIds = branches.get(branchRootId) ?? [];
+            existingNodeIds.push(nodeId);
+            branches.set(branchRootId, existingNodeIds);
+            return branches;
+          },
+          new Map(),
+        );
+
+        draggedBranchNodeIdsByGroup.forEach((branchNodeIds) => {
+          const branchGroupId = branchNodeIds.reduce<string | null>((groupId, nodeId) => {
+            if (groupId) {
+              return groupId;
+            }
+
+            const movingNode = getNodeById(nodeId);
+            if (candidateGroupIds.has(nodeId)) {
+              return candidateGroupIds.get(nodeId) ?? null;
+            }
+
+            return movingNode?.groupId ?? null;
+          }, null);
+
+          if (!branchGroupId) {
+            return;
+          }
+
+          const groupBounds = getGroupBounds(branchGroupId, rawNextPositions);
+          const layoutBounds = getLayoutBounds(rawNextPositions, branchNodeIds);
+
+          if (!groupBounds || !layoutBounds || !rectanglesIntersect(layoutBounds, groupBounds)) {
+            return;
+          }
+
+          branchNodeIds.forEach((nodeId) => {
+            candidateGroupIds.set(nodeId, branchGroupId);
+          });
+        });
         const constrainedGroupResult = constrainDraggedLayoutsToTargetGroups(
           nextDraftPositions,
           liveDragState.nodeIds,
@@ -671,21 +785,23 @@ export function FileCanvasView({
           ? getSharedGroupSnapOrigin(
               liveDragState.nodeIds,
               desiredSnapPositions,
+              liveDragState.basePositions,
               constrainedCandidateGroupIds,
               sharedDragTargetGroupId!,
             )
           : null;
-        const sharedOuterGridOrigin =
+        const sharedOuterSnapTarget =
           sharedDragTargetBounds || sharedGroupSnapOrigin
             ? null
             : getSharedOuterSnapOrigin(
                 liveDragState.nodeIds,
                 desiredSnapPositions,
+                liveDragState.basePositions,
                 constrainedCandidateGroupIds,
               );
         const nextActiveSnapPreviewIds = liveDragState.nodeIds.reduce<Record<string, boolean>>(
           (accumulator, nodeId) => {
-            accumulator[nodeId] = Boolean(sharedGroupSnapOrigin || sharedOuterGridOrigin);
+            accumulator[nodeId] = Boolean(sharedGroupSnapOrigin || sharedOuterSnapTarget);
             return accumulator;
           },
           {},
@@ -740,7 +856,7 @@ export function FileCanvasView({
             )
           : sharedDragTargetBounds
             ? desiredSnapPositions
-          : sharedOuterGridOrigin
+          : sharedOuterSnapTarget
             ? resolveSnapPositions(
                 desiredSnapPositions,
                 liveDragState.nodeIds,
@@ -756,7 +872,28 @@ export function FileCanvasView({
                   constrainedCandidateGroupIds,
                 ),
                 {
-                  anchorGridOrigin: sharedOuterGridOrigin,
+                  anchorGridOrigin: sharedOuterSnapTarget.gridOrigin,
+                  preferredAnchorCandidates: sharedOuterSnapTarget.preferredAnchorCandidates,
+                  toSnapPosition: (position, nodeId) => {
+                    const node = getNodeById(nodeId);
+
+                    return node?.kind === 'group'
+                      ? {
+                          x: position.x - GROUP_CONTENT_INSET_LEFT,
+                          y: position.y - GROUP_CONTENT_INSET_TOP,
+                        }
+                      : position;
+                  },
+                  fromSnapPosition: (position, nodeId) => {
+                    const node = getNodeById(nodeId);
+
+                    return node?.kind === 'group'
+                      ? {
+                          x: position.x + GROUP_CONTENT_INSET_LEFT,
+                          y: position.y + GROUP_CONTENT_INSET_TOP,
+                        }
+                      : position;
+                  },
                   constrainPosition: (position) => ({
                     x: clampToCanvas(position.x),
                     y: clampToCanvas(position.y),
@@ -1336,11 +1473,19 @@ export function FileCanvasView({
         return null;
       }
 
-      if (shiftX < 0 && layoutBounds.left + shiftX < CANVAS_PADDING) {
+      if (layoutBounds.left + shiftX < -CANVAS_WORLD_LIMIT) {
         return null;
       }
 
-      if (shiftY < 0 && layoutBounds.top + shiftY < CANVAS_PADDING) {
+      if (layoutBounds.top + shiftY < -CANVAS_WORLD_LIMIT) {
+        return null;
+      }
+
+      if (layoutBounds.right + shiftX > CANVAS_WORLD_LIMIT) {
+        return null;
+      }
+
+      if (layoutBounds.bottom + shiftY > CANVAS_WORLD_LIMIT) {
         return null;
       }
 
@@ -1602,10 +1747,10 @@ export function FileCanvasView({
     anchorNodeId: string,
     desiredPositions: Record<string, Point>,
     dragNodeIds: string[],
-  ) => {
+  ): OuterSnapTarget | null => {
     const anchorNode = getNodeById(anchorNodeId);
 
-    if (!anchorNode || anchorNode.kind === 'group' || anchorNode.groupId) {
+    if (!anchorNode) {
       return null;
     }
 
@@ -1614,14 +1759,13 @@ export function FileCanvasView({
     const anchorBounds = getNodeBoundsWithSize(anchorPosition, anchorSize, anchorNode.kind);
     const activationPaddingX = SLOT_STEP_X * 0.18;
     const activationPaddingY = SLOT_STEP_Y * 0.18;
-    let closestOrigin: Point | null = null;
+    let closestTarget: OuterSnapTarget | null = null;
     let closestDistance = Number.POSITIVE_INFINITY;
 
     nodesRef.current.forEach((candidate) => {
       if (
         candidate.id === anchorNodeId ||
         dragNodeIds.includes(candidate.id) ||
-        candidate.kind === 'group' ||
         candidate.groupId
       ) {
         return;
@@ -1652,34 +1796,186 @@ export function FileCanvasView({
       const distance = Math.hypot(distanceX, distanceY);
 
       if (distance <= OUTER_WIDGET_SNAP_THRESHOLD && distance < closestDistance) {
-        closestOrigin = origin;
+        closestTarget = {
+          nodeId: candidate.id,
+          origin:
+            candidate.kind === 'group'
+              ? {
+                  x: origin.x - GROUP_CONTENT_INSET_LEFT,
+                  y: origin.y - GROUP_CONTENT_INSET_TOP,
+                }
+              : origin,
+        };
         closestDistance = distance;
       }
     });
 
-    return closestOrigin;
+    return closestTarget;
   }, [getNodeById]);
 
   const getSharedOuterSnapOrigin = useCallback((
     dragNodeIds: string[],
     desiredPositions: Record<string, Point>,
+    basePositions: Record<string, Point>,
     candidateGroupIds: Map<string, string | null>,
-  ) => {
+  ): SharedOuterSnapTarget | null => {
     if (dragNodeIds.length === 0) {
       return null;
     }
 
+    const dragNodeIdSet = new Set(dragNodeIds);
+
     const canUseOuterWidgetSnap = dragNodeIds.every((nodeId) => {
       const node = getNodeById(nodeId);
+      const candidateGroupId = candidateGroupIds.get(nodeId) ?? null;
 
-      return Boolean(node && node.kind !== 'group' && !candidateGroupIds.get(nodeId));
+      return Boolean(
+        node &&
+          (!candidateGroupId || dragNodeIdSet.has(candidateGroupId)),
+      );
     });
 
     if (!canUseOuterWidgetSnap) {
       return null;
     }
 
-    return getNearbyOuterGridOrigin(dragNodeIds[0], desiredPositions, dragNodeIds);
+    const getSnapSpacePosition = (node: FilePageNode, position: Point) =>
+      node.kind === 'group'
+        ? {
+            x: position.x - GROUP_CONTENT_INSET_LEFT,
+            y: position.y - GROUP_CONTENT_INSET_TOP,
+          }
+        : position;
+
+    const getSnapSpaceBounds = (node: FilePageNode, position: Point) => {
+      const snapPosition = getSnapSpacePosition(node, position);
+      const size = draftSizesRef.current[node.id] ?? node.size;
+      const dimensions = getNodeDimensionsForKind(size, node.kind);
+
+      return {
+        left: snapPosition.x,
+        top: snapPosition.y,
+        right: snapPosition.x + dimensions.width,
+        bottom: snapPosition.y + dimensions.height,
+      };
+    };
+
+    const baseAnchorId = dragNodeIds[0];
+    const baseAnchorNode = getNodeById(baseAnchorId);
+    const baseAnchorPosition =
+      basePositions[baseAnchorId] ??
+      desiredPositions[baseAnchorId] ??
+      baseAnchorNode?.position;
+
+    if (!baseAnchorNode || !baseAnchorPosition) {
+      return null;
+    }
+
+    const baseAnchorSnapPosition = getSnapSpacePosition(baseAnchorNode, baseAnchorPosition);
+
+    for (const triggerNodeId of dragNodeIds) {
+      const nearbyTarget =
+        getNearbyOuterGridOrigin(triggerNodeId, desiredPositions, dragNodeIds);
+
+      if (!nearbyTarget) {
+        continue;
+      }
+
+      const triggerNode = getNodeById(triggerNodeId);
+      const triggerBasePosition =
+        basePositions[triggerNodeId] ??
+        desiredPositions[triggerNodeId] ??
+        triggerNode?.position;
+
+      if (!triggerNode || !triggerBasePosition) {
+        continue;
+      }
+
+      const resolvedOrigin = nearbyTarget.origin;
+      const targetNode = getNodeById(nearbyTarget.nodeId);
+      const triggerBaseSnapPosition = getSnapSpacePosition(triggerNode, triggerBasePosition);
+      const targetPosition =
+        desiredPositions[nearbyTarget.nodeId] ??
+        draftPositionsRef.current[nearbyTarget.nodeId] ??
+        targetNode?.position;
+
+      if (!targetNode || !targetPosition) {
+        return {
+          gridOrigin: {
+            x: resolvedOrigin.x - (triggerBaseSnapPosition.x - baseAnchorSnapPosition.x),
+            y: resolvedOrigin.y - (triggerBaseSnapPosition.y - baseAnchorSnapPosition.y),
+          },
+        };
+      }
+
+      const targetBounds = getSnapSpaceBounds(targetNode, targetPosition);
+      const triggerSize = draftSizesRef.current[triggerNodeId] ?? triggerNode.size;
+      const triggerDimensions = getNodeDimensionsForKind(triggerSize, triggerNode.kind);
+      const offsetX = triggerBaseSnapPosition.x - baseAnchorSnapPosition.x;
+      const offsetY = triggerBaseSnapPosition.y - baseAnchorSnapPosition.y;
+      const needsEdgeCandidates =
+        triggerNode.kind === 'group' || targetNode.kind === 'group';
+      const buildAxisCandidates = (
+        start: number,
+        end: number,
+        step: number,
+      ) => {
+        if (end <= start) {
+          return [start];
+        }
+
+        const values: number[] = [];
+
+        for (let value = start; value <= end; value += step) {
+          values.push(value);
+        }
+
+        if (values[values.length - 1] !== end) {
+          values.push(end);
+        }
+
+        return values;
+      };
+      const horizontalAnchorCandidates = buildAxisCandidates(
+        targetBounds.left - offsetX,
+        targetBounds.right - triggerDimensions.width - offsetX,
+        SLOT_STEP_X,
+      );
+      const verticalAnchorCandidates = buildAxisCandidates(
+        targetBounds.top - offsetY,
+        targetBounds.bottom - triggerDimensions.height - offsetY,
+        SLOT_STEP_Y,
+      );
+
+      return {
+        gridOrigin: {
+          x: resolvedOrigin.x - offsetX,
+          y: resolvedOrigin.y - offsetY,
+        },
+        preferredAnchorCandidates: needsEdgeCandidates
+          ? [
+              ...horizontalAnchorCandidates.map((x) => ({
+                x,
+                y: targetBounds.top - triggerDimensions.height - SLOT_GAP_Y - offsetY,
+              })),
+              ...horizontalAnchorCandidates.map((x) => ({
+                x,
+                y: targetBounds.bottom + SLOT_GAP_Y - offsetY,
+              })),
+              ...verticalAnchorCandidates.map((y) => ({
+                x: targetBounds.left - triggerDimensions.width - SLOT_GAP_X - offsetX,
+                y,
+              })),
+              ...verticalAnchorCandidates.map((y) => ({
+                x: targetBounds.right + SLOT_GAP_X - offsetX,
+                y,
+              })),
+            ]
+          : undefined,
+      };
+    }
+
+    return null;
   }, [getNearbyOuterGridOrigin, getNodeById]);
 
   const getNearbyGroupGridOrigin = useCallback((
@@ -1748,6 +2044,7 @@ export function FileCanvasView({
   const getSharedGroupSnapOrigin = useCallback((
     dragNodeIds: string[],
     desiredPositions: Record<string, Point>,
+    basePositions: Record<string, Point>,
     candidateGroupIds: Map<string, string | null>,
     groupId: string,
   ) => {
@@ -1769,7 +2066,46 @@ export function FileCanvasView({
       return null;
     }
 
-    return getNearbyGroupGridOrigin(dragNodeIds[0], desiredPositions, dragNodeIds, groupId);
+    const baseAnchorId = dragNodeIds[0];
+    const baseAnchorPosition =
+      basePositions[baseAnchorId] ??
+      desiredPositions[baseAnchorId] ??
+      getNodeById(baseAnchorId)?.position;
+
+    if (!baseAnchorPosition) {
+      return null;
+    }
+
+    for (const triggerNodeId of dragNodeIds) {
+      const nearbyOrigin: Point | null = getNearbyGroupGridOrigin(
+        triggerNodeId,
+        desiredPositions,
+        dragNodeIds,
+        groupId,
+      );
+
+      if (!nearbyOrigin) {
+        continue;
+      }
+
+      const triggerBasePosition =
+        basePositions[triggerNodeId] ??
+        desiredPositions[triggerNodeId] ??
+        getNodeById(triggerNodeId)?.position;
+
+      if (!triggerBasePosition) {
+        continue;
+      }
+
+      const resolvedOrigin = nearbyOrigin as Point;
+
+      return {
+        x: resolvedOrigin.x - (triggerBasePosition.x - baseAnchorPosition.x),
+        y: resolvedOrigin.y - (triggerBasePosition.y - baseAnchorPosition.y),
+      };
+    }
+
+    return null;
   }, [getNearbyGroupGridOrigin, getNodeById]);
 
   function resolveInsertionPosition(node: Pick<FilePageNode, 'kind' | 'size'>) {
@@ -2088,8 +2424,8 @@ export function FileCanvasView({
     const width = bounds.right - bounds.left;
     const height = bounds.bottom - bounds.top;
     const topShellHeight = GROUP_CONTENT_INSET_TOP;
-    const leftShellWidth = GROUP_CONTENT_INSET_X;
-    const rightShellWidth = GROUP_CONTENT_INSET_X;
+    const leftShellWidth = GROUP_CONTENT_INSET_LEFT;
+    const rightShellWidth = GROUP_CONTENT_INSET_RIGHT;
     const bottomShellHeight = GROUP_CONTENT_INSET_BOTTOM;
     const isSelected = selectedIdSet.has(node.id);
     const isResizing = resizeState?.nodeId === node.id;
@@ -2143,6 +2479,15 @@ export function FileCanvasView({
             right: leftShellWidth + 22,
             bottom: 18,
             height: 1,
+          }}
+        />
+        <span
+          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          style={{
+            top: topShellHeight,
+            bottom: bottomShellHeight + 22,
+            left: 18,
+            width: 1,
           }}
         />
         <span
