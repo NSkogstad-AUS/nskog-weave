@@ -148,7 +148,7 @@ export function FileCanvasNode({
         'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
         meta.className,
         isGroupNode && 'overflow-hidden',
-        isDragging && 'z-20 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
+        isDragging && 'z-40 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
         !isDragging &&
           'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
         snapPreviewPosition && isDragging && 'opacity-94',

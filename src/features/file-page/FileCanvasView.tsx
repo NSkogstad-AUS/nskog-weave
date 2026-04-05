@@ -871,16 +871,24 @@ export function FileCanvasView({
     rightNode: FilePageNode | undefined,
     candidateGroupIds?: Map<string, string | null>,
   ) {
+    const getEffectiveGroupId = (node: FilePageNode) => {
+      if (!candidateGroupIds?.has(node.id)) {
+        return node.groupId ?? null;
+      }
+
+      return candidateGroupIds.get(node.id) ?? null;
+    };
+
     if (!leftNode || !rightNode || leftNode.id === rightNode.id) {
       return false;
     }
 
     if (leftNode.kind === 'group' && rightNode.kind !== 'group') {
-      return (candidateGroupIds?.get(rightNode.id) ?? rightNode.groupId ?? null) === leftNode.id;
+      return getEffectiveGroupId(rightNode) === leftNode.id;
     }
 
     if (rightNode.kind === 'group' && leftNode.kind !== 'group') {
-      return (candidateGroupIds?.get(leftNode.id) ?? leftNode.groupId ?? null) === rightNode.id;
+      return getEffectiveGroupId(leftNode) === rightNode.id;
     }
 
     return false;
