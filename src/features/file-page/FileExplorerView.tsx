@@ -1,6 +1,7 @@
 import {
   FileTextIcon,
   FolderIcon,
+  ShapesIcon,
   SparklesIcon,
 } from 'lucide-react';
 
@@ -27,6 +28,10 @@ const NODE_META = {
   element: {
     icon: SparklesIcon,
     label: 'Element',
+  },
+  group: {
+    icon: ShapesIcon,
+    label: 'Group',
   },
 } satisfies Record<
   FilePageNode['kind'],

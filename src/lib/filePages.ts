@@ -6,7 +6,8 @@ export const FILE_PAGES_STORAGE_KEY = 'weave:file-pages:v1';
 const KIND_RANK: Record<FilePageNode['kind'], number> = {
   folder: 0,
   file: 1,
-  element: 2,
+  group: 2,
+  element: 3,
 };
 
 const ELEMENT_LABELS: Record<WorkspaceFile['kind'], string> = {
@@ -58,9 +59,19 @@ function createNode(
   return {
     id,
     label,
-    description: kind === 'element' ? 'Freeform canvas object.' : '',
+    description:
+      kind === 'element'
+        ? 'Freeform canvas object.'
+        : kind === 'group'
+          ? 'Shared region for clustering related canvas items.'
+          : '',
     kind,
-    icon: kind === 'folder' ? 'shapes' : kind === 'file' ? 'message-square' : 'sparkles',
+    icon:
+      kind === 'folder' || kind === 'group'
+        ? 'shapes'
+        : kind === 'file'
+          ? 'message-square'
+          : 'sparkles',
     position: { x, y },
     size: {
       widthUnits: 1,

@@ -1,13 +1,20 @@
-import { CANVAS_PADDING, COLLISION_GAP, NODE_UNIT, SLOT_STEP_X, SLOT_STEP_Y } from './constants';
-import type { FilePageNode } from '@/types/filePage';
+import {
+  CANVAS_PADDING,
+  COLLISION_GAP,
+  MAX_NODE_GRID_UNITS,
+  NODE_UNIT,
+  SLOT_STEP_X,
+  SLOT_STEP_Y,
+} from './constants';
+import type { FilePageNode, FilePageNodeSize } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 export function clampToCanvas(value: number) {
   return Math.max(CANVAS_PADDING, value);
 }
 
-export function clampUnits(value: number): 1 | 2 | 3 {
-  return Math.max(1, Math.min(3, value)) as 1 | 2 | 3;
+export function clampGridUnits(value: number, minimum = 1, maximum = MAX_NODE_GRID_UNITS) {
+  return Math.max(minimum, Math.min(maximum, Math.round(value)));
 }
 
 export function snapToSlotX(value: number) {
@@ -45,14 +52,14 @@ export function rectanglesIntersect(
   );
 }
 
-export function getNodeDimensions(size: FilePageNode['size']) {
+export function getNodeDimensions(size: FilePageNodeSize) {
   return {
     width: NODE_UNIT + (size.widthUnits - 1) * SLOT_STEP_X,
     height: NODE_UNIT + (size.heightUnits - 1) * SLOT_STEP_Y,
   };
 }
 
-export function getNodeBoundsWithSize(position: Point, size: FilePageNode['size']) {
+export function getNodeBoundsWithSize(position: Point, size: FilePageNodeSize) {
   const dimensions = getNodeDimensions(size);
 
   return {
@@ -73,6 +80,15 @@ export function boundsOverlap(
     left.bottom + COLLISION_GAP <= right.top ||
     left.top >= right.bottom + COLLISION_GAP
   );
+}
+
+export function getUnitsForDimension(
+  dimension: number,
+  step: number,
+  minimum = 1,
+  maximum = MAX_NODE_GRID_UNITS,
+) {
+  return clampGridUnits(1 + (dimension - NODE_UNIT) / step, minimum, maximum);
 }
 
 function buildCandidateAnchors(origin: Point) {
@@ -123,7 +139,7 @@ export function resolveSnapPositions(
   dragNodeIds: string[],
   stationaryNodes: FilePageNode[],
   basePositions: Record<string, Point>,
-  nodeSizes: Record<string, FilePageNode['size']>,
+  nodeSizes: Record<string, FilePageNodeSize>,
 ) {
   const anchorId = dragNodeIds[0];
   const anchorBasePosition = basePositions[anchorId];

@@ -2,7 +2,8 @@ import { useCallback } from 'react';
 import { FileTextIcon } from 'lucide-react';
 
 import type { WorkspaceFile, WorkspaceFolder } from '@/data/sidebarNavigation';
-import type { FilePageElementIcon, FilePageNode, FilePageView } from '@/types/filePage';
+import type { FilePageNode, FilePageNodeSize, FilePageView } from '@/types/filePage';
+import type { Point } from '@/types/geometry';
 import { FileWorkspaceHeader } from './FileWorkspaceHeader';
 import { FileCanvasView } from './FileCanvasView';
 import { FileExplorerView } from './FileExplorerView';
@@ -13,50 +14,14 @@ interface FileWorkspaceProps {
   activeFolder: WorkspaceFolder | null;
   activeView: FilePageView | null;
   locationSegments: string[];
-  nodes: Array<{
-    id: string;
-    label: string;
-    description: string;
-    kind: 'folder' | 'file' | 'element';
-    icon: FilePageElementIcon;
-    position: { x: number; y: number };
-    size: {
-      widthUnits: 1 | 2 | 3;
-      heightUnits: 1 | 2 | 3;
-    };
-  }>;
+  nodes: FilePageNode[];
   selectedNodeIds: string[];
-  onMoveNodes: (positions: Record<string, { x: number; y: number }>) => void;
-  onResizeNode: (
-    nodeId: string,
-    size: {
-      widthUnits: 1 | 2 | 3;
-      heightUnits: 1 | 2 | 3;
-    },
-  ) => void;
-  onAddNode: (node: {
-    id: string;
-    label: string;
-    description: string;
-    kind: 'folder' | 'file' | 'element';
-    icon: FilePageElementIcon;
-    position: { x: number; y: number };
-    size: {
-      widthUnits: 1 | 2 | 3;
-      heightUnits: 1 | 2 | 3;
-    };
-  }) => void;
+  onMoveNodes: (positions: Record<string, Point>) => void;
+  onResizeNode: (nodeId: string, size: FilePageNodeSize) => void;
+  onAddNode: (node: FilePageNode) => void;
   onUpdateNode: (
     nodeId: string,
-    updates: Partial<{
-      label: string;
-      description: string;
-      icon: FilePageElementIcon;
-      size: {
-        widthUnits: 1 | 2 | 3;
-        heightUnits: 1 | 2 | 3;
-      };
-    }>,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
   ) => void;
   onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;

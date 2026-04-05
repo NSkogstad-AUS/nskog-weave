@@ -1,19 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
 
 import type { WorkspaceFolder } from '@/data/sidebarNavigation';
-import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
+import type { FilePageNode, FilePageNodeSize } from '@/types/filePage';
+import type { Point } from '@/types/geometry';
 
-type NodeSize = {
-  widthUnits: 1 | 2 | 3;
-  heightUnits: 1 | 2 | 3;
-};
-
-type NodeUpdates = Partial<{
-  label: string;
-  description: string;
-  icon: FilePageElementIcon;
-  size: NodeSize;
-}>;
+type NodeUpdates = Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>;
 
 export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
   const baseNodes = useMemo<FilePageNode[]>(() => {
@@ -97,7 +88,7 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
   const activeNodes = activeFolder ? folderCanvasNodes[activeFolder.id] ?? baseNodes : [];
   const activeSelectedNodeIds = activeFolder ? folderSelectedNodeIds[activeFolder.id] ?? [] : [];
 
-  function moveNodes(positions: Record<string, { x: number; y: number }>) {
+  function moveNodes(positions: Record<string, Point>) {
     if (!activeFolder) {
       return;
     }
@@ -115,7 +106,7 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     }));
   }
 
-  function resizeNode(nodeId: string, size: NodeSize) {
+  function resizeNode(nodeId: string, size: FilePageNodeSize) {
     if (!activeFolder) {
       return;
     }

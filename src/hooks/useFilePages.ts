@@ -5,13 +5,33 @@ import {
   createDefaultFilePage,
   FILE_PAGES_STORAGE_KEY,
 } from '@/lib/filePages';
-import type { FilePageElementIcon, FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
+import {
+  FILE_PAGE_NODE_KINDS,
+  type FilePageElementIcon,
+  type FilePageNode,
+  type FilePageNodeKind,
+  type FilePageNodeSize,
+  type FilePageState,
+  type FilePageView,
+} from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 type FilePagesStore = Record<string, FilePageState>;
 
-function normalizeUnit(value: unknown): 1 | 2 | 3 {
-  return value === 2 || value === 3 ? value : 1;
+const MAX_STORED_GRID_UNITS = 12;
+
+function normalizeUnit(value: unknown, minimum = 1) {
+  if (!Number.isFinite(value)) {
+    return minimum;
+  }
+
+  return Math.max(minimum, Math.min(MAX_STORED_GRID_UNITS, Math.round(Number(value))));
+}
+
+function normalizeNodeKind(value: unknown): FilePageNodeKind | null {
+  return FILE_PAGE_NODE_KINDS.includes(value as FilePageNodeKind)
+    ? (value as FilePageNodeKind)
+    : null;
 }
 
 function normalizeIcon(value: unknown): FilePageElementIcon {
@@ -44,10 +64,12 @@ function hydrateFilePages(): FilePagesStore {
         }
 
         const nodes = page.nodes.flatMap((node) => {
+          const kind = normalizeNodeKind(node?.kind);
+
           if (
             typeof node?.id !== 'string' ||
             typeof node?.label !== 'string' ||
-            (node?.kind !== 'folder' && node?.kind !== 'file' && node?.kind !== 'element') ||
+            !kind ||
             !Number.isFinite(node?.position?.x) ||
             !Number.isFinite(node?.position?.y)
           ) {
@@ -59,7 +81,7 @@ function hydrateFilePages(): FilePagesStore {
               id: node.id,
               label: node.label,
               description: typeof node.description === 'string' ? node.description : '',
-              kind: node.kind,
+              kind,
               icon: normalizeIcon(node.icon),
               position: {
                 x: node.position.x,
@@ -160,10 +182,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   function resizeNode(
     nodeId: string,
-    size: {
-      widthUnits: 1 | 2 | 3;
-      heightUnits: 1 | 2 | 3;
-    },
+    size: FilePageNodeSize,
   ) {
     updateActivePage((page) => ({
       ...page,

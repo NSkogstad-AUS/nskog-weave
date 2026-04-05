@@ -22,6 +22,11 @@ export const NODE_META = {
     eyebrow: 'File',
     className: 'border-slate-200/80 bg-white/98',
   },
+  group: {
+    icon: ShapesIcon,
+    eyebrow: 'Group',
+    className: 'border-slate-300/85 bg-[#fffbf1]/95',
+  },
   element: {
     icon: SparklesIcon,
     eyebrow: 'Element',
