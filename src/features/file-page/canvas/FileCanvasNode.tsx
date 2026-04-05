@@ -67,6 +67,7 @@ interface FileCanvasNodeProps {
     axis: 'x' | 'y' | 'both',
   ) => void;
   onSelect: () => void;
+  showGroupHeader?: boolean;
   onStartRename: () => void;
   onStopRename: () => void;
   canResize: (size: FilePageNode['size']) => boolean;
@@ -99,6 +100,7 @@ export function FileCanvasNode({
   onPreviewResize,
   onResizeHandlePointerDown,
   onSelect,
+  showGroupHeader = true,
   onStartRename,
   onStopRename,
   canResize,
@@ -198,41 +200,43 @@ export function FileCanvasNode({
               width: 1,
             }}
           />
-          <div className="relative z-10 h-full">
-            <div
-              className="absolute left-4 right-4 top-4"
-              style={{ height: GROUP_HEADER_HEIGHT - 16 }}
-            >
-              {isEditing ? (
-                <input
-                  autoFocus
-                  value={editingLabel}
-                  onChange={(event) => onEditingLabelChange(event.target.value)}
-                  onBlur={onCommitRename}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') {
-                      onCommitRename();
-                    }
-                    if (event.key === 'Escape') {
-                      onStopRename();
-                    }
+          {showGroupHeader ? (
+            <div className="relative z-10 h-full">
+              <div
+                className="absolute left-4 right-4 top-4"
+                style={{ height: GROUP_HEADER_HEIGHT - 16 }}
+              >
+                {isEditing ? (
+                  <input
+                    autoFocus
+                    value={editingLabel}
+                    onChange={(event) => onEditingLabelChange(event.target.value)}
+                    onBlur={onCommitRename}
+                    onKeyDown={(event) => {
+                      if (event.key === 'Enter') {
+                        onCommitRename();
+                      }
+                      if (event.key === 'Escape') {
+                        onStopRename();
+                      }
+                    }}
+                    onPointerDown={(event) => event.stopPropagation()}
+                    className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
+                  />
+                ) : (
+                  <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
+                )}
+                <span
+                  aria-hidden="true"
+                  className="pointer-events-none absolute bottom-0 h-px bg-slate-300/80"
+                  style={{
+                    left: GROUP_TITLE_UNDERLINE_INSET,
+                    right: GROUP_TITLE_UNDERLINE_INSET,
                   }}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
                 />
-              ) : (
-                <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
-              )}
-              <span
-                aria-hidden="true"
-                className="pointer-events-none absolute bottom-0 h-px bg-slate-300/80"
-                style={{
-                  left: GROUP_TITLE_UNDERLINE_INSET,
-                  right: GROUP_TITLE_UNDERLINE_INSET,
-                }}
-              />
+              </div>
             </div>
-          </div>
+          ) : null}
           {showResizeHandle ? (
             <>
               <span

@@ -15,7 +15,9 @@ import {
   GROUP_CONTENT_INSET_BOTTOM,
   GROUP_CONTENT_INSET_TOP,
   GROUP_CONTENT_INSET_X,
+  GROUP_HEADER_HEIGHT,
   GROUP_MIN_GRID_UNITS,
+  GROUP_TITLE_UNDERLINE_INSET,
   SLOT_STEP_X,
   SLOT_STEP_Y,
 } from './canvas/constants';
@@ -1273,6 +1275,103 @@ export function FileCanvasView({
     }));
   }
 
+  function renderGroupShellOverlay(node: FilePageNode) {
+    const displayPosition = draftPositions[node.id] ?? node.position;
+    const displaySize = draftSizes[node.id] ?? node.size;
+    const bounds = getNodeBoundsWithSize(displayPosition, displaySize, node.kind);
+    const width = bounds.right - bounds.left;
+    const height = bounds.bottom - bounds.top;
+    const topShellHeight = GROUP_CONTENT_INSET_TOP;
+    const leftShellWidth = GROUP_CONTENT_INSET_X;
+    const rightShellWidth = GROUP_CONTENT_INSET_X;
+    const bottomShellHeight = GROUP_CONTENT_INSET_BOTTOM;
+    const isSelected = selectedIdSet.has(node.id);
+    const isResizing = resizeState?.nodeId === node.id;
+    const resizeAccentClass =
+      isResizing || isSelected ? 'bg-sky-300/80' : 'bg-slate-300/70';
+    const resizeHandleClass =
+      isResizing || isSelected
+        ? 'border-sky-300/80 bg-sky-50/95 text-sky-600 shadow-[0_10px_24px_-16px_rgba(14,165,233,0.55)]'
+        : 'border-slate-300/80 bg-white/92 text-slate-500 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)]';
+
+    return (
+      <div
+        key={`${node.id}-shell`}
+        aria-hidden="true"
+        className="pointer-events-none absolute z-30"
+        style={{
+          left: bounds.left,
+          top: bounds.top,
+          width,
+          height,
+        }}
+      >
+        <div
+          className={cn(
+            'absolute inset-0 rounded-2xl border bg-transparent',
+            isResizing
+              ? 'border-sky-300/85 ring-2 ring-sky-200/80'
+              : isSelected
+                ? 'border-slate-900/25 ring-2 ring-slate-900/8'
+                : 'border-slate-300/85',
+          )}
+        />
+        <div className="absolute inset-x-0 top-0 rounded-t-2xl bg-[#fffbf1]/95" style={{ height: topShellHeight }} />
+        <div className="absolute left-0 bg-[#fffbf1]/95" style={{ top: topShellHeight, bottom: bottomShellHeight, width: leftShellWidth }} />
+        <div className="absolute right-0 bg-[#fffbf1]/95" style={{ top: topShellHeight, bottom: bottomShellHeight, width: rightShellWidth }} />
+        <div className="absolute inset-x-0 bottom-0 rounded-b-2xl bg-[#fffbf1]/95" style={{ height: bottomShellHeight }} />
+        <div className="absolute left-4 right-4 top-4" style={{ height: GROUP_HEADER_HEIGHT - 16 }}>
+          <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
+          <span
+            className="absolute bottom-0 h-px bg-slate-300/80"
+            style={{
+              left: GROUP_TITLE_UNDERLINE_INSET,
+              right: GROUP_TITLE_UNDERLINE_INSET,
+            }}
+          />
+        </div>
+        <span
+          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          style={{
+            left: leftShellWidth,
+            right: leftShellWidth + 22,
+            bottom: 18,
+            height: 1,
+          }}
+        />
+        <span
+          className={cn('absolute transition-colors duration-150', resizeAccentClass)}
+          style={{
+            top: topShellHeight,
+            bottom: bottomShellHeight + 22,
+            right: 18,
+            width: 1,
+          }}
+        />
+        <span
+          role="presentation"
+          onPointerDown={(event) => beginNodeResize(event, node, 'x')}
+          className="pointer-events-auto absolute inset-y-0 right-0 w-5 cursor-ew-resize"
+        />
+        <span
+          role="presentation"
+          onPointerDown={(event) => beginNodeResize(event, node, 'y')}
+          className="pointer-events-auto absolute bottom-0 left-0 right-0 h-5 cursor-ns-resize"
+        />
+        <span
+          role="presentation"
+          onPointerDown={(event) => beginNodeResize(event, node, 'both')}
+          className={cn(
+            'pointer-events-auto absolute bottom-2 right-2 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
+            resizeHandleClass,
+          )}
+        >
+          <span className="size-3 rounded-br-[7px] border-b-2 border-r-2 border-current" />
+        </span>
+      </div>
+    );
+  }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -1377,11 +1476,15 @@ export function FileCanvasView({
                     : undefined
                 }
                 onSelect={() => selectSingleNode(node.id)}
+                showGroupHeader={node.kind !== 'group'}
                 onStartRename={() => startNodeRename(node)}
                 onStopRename={stopNodeRename}
               />
             );
           })}
+            {renderedNodes
+              .filter((node) => node.kind === 'group')
+              .map((node) => renderGroupShellOverlay(node))}
 
             {marqueeState ? (
               <div
