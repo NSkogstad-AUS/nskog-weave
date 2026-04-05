@@ -169,6 +169,7 @@ export function FileCanvasView({
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const contextMenuNodeIdRef = useRef<string | null>(null);
   const draftSizesRef = useRef<Record<string, FilePageNode['size']>>({});
+  const editingNodeIdRef = useRef<string | null>(null);
   const editingLabelRef = useRef('');
   const onMoveNodesRef = useRef(onMoveNodes);
   const onResizeNodeRef = useRef(onResizeNode);
@@ -371,6 +372,10 @@ export function FileCanvasView({
   useEffect(() => {
     selectedNodeIdsRef.current = selectedNodeIds;
   }, [selectedNodeIds]);
+
+  useEffect(() => {
+    editingNodeIdRef.current = editingNodeId;
+  }, [editingNodeId]);
 
   useEffect(() => {
     dragStateRef.current = dragState;
@@ -1016,6 +1021,24 @@ export function FileCanvasView({
     }
   }, [dragState, marqueeState, nodes, panState, resizeState]);
 
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || editingNodeIdRef.current) {
+        return;
+      }
+
+      draftSelectedNodeIdsRef.current = null;
+      onSelectNodesRef.current([]);
+      setDraftSelectedNodeIds(null);
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
   const getNodeById = useCallback((nodeId: string) => nodeMapRef.current.get(nodeId), []);
 
   const getLocalPoint = useCallback((clientX: number, clientY: number) => {
@@ -1054,8 +1077,9 @@ export function FileCanvasView({
       currentSelectionSet.has(node.id) && currentSelection.length > 1 ? currentSelection : [node.id];
     const nextDragNodeIds = expandDragNodeIds(nextSelectedIds);
 
-    onSelectNodesRef.current(nextSelectedIds);
-    setDraftSelectedNodeIds(nextSelectedIds);
+    onSelectNodesRef.current([]);
+    setDraftSelectedNodeIds([]);
+    draftSelectedNodeIdsRef.current = [];
     const nextDragState = {
       nodeIds: nextDragNodeIds,
       selectedNodeIds: nextSelectedIds,
@@ -2191,11 +2215,15 @@ export function FileCanvasView({
                   additive: true,
                   initialSelection: selectedNodeIds,
                 };
-                draftSelectedNodeIdsRef.current = selectedNodeIds;
-                setDraftSelectedNodeIds(selectedNodeIds);
+                onSelectNodes([]);
+                draftSelectedNodeIdsRef.current = [];
+                setDraftSelectedNodeIds([]);
                 return;
               }
 
+        onSelectNodes([]);
+              draftSelectedNodeIdsRef.current = [];
+              setDraftSelectedNodeIds([]);
         const nextPanState = {
                 origin: { x: event.clientX, y: event.clientY },
                 baseViewport: viewport,
@@ -2245,7 +2273,10 @@ export function FileCanvasView({
             {groupNodes.map((node) => {
             const displayPosition = draftPositions[node.id] ?? node.position;
             const previewPosition = snapPreviewPositions[node.id];
-            const showSnapPreview = dragNodeIdSet.has(node.id) && previewPosition;
+            const showSnapPreview =
+              activeSnapPreviewIds[node.id] &&
+              previewPosition &&
+              !arePointsEqual(previewPosition, displayPosition);
             const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
 
             return (
@@ -2370,7 +2401,10 @@ export function FileCanvasView({
             {contentNodes.map((node) => {
             const displayPosition = draftPositions[node.id] ?? node.position;
             const previewPosition = snapPreviewPositions[node.id];
-            const showSnapPreview = dragNodeIdSet.has(node.id) && previewPosition;
+            const showSnapPreview =
+              activeSnapPreviewIds[node.id] &&
+              previewPosition &&
+              !arePointsEqual(previewPosition, displayPosition);
             const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
 
             return (
