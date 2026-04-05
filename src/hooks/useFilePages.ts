@@ -65,6 +65,10 @@ function hydrateFilePages(): FilePagesStore {
 
         const nodes = page.nodes.flatMap((node) => {
           const kind = normalizeNodeKind(node?.kind);
+          const groupId =
+            typeof node?.groupId === 'string' && node.groupId.trim().length > 0
+              ? node.groupId
+              : null;
 
           if (
             typeof node?.id !== 'string' ||
@@ -81,6 +85,7 @@ function hydrateFilePages(): FilePagesStore {
               id: node.id,
               label: node.label,
               description: typeof node.description === 'string' ? node.description : '',
+              groupId,
               kind,
               icon: normalizeIcon(node.icon),
               position: {
@@ -208,7 +213,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   function updateNode(
     nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
   ) {
     updateActivePage((page) => ({
       ...page,

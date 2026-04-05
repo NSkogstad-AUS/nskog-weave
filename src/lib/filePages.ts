@@ -72,6 +72,7 @@ function createNode(
         : kind === 'file'
           ? 'message-square'
           : 'sparkles',
+    groupId: null,
     position: { x, y },
     size: {
       widthUnits: 1,

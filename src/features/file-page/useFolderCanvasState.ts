@@ -4,7 +4,7 @@ import type { WorkspaceFolder } from '@/data/sidebarNavigation';
 import type { FilePageNode, FilePageNodeSize } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
-type NodeUpdates = Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>;
+type NodeUpdates = Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>;
 
 export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
   const baseNodes = useMemo<FilePageNode[]>(() => {
@@ -71,6 +71,7 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
         return existingNode
           ? {
               ...node,
+              groupId: existingNode.groupId ?? node.groupId,
               position: existingNode.position,
               size: existingNode.size,
               icon: existingNode.icon,

@@ -1,6 +1,9 @@
 import {
   CANVAS_PADDING,
   COLLISION_GAP,
+  GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_INSET_X,
   MAX_NODE_GRID_UNITS,
   NODE_UNIT,
   SLOT_STEP_X,
@@ -53,20 +56,53 @@ export function rectanglesIntersect(
 }
 
 export function getNodeDimensions(size: FilePageNodeSize) {
-  return {
+  return getNodeDimensionsForKind(size);
+}
+
+export function getNodeDimensionsForKind(
+  size: FilePageNodeSize,
+  kind: FilePageNode['kind'] = 'element',
+) {
+  const baseDimensions = {
     width: NODE_UNIT + (size.widthUnits - 1) * SLOT_STEP_X,
     height: NODE_UNIT + (size.heightUnits - 1) * SLOT_STEP_Y,
   };
+
+  if (kind !== 'group') {
+    return baseDimensions;
+  }
+
+  return {
+    width: baseDimensions.width + GROUP_CONTENT_INSET_X * 2,
+    height: baseDimensions.height + GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM,
+  };
 }
 
-export function getNodeBoundsWithSize(position: Point, size: FilePageNodeSize) {
-  const dimensions = getNodeDimensions(size);
+export function getNodeBoundsWithSize(
+  position: Point,
+  size: FilePageNodeSize,
+  kind: FilePageNode['kind'] = 'element',
+) {
+  const dimensions = getNodeDimensionsForKind(size, kind);
+  const left = kind === 'group' ? position.x - GROUP_CONTENT_INSET_X : position.x;
+
+  return {
+    left,
+    top: position.y,
+    right: left + dimensions.width,
+    bottom: position.y + dimensions.height,
+  };
+}
+
+export function getGroupContentBounds(position: Point, size: FilePageNodeSize) {
+  const bounds = getNodeBoundsWithSize(position, size, 'group');
+  const innerDimensions = getNodeDimensions(size);
 
   return {
     left: position.x,
-    top: position.y,
-    right: position.x + dimensions.width,
-    bottom: position.y + dimensions.height,
+    top: bounds.top + GROUP_CONTENT_INSET_TOP,
+    right: position.x + innerDimensions.width,
+    bottom: bounds.top + GROUP_CONTENT_INSET_TOP + innerDimensions.height,
   };
 }
 
@@ -82,6 +118,34 @@ export function boundsOverlap(
   );
 }
 
+export function clampNodePositionToBounds(
+  position: Point,
+  size: FilePageNodeSize,
+  bounds: ReturnType<typeof getGroupContentBounds>,
+) {
+  const dimensions = getNodeDimensions(size);
+  const maxX = Math.max(bounds.left, bounds.right - dimensions.width);
+  const maxY = Math.max(bounds.top, bounds.bottom - dimensions.height);
+
+  return {
+    x: Math.min(Math.max(position.x, bounds.left), maxX),
+    y: Math.min(Math.max(position.y, bounds.top), maxY),
+  };
+}
+
+export function snapPointToBoundsGrid(
+  position: Point,
+  size: FilePageNodeSize,
+  bounds: ReturnType<typeof getGroupContentBounds>,
+) {
+  const snapped = {
+    x: bounds.left + Math.round((position.x - bounds.left) / SLOT_STEP_X) * SLOT_STEP_X,
+    y: bounds.top + Math.round((position.y - bounds.top) / SLOT_STEP_Y) * SLOT_STEP_Y,
+  };
+
+  return clampNodePositionToBounds(snapped, size, bounds);
+}
+
 export function getUnitsForDimension(
   dimension: number,
   step: number,
@@ -91,9 +155,9 @@ export function getUnitsForDimension(
   return clampGridUnits(1 + (dimension - NODE_UNIT) / step, minimum, maximum);
 }
 
-function buildCandidateAnchors(origin: Point) {
-  const baseColumn = Math.round((snapToSlotX(origin.x) - CANVAS_PADDING) / SLOT_STEP_X);
-  const baseRow = Math.round((snapToSlotY(origin.y) - CANVAS_PADDING) / SLOT_STEP_Y);
+function buildCandidateAnchors(origin: Point, gridOrigin: Point = { x: CANVAS_PADDING, y: CANVAS_PADDING }) {
+  const baseColumn = Math.round((origin.x - gridOrigin.x) / SLOT_STEP_X);
+  const baseRow = Math.round((origin.y - gridOrigin.y) / SLOT_STEP_Y);
   const candidates: Point[] = [];
   const seen = new Set<string>();
 
@@ -125,13 +189,19 @@ function buildCandidateAnchors(origin: Point) {
 
       seen.add(key);
       candidates.push({
-        x: CANVAS_PADDING + column * SLOT_STEP_X,
-        y: CANVAS_PADDING + row * SLOT_STEP_Y,
+        x: gridOrigin.x + column * SLOT_STEP_X,
+        y: gridOrigin.y + row * SLOT_STEP_Y,
       });
     });
   }
 
   return candidates;
+}
+
+interface ResolveSnapOptions {
+  anchorGridOrigin?: Point;
+  constrainPosition?: (position: Point, nodeId: string) => Point | null;
+  getNodeKind?: (nodeId: string) => FilePageNode['kind'] | undefined;
 }
 
 export function resolveSnapPositions(
@@ -140,6 +210,8 @@ export function resolveSnapPositions(
   stationaryNodes: FilePageNode[],
   basePositions: Record<string, Point>,
   nodeSizes: Record<string, FilePageNodeSize>,
+  canOverlap?: (leftNodeId: string, rightNodeId: string) => boolean,
+  options?: ResolveSnapOptions,
 ) {
   const anchorId = dragNodeIds[0];
   const anchorBasePosition = basePositions[anchorId];
@@ -161,39 +233,67 @@ export function resolveSnapPositions(
 
     return offsets;
   }, {});
-  const stationaryBounds = stationaryNodes.map((node) =>
-    getNodeBoundsWithSize(node.position, node.size),
-  );
+  const stationaryBounds = stationaryNodes.map((node) => ({
+    nodeId: node.id,
+    bounds: getNodeBoundsWithSize(node.position, node.size, node.kind),
+  }));
 
-  for (const anchorCandidate of buildCandidateAnchors(anchorDesiredPosition)) {
+  for (const anchorCandidate of buildCandidateAnchors(
+    anchorDesiredPosition,
+    options?.anchorGridOrigin,
+  )) {
+    let hasInvalidCandidate = false;
     const candidatePositions = dragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
       const offset = relativeOffsets[nodeId] ?? { x: 0, y: 0 };
+      const unclampedPosition = {
+        x: anchorCandidate.x + offset.x,
+        y: anchorCandidate.y + offset.y,
+      };
+      const constrainedPosition = options?.constrainPosition?.(unclampedPosition, nodeId);
 
-      positions[nodeId] = {
-        x: clampToCanvas(anchorCandidate.x + offset.x),
-        y: clampToCanvas(anchorCandidate.y + offset.y),
+      if (constrainedPosition === null) {
+        hasInvalidCandidate = true;
+        return positions;
+      }
+
+      positions[nodeId] = constrainedPosition ?? {
+        x: clampToCanvas(unclampedPosition.x),
+        y: clampToCanvas(unclampedPosition.y),
       };
 
       return positions;
     }, {});
-    const candidateBounds = dragNodeIds.map((nodeId) =>
-      getNodeBoundsWithSize(
+
+    if (hasInvalidCandidate) {
+      continue;
+    }
+
+    const candidateBounds = dragNodeIds.map((nodeId) => ({
+      nodeId,
+      bounds: getNodeBoundsWithSize(
         candidatePositions[nodeId],
         nodeSizes[nodeId] ?? { widthUnits: 1, heightUnits: 1 },
+        options?.getNodeKind?.(nodeId),
       ),
-    );
-    const collidesWithStationary = candidateBounds.some((bounds) =>
-      stationaryBounds.some((stationary) => boundsOverlap(bounds, stationary)),
+    }));
+    const collidesWithStationary = candidateBounds.some(({ nodeId, bounds }) =>
+      stationaryBounds.some(
+        ({ nodeId: stationaryNodeId, bounds: stationaryBoundsItem }) =>
+          !(canOverlap?.(nodeId, stationaryNodeId) ?? false) &&
+          boundsOverlap(bounds, stationaryBoundsItem),
+      ),
     );
 
     if (collidesWithStationary) {
       continue;
     }
 
-    const collidesWithinGroup = candidateBounds.some((bounds, index) =>
+    const collidesWithinGroup = candidateBounds.some(({ nodeId, bounds }, index) =>
       candidateBounds.some(
-        (otherBounds, otherIndex) =>
-          index !== otherIndex && boundsOverlap(bounds, otherBounds),
+        ({ nodeId: otherNodeId, bounds: otherBounds }, otherIndex) =>
+          index !== otherIndex &&
+          !(canOverlap?.(nodeId, otherNodeId) ?? false) &&
+          boundsOverlap(bounds, otherBounds),
       ),
     );
 
@@ -202,5 +302,8 @@ export function resolveSnapPositions(
     }
   }
 
-  return desiredPositions;
+  return dragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
+    positions[nodeId] = basePositions[nodeId] ?? desiredPositions[nodeId];
+    return positions;
+  }, {});
 }

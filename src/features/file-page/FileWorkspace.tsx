@@ -21,7 +21,7 @@ interface FileWorkspaceProps {
   onAddNode: (node: FilePageNode) => void;
   onUpdateNode: (
     nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
   ) => void;
   onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;

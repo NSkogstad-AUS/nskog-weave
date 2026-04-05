@@ -21,9 +21,18 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/animate-ui/components/animate/tooltip';
-import { NODE_CARD_CLASS, SLOT_STEP_X, SLOT_STEP_Y } from './constants';
+import {
+  GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_INSET_X,
+  GROUP_HEADER_HEIGHT,
+  GROUP_TITLE_UNDERLINE_INSET,
+  NODE_CARD_CLASS,
+  SLOT_STEP_X,
+  SLOT_STEP_Y,
+} from './constants';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
-import { getNodeDimensions } from './utils';
+import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
 import { cn } from '@/lib/utils';
 import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
@@ -53,7 +62,10 @@ interface FileCanvasNodeProps {
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
   onPreviewIcon: (icon: FilePageElementIcon) => void;
   onPreviewResize: (size: FilePageNode['size']) => void;
-  onResizeHandlePointerDown?: (event: ReactPointerEvent<HTMLSpanElement>) => void;
+  onResizeHandlePointerDown?: (
+    event: ReactPointerEvent<HTMLSpanElement>,
+    axis: 'x' | 'y' | 'both',
+  ) => void;
   onSelect: () => void;
   onStartRename: () => void;
   onStopRename: () => void;
@@ -95,7 +107,11 @@ export function FileCanvasNode({
   const elementIcon = draftIcon ?? node.icon;
   const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[elementIcon] : null;
   const Icon = elementMeta?.icon ?? meta.icon;
-  const dimensions = getNodeDimensions(displaySize);
+  const dimensions = getNodeDimensionsForKind(displaySize, node.kind);
+  const displayBounds = getNodeBoundsWithSize(displayPosition, displaySize, node.kind);
+  const snapPreviewBounds = snapPreviewPosition
+    ? getNodeBoundsWithSize(snapPreviewPosition, displaySize, node.kind)
+    : null;
   const isGroupNode = node.kind === 'group';
   const isCompactNode = displaySize.widthUnits === 1;
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
@@ -140,15 +156,19 @@ export function FileCanvasNode({
       style={{
         width: dimensions.width,
         height: dimensions.height,
-        transform: `translate3d(${displayPosition.x}px, ${displayPosition.y}px, 0)`,
+        transform: `translate3d(${displayBounds.left}px, ${displayBounds.top}px, 0)`,
       }}
     >
       {isGroupNode ? (
         <>
           <span
             aria-hidden="true"
-            className="pointer-events-none absolute inset-0 opacity-70"
+            className="pointer-events-none absolute opacity-70"
             style={{
+              left: GROUP_CONTENT_INSET_X,
+              right: GROUP_CONTENT_INSET_X,
+              top: GROUP_CONTENT_INSET_TOP,
+              bottom: GROUP_CONTENT_INSET_BOTTOM,
               backgroundImage:
                 'linear-gradient(to right, rgba(148,163,184,0.14) 1px, transparent 1px), linear-gradient(to bottom, rgba(148,163,184,0.14) 1px, transparent 1px)',
               backgroundSize: `${SLOT_STEP_X}px ${SLOT_STEP_Y}px`,
@@ -157,22 +177,32 @@ export function FileCanvasNode({
           <span
             aria-hidden="true"
             className={cn(
-              'pointer-events-none absolute bottom-2 left-5 right-10 h-px transition-colors duration-150',
+              'pointer-events-none absolute bottom-[18px] transition-colors duration-150',
               groupResizeAccentClass,
             )}
+            style={{
+              left: GROUP_CONTENT_INSET_X,
+              right: GROUP_CONTENT_INSET_X + 22,
+              height: 1,
+            }}
           />
           <span
             aria-hidden="true"
             className={cn(
-              'pointer-events-none absolute right-2 top-12 bottom-10 w-px transition-colors duration-150',
+              'pointer-events-none absolute right-[18px] transition-colors duration-150',
               groupResizeAccentClass,
             )}
+            style={{
+              top: GROUP_CONTENT_INSET_TOP,
+              bottom: GROUP_CONTENT_INSET_BOTTOM + 22,
+              width: 1,
+            }}
           />
-          <div className="relative z-10 flex h-full flex-col">
-            <span className="inline-flex w-fit rounded-full border border-slate-200/80 bg-white/88 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-500">
-              {meta.eyebrow}
-            </span>
-            <div className="mt-3 min-w-0">
+          <div className="relative z-10 h-full">
+            <div
+              className="absolute left-4 right-4 top-4"
+              style={{ height: GROUP_HEADER_HEIGHT - 16 }}
+            >
               {isEditing ? (
                 <input
                   autoFocus
@@ -193,24 +223,39 @@ export function FileCanvasNode({
               ) : (
                 <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
               )}
-              {node.description.trim().length > 0 ? (
-                <div className="mt-1 max-w-[18rem] text-xs leading-5 text-slate-500">
-                  {node.description}
-                </div>
-              ) : null}
+              <span
+                aria-hidden="true"
+                className="pointer-events-none absolute bottom-0 h-px bg-slate-300/80"
+                style={{
+                  left: GROUP_TITLE_UNDERLINE_INSET,
+                  right: GROUP_TITLE_UNDERLINE_INSET,
+                }}
+              />
             </div>
           </div>
           {showResizeHandle ? (
-            <span
-              role="presentation"
-              onPointerDown={onResizeHandlePointerDown}
-              className={cn(
-                'absolute bottom-2 right-2 flex size-7 items-center justify-center rounded-lg border transition-colors',
-                groupResizeHandleClass,
-              )}
-            >
-              <span className="size-3 rounded-br-[7px] border-b-2 border-r-2 border-current" />
-            </span>
+            <>
+              <span
+                role="presentation"
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'x')}
+                className="absolute inset-y-0 right-0 z-20 w-5 cursor-ew-resize"
+              />
+              <span
+                role="presentation"
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'y')}
+                className="absolute bottom-0 left-0 right-0 z-20 h-5 cursor-ns-resize"
+              />
+              <span
+                role="presentation"
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'both')}
+                className={cn(
+                  'absolute bottom-2 right-2 z-30 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
+                  groupResizeHandleClass,
+                )}
+              >
+                <span className="size-3 rounded-br-[7px] border-b-2 border-r-2 border-current" />
+              </span>
+            </>
           ) : null}
         </>
       ) : (
@@ -290,7 +335,7 @@ export function FileCanvasNode({
       }}
     >
       <>
-        {isDragging && snapPreviewPosition ? (
+        {isDragging && snapPreviewBounds ? (
           <div
             aria-hidden="true"
             className={cn(
@@ -300,7 +345,7 @@ export function FileCanvasNode({
             style={{
               width: dimensions.width,
               height: dimensions.height,
-              transform: `translate3d(${snapPreviewPosition.x}px, ${snapPreviewPosition.y}px, 0)`,
+              transform: `translate3d(${snapPreviewBounds.left}px, ${snapPreviewBounds.top}px, 0)`,
             }}
           />
         ) : null}

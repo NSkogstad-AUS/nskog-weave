@@ -12,6 +12,9 @@ import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
   GRID_SIZE,
+  GROUP_CONTENT_INSET_BOTTOM,
+  GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_INSET_X,
   GROUP_MIN_GRID_UNITS,
   SLOT_STEP_X,
   SLOT_STEP_Y,
@@ -19,13 +22,16 @@ import {
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import {
   boundsOverlap,
+  clampNodePositionToBounds,
   clampToCanvas,
+  getGroupContentBounds,
   getNodeBoundsWithSize,
-  getNodeDimensions,
+  getNodeDimensionsForKind,
   getUnitsForDimension,
   normalizeRectangle,
   rectanglesIntersect,
   resolveSnapPositions,
+  snapPointToBoundsGrid,
   snapToSlotX,
   snapToSlotY,
 } from './canvas/utils';
@@ -40,7 +46,7 @@ interface FileCanvasViewProps {
   onAddNode: (node: FilePageNode) => void;
   onUpdateNode: (
     nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size'>>,
+    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
   ) => void;
   onDeleteNode: (nodeId: string) => void;
   onHoverNodeChange: (node: FilePageNode | null) => void;
@@ -49,6 +55,7 @@ interface FileCanvasViewProps {
 
 type DragState = {
   nodeIds: string[];
+  selectedNodeIds: string[];
   origin: Point;
   basePositions: Record<string, Point>;
 };
@@ -67,6 +74,7 @@ type PanState = {
 
 type ResizeState = {
   nodeId: string;
+  axis: 'x' | 'y' | 'both';
   origin: Point;
   baseSize: FilePageNode['size'];
   minimumSize: FilePageNode['size'];
@@ -90,6 +98,7 @@ export function FileCanvasView({
   const marqueeStateRef = useRef<MarqueeState | null>(null);
   const panStateRef = useRef<PanState | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
+  const rawDragPositionsRef = useRef<Record<string, Point>>({});
   const draftPositionsRef = useRef<Record<string, Point>>({});
   const snapPreviewPositionsRef = useRef<Record<string, Point>>({});
   const draftSelectedNodeIdsRef = useRef<string[] | null>(null);
@@ -109,6 +118,12 @@ export function FileCanvasView({
   const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const renderedNodes = [...nodes].sort((left, right) => {
+    const leftRank = left.kind === 'group' ? 0 : 1;
+    const rightRank = right.kind === 'group' ? 0 : 1;
+
+    return leftRank - rightRank;
+  });
   const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
   const selectedIdSet = new Set(displaySelectedNodeIds);
 
@@ -192,19 +207,37 @@ export function FileCanvasView({
           return;
         }
 
-        const baseDimensions = getNodeDimensions(liveResizeState.baseSize);
+        const baseDimensions = getNodeDimensionsForKind(
+          liveResizeState.baseSize,
+          resizingNode.kind,
+        );
+        const widthChromeInset = resizingNode.kind === 'group' ? GROUP_CONTENT_INSET_X * 2 : 0;
+        const heightChromeInset =
+          resizingNode.kind === 'group'
+            ? GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM
+            : 0;
         const currentSize = draftSizes[resizingNode.id] ?? resizingNode.size;
         const candidateSize = {
-          widthUnits: getUnitsForDimension(
-            baseDimensions.width + (localPoint.x - liveResizeState.origin.x),
-            SLOT_STEP_X,
-            liveResizeState.minimumSize.widthUnits,
-          ),
-          heightUnits: getUnitsForDimension(
-            baseDimensions.height + (localPoint.y - liveResizeState.origin.y),
-            SLOT_STEP_Y,
-            liveResizeState.minimumSize.heightUnits,
-          ),
+          widthUnits:
+            liveResizeState.axis === 'y'
+              ? currentSize.widthUnits
+              : getUnitsForDimension(
+                  baseDimensions.width -
+                    widthChromeInset +
+                    (localPoint.x - liveResizeState.origin.x),
+                  SLOT_STEP_X,
+                  liveResizeState.minimumSize.widthUnits,
+                ),
+          heightUnits:
+            liveResizeState.axis === 'x'
+              ? currentSize.heightUnits
+              : getUnitsForDimension(
+                  baseDimensions.height -
+                    heightChromeInset +
+                    (localPoint.y - liveResizeState.origin.y),
+                  SLOT_STEP_Y,
+                  liveResizeState.minimumSize.heightUnits,
+                ),
         };
         const fallbackSizes = [
           candidateSize,
@@ -248,7 +281,7 @@ export function FileCanvasView({
       }
 
       if (liveDragState) {
-        const nextDraftPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
+        const rawNextPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
           (positions, nodeId) => {
             const basePosition = liveDragState.basePositions[nodeId];
             const nextX = basePosition.x + (localPoint.x - liveDragState.origin.x);
@@ -263,19 +296,104 @@ export function FileCanvasView({
           },
           {},
         );
+        const nextDraftPositions = { ...rawNextPositions };
+        const candidateGroupIds = new Map<string, string | null>();
+
+        liveDragState.nodeIds.forEach((nodeId) => {
+          const movingNode = nodesRef.current.find((node) => node.id === nodeId);
+
+          if (
+            !movingNode ||
+            movingNode.kind === 'group' ||
+            (movingNode.groupId && liveDragState.nodeIds.includes(movingNode.groupId))
+          ) {
+            return;
+          }
+
+          const nextSize = draftSizes[nodeId] ?? movingNode.size;
+          const detectedGroupId = findContainingGroupId(
+            movingNode,
+            rawNextPositions[nodeId],
+            nextSize,
+            rawNextPositions,
+          );
+          let nextGroupId = detectedGroupId;
+
+          if (!detectedGroupId && movingNode.groupId) {
+            const currentGroupBounds = getGroupBounds(movingNode.groupId, nextDraftPositions);
+
+            if (currentGroupBounds) {
+              const clampedToCurrentGroup = clampNodePositionToBounds(
+                rawNextPositions[nodeId],
+                nextSize,
+                currentGroupBounds,
+              );
+              const releaseThreshold = Math.min(SLOT_STEP_X, SLOT_STEP_Y) / 2;
+              const distanceFromBoundary = Math.max(
+                Math.abs(clampedToCurrentGroup.x - rawNextPositions[nodeId].x),
+                Math.abs(clampedToCurrentGroup.y - rawNextPositions[nodeId].y),
+              );
+
+              if (distanceFromBoundary <= releaseThreshold) {
+                nextGroupId = movingNode.groupId;
+                nextDraftPositions[nodeId] = clampedToCurrentGroup;
+              }
+            }
+          }
+
+          candidateGroupIds.set(nodeId, nextGroupId);
+
+          if (!nextGroupId) {
+            return;
+          }
+
+          const parentBounds = getGroupBounds(nextGroupId, nextDraftPositions);
+
+          if (!parentBounds) {
+            return;
+          }
+
+          nextDraftPositions[nodeId] = clampNodePositionToBounds(
+            nextDraftPositions[nodeId],
+            nextSize,
+            parentBounds,
+          );
+        });
         const desiredSnapPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
           (positions, nodeId) => {
             const draftPosition = nextDraftPositions[nodeId];
+            const movingNode = nodesRef.current.find((node) => node.id === nodeId);
+            const nextSize =
+              draftSizes[nodeId] ?? movingNode?.size ?? { widthUnits: 1, heightUnits: 1 };
+            const nextGroupId = candidateGroupIds.get(nodeId);
+            const groupBounds =
+              typeof nextGroupId === 'string'
+                ? getGroupBounds(nextGroupId, nextDraftPositions)
+                : null;
 
-            positions[nodeId] = {
-              x: snapToSlotX(draftPosition.x),
-              y: snapToSlotY(draftPosition.y),
-            };
+            positions[nodeId] =
+              groupBounds && movingNode && movingNode.kind !== 'group'
+                ? snapPointToBoundsGrid(draftPosition, nextSize, groupBounds)
+                : {
+                    x: snapToSlotX(draftPosition.x),
+                    y: snapToSlotY(draftPosition.y),
+                  };
 
             return positions;
           },
           {},
         );
+        const dragTargetGroupIds = liveDragState.nodeIds.map((nodeId) => candidateGroupIds.get(nodeId));
+        const firstDragTargetGroupId = dragTargetGroupIds[0];
+        const sharedDragTargetGroupId =
+          typeof firstDragTargetGroupId === 'string' &&
+          dragTargetGroupIds.every((groupId) => groupId === firstDragTargetGroupId)
+            ? firstDragTargetGroupId
+            : null;
+        const sharedDragTargetBounds =
+          typeof sharedDragTargetGroupId === 'string'
+            ? getGroupBounds(sharedDragTargetGroupId, nextDraftPositions)
+            : null;
         const nextSnapPositions = resolveSnapPositions(
           desiredSnapPositions,
           liveDragState.nodeIds,
@@ -284,8 +402,53 @@ export function FileCanvasView({
           Object.fromEntries(
             nodesRef.current.map((node) => [node.id, draftSizes[node.id] ?? node.size]),
           ),
+          (leftNodeId, rightNodeId) =>
+            canNodesShareSpace(
+              nodesRef.current.find((node) => node.id === leftNodeId),
+              nodesRef.current.find((node) => node.id === rightNodeId),
+              candidateGroupIds,
+            ),
+          sharedDragTargetBounds
+            ? {
+                anchorGridOrigin: {
+                  x: sharedDragTargetBounds.left,
+                  y: sharedDragTargetBounds.top,
+                },
+                constrainPosition: (position, nodeId) => {
+                  const movingNode = nodesRef.current.find((node) => node.id === nodeId);
+
+                  if (!movingNode) {
+                    return {
+                      x: clampToCanvas(position.x),
+                      y: clampToCanvas(position.y),
+                    };
+                  }
+
+                  if ((candidateGroupIds.get(nodeId) ?? null) !== sharedDragTargetGroupId) {
+                    return null;
+                  }
+
+                  const nextSize = draftSizes[nodeId] ?? movingNode.size;
+                  const clampedPosition = clampNodePositionToBounds(
+                    position,
+                    nextSize,
+                    sharedDragTargetBounds,
+                  );
+
+                  return clampedPosition.x === position.x && clampedPosition.y === position.y
+                    ? clampedPosition
+                    : null;
+                },
+                getNodeKind: (nodeId) =>
+                  nodesRef.current.find((node) => node.id === nodeId)?.kind,
+              }
+            : {
+                getNodeKind: (nodeId) =>
+                  nodesRef.current.find((node) => node.id === nodeId)?.kind,
+              },
         );
 
+        rawDragPositionsRef.current = rawNextPositions;
         draftPositionsRef.current = nextDraftPositions;
         snapPreviewPositionsRef.current = nextSnapPositions;
 
@@ -312,14 +475,9 @@ export function FileCanvasView({
         .filter((node) => {
           const position = draftPositionsRef.current[node.id] ?? node.position;
           const size = draftSizes[node.id] ?? node.size;
-          const dimensions = getNodeDimensions(size);
+          const bounds = getNodeBoundsWithSize(position, size, node.kind);
 
-          return rectanglesIntersect(marqueeRect, {
-            left: position.x,
-            top: position.y,
-            right: position.x + dimensions.width,
-            bottom: position.y + dimensions.height,
-          });
+          return rectanglesIntersect(marqueeRect, bounds);
         })
         .map((node) => node.id);
 
@@ -345,9 +503,125 @@ export function FileCanvasView({
       const liveResizeState = resizeStateRef.current;
 
       if (liveDragState && Object.keys(liveSnapPreviewPositions).length > 0) {
-        onMoveNodes(liveSnapPreviewPositions);
-        draftPositionsRef.current = liveSnapPreviewPositions;
-        setDraftPositions(liveSnapPreviewPositions);
+        const finalSnapPositions = { ...liveSnapPreviewPositions };
+        const nextGroupIds = new Map<string, string | null>();
+        const rawNextPositions = rawDragPositionsRef.current;
+        const nextPositions = nodesRef.current.reduce<Record<string, Point>>((positions, node) => {
+          positions[node.id] = finalSnapPositions[node.id] ?? node.position;
+          return positions;
+        }, {});
+
+        liveDragState.selectedNodeIds.forEach((nodeId) => {
+          const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+
+          if (!node || node.kind === 'group') {
+            return;
+          }
+
+          const rawPosition = rawNextPositions[nodeId] ?? nextPositions[nodeId];
+          const nextGroupId = findContainingGroupId(
+            node,
+            rawPosition,
+            draftSizes[node.id] ?? node.size,
+            {
+              ...nextPositions,
+              [nodeId]: rawPosition,
+            },
+          );
+
+          nextGroupIds.set(node.id, nextGroupId);
+
+          const parentBounds =
+            typeof nextGroupId === 'string' ? getGroupBounds(nextGroupId, nextPositions) : null;
+          const desiredPosition =
+            nextGroupId && parentBounds
+              ? snapPointToBoundsGrid(rawPosition, draftSizes[node.id] ?? node.size, parentBounds)
+              : {
+                  x: snapToSlotX(rawPosition.x),
+                  y: snapToSlotY(rawPosition.y),
+                };
+          const stationaryNodes = nodesRef.current
+            .filter((candidate) => candidate.id !== node.id)
+            .map((candidate) => ({
+              ...candidate,
+              position: nextPositions[candidate.id] ?? candidate.position,
+            }));
+          const resolvedPositions = resolveSnapPositions(
+            {
+              [node.id]: desiredPosition,
+            },
+            [node.id],
+            stationaryNodes,
+            {
+              [node.id]: desiredPosition,
+            },
+            {
+              [node.id]: draftSizes[node.id] ?? node.size,
+            },
+            (leftNodeId, rightNodeId) => {
+              const leftNode =
+                leftNodeId === node.id
+                  ? node
+                  : stationaryNodes.find((candidate) => candidate.id === leftNodeId);
+              const rightNode =
+                rightNodeId === node.id
+                  ? node
+                  : stationaryNodes.find((candidate) => candidate.id === rightNodeId);
+
+              return canNodesShareSpace(
+                leftNode,
+                rightNode,
+                new Map([[node.id, nextGroupId]]),
+              );
+            },
+            parentBounds
+              ? {
+                  anchorGridOrigin: {
+                    x: parentBounds.left,
+                    y: parentBounds.top,
+                  },
+                  constrainPosition: (position) => {
+                    const clampedPosition = clampNodePositionToBounds(
+                      position,
+                      draftSizes[node.id] ?? node.size,
+                      parentBounds,
+                    );
+
+                    return clampedPosition.x === position.x && clampedPosition.y === position.y
+                      ? clampedPosition
+                      : null;
+                  },
+                  getNodeKind: (nodeId) =>
+                    nodeId === node.id
+                      ? node.kind
+                      : stationaryNodes.find((candidate) => candidate.id === nodeId)?.kind,
+                }
+              : {
+                  getNodeKind: (nodeId) =>
+                    nodeId === node.id
+                      ? node.kind
+                      : stationaryNodes.find((candidate) => candidate.id === nodeId)?.kind,
+                },
+          );
+          const resolvedPosition = resolvedPositions[node.id] ?? desiredPosition;
+
+          finalSnapPositions[node.id] = resolvedPosition;
+          nextPositions[node.id] = resolvedPosition;
+        });
+
+        onMoveNodes(finalSnapPositions);
+        draftPositionsRef.current = finalSnapPositions;
+        setDraftPositions(finalSnapPositions);
+
+        nextGroupIds.forEach((nextGroupId, nodeId) => {
+          const node = nodesRef.current.find((candidate) => candidate.id === nodeId);
+
+          if (node && (node.groupId ?? null) !== nextGroupId) {
+            onUpdateNode(node.id, {
+              groupId: nextGroupId,
+            });
+          }
+        });
       }
 
       if (liveResizeState) {
@@ -383,6 +657,7 @@ export function FileCanvasView({
       }
 
       releaseTimerRef.current = window.setTimeout(() => {
+        rawDragPositionsRef.current = {};
         draftPositionsRef.current = {};
         snapPreviewPositionsRef.current = {};
         setDraftPositions({});
@@ -400,6 +675,101 @@ export function FileCanvasView({
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, [draftSizes, onMoveNodes, onResizeNode, onSelectNodes]);
+
+  useEffect(() => {
+    if (dragState || marqueeState || panState || resizeState) {
+      return;
+    }
+
+    const nextPositions = nodes.reduce<Record<string, Point>>((positions, node) => {
+      positions[node.id] = node.position;
+      return positions;
+    }, {});
+    const correctedPositions: Record<string, Point> = {};
+
+    nodes
+      .filter((node) => node.kind !== 'group')
+      .forEach((node) => {
+        const currentPosition = nextPositions[node.id] ?? node.position;
+        const parentBounds = node.groupId ? getGroupBounds(node.groupId, nextPositions) : null;
+        const desiredPosition = parentBounds
+          ? snapPointToBoundsGrid(currentPosition, node.size, parentBounds)
+          : {
+              x: snapToSlotX(currentPosition.x),
+              y: snapToSlotY(currentPosition.y),
+            };
+        const stationaryNodes = nodes
+          .filter((otherNode) => otherNode.id !== node.id)
+          .map((otherNode) => ({
+            ...otherNode,
+            position: nextPositions[otherNode.id] ?? otherNode.position,
+          }));
+        const resolvedPositions = resolveSnapPositions(
+          {
+            [node.id]: desiredPosition,
+          },
+          [node.id],
+          stationaryNodes,
+          {
+            [node.id]: desiredPosition,
+          },
+          {
+            [node.id]: node.size,
+          },
+          (leftNodeId, rightNodeId) => {
+            const leftNode =
+              leftNodeId === node.id
+                ? node
+                : stationaryNodes.find((otherNode) => otherNode.id === leftNodeId);
+            const rightNode =
+              rightNodeId === node.id
+                ? node
+                : stationaryNodes.find((otherNode) => otherNode.id === rightNodeId);
+
+            return canNodesShareSpace(leftNode, rightNode);
+          },
+          parentBounds
+            ? {
+                anchorGridOrigin: {
+                  x: parentBounds.left,
+                  y: parentBounds.top,
+                },
+                constrainPosition: (position) => {
+                  const clampedPosition = clampNodePositionToBounds(
+                    position,
+                    node.size,
+                    parentBounds,
+                  );
+
+                  return clampedPosition.x === position.x && clampedPosition.y === position.y
+                    ? clampedPosition
+                    : null;
+                },
+                getNodeKind: (nodeId) =>
+                  nodeId === node.id
+                    ? node.kind
+                    : stationaryNodes.find((otherNode) => otherNode.id === nodeId)?.kind,
+              }
+            : {
+                getNodeKind: (nodeId) =>
+                  nodeId === node.id
+                    ? node.kind
+                    : stationaryNodes.find((otherNode) => otherNode.id === nodeId)?.kind,
+              },
+        );
+        const nextPosition = resolvedPositions[node.id] ?? desiredPosition;
+
+        nextPositions[node.id] = nextPosition;
+
+        if (nextPosition.x !== node.position.x || nextPosition.y !== node.position.y) {
+          correctedPositions[node.id] = nextPosition;
+        }
+      });
+
+    if (Object.keys(correctedPositions).length > 0) {
+      onMoveNodes(correctedPositions);
+    }
+  }, [dragState, marqueeState, nodes, onMoveNodes, panState, resizeState]);
 
   function getLocalPoint(clientX: number, clientY: number) {
     if (!canvasRef.current) {
@@ -433,13 +803,15 @@ export function FileCanvasView({
 
     const nextSelectedIds =
       selectedIdSet.has(node.id) && selectedNodeIds.length > 1 ? selectedNodeIds : [node.id];
+    const nextDragNodeIds = expandDragNodeIds(nextSelectedIds);
 
     onSelectNodes(nextSelectedIds);
     setDraftSelectedNodeIds(nextSelectedIds);
     const nextDragState = {
-      nodeIds: nextSelectedIds,
+      nodeIds: nextDragNodeIds,
+      selectedNodeIds: nextSelectedIds,
       origin: localPoint,
-      basePositions: nextSelectedIds.reduce<Record<string, Point>>((positions, nodeId) => {
+      basePositions: nextDragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
         const selectedNode = nodes.find((candidate) => candidate.id === nodeId);
 
         if (selectedNode) {
@@ -476,10 +848,119 @@ export function FileCanvasView({
       : {
           widthUnits: 1,
           heightUnits: 1,
-        };
+      };
   }
 
-  function resolveInsertionPosition(size: FilePageNode['size']) {
+  function getGroupBounds(groupId: string, positions?: Record<string, Point>) {
+    const groupNode = nodesRef.current.find((node) => node.id === groupId && node.kind === 'group');
+
+    if (!groupNode) {
+      return null;
+    }
+
+    return getGroupContentBounds(
+      positions?.[groupNode.id] ?? draftPositionsRef.current[groupNode.id] ?? groupNode.position,
+      draftSizes[groupNode.id] ?? groupNode.size,
+    );
+  }
+
+  function canNodesShareSpace(
+    leftNode: FilePageNode | undefined,
+    rightNode: FilePageNode | undefined,
+    candidateGroupIds?: Map<string, string | null>,
+  ) {
+    if (!leftNode || !rightNode || leftNode.id === rightNode.id) {
+      return false;
+    }
+
+    if (leftNode.kind === 'group' && rightNode.kind !== 'group') {
+      return (candidateGroupIds?.get(rightNode.id) ?? rightNode.groupId ?? null) === leftNode.id;
+    }
+
+    if (rightNode.kind === 'group' && leftNode.kind !== 'group') {
+      return (candidateGroupIds?.get(leftNode.id) ?? leftNode.groupId ?? null) === rightNode.id;
+    }
+
+    return false;
+  }
+
+  function expandDragNodeIds(selectedIds: string[]) {
+    const seen = new Set(selectedIds);
+    const queue = [...selectedIds];
+
+    while (queue.length > 0) {
+      const nodeId = queue.shift();
+
+      if (!nodeId) {
+        continue;
+      }
+
+      const childIds = nodesRef.current
+        .filter((node) => node.groupId === nodeId)
+        .map((node) => node.id);
+
+      childIds.forEach((childId) => {
+        if (seen.has(childId)) {
+          return;
+        }
+
+        seen.add(childId);
+        queue.push(childId);
+      });
+    }
+
+    return [...seen];
+  }
+
+  function findContainingGroupId(
+    node: FilePageNode,
+    position: Point,
+    size: FilePageNode['size'],
+    positions: Record<string, Point>,
+  ) {
+    if (node.kind === 'group') {
+      return null;
+    }
+
+    const nodeBounds = getNodeBoundsWithSize(position, size, node.kind);
+    const containingGroups = nodesRef.current
+      .filter((candidate) => candidate.kind === 'group' && candidate.id !== node.id)
+      .filter((candidate) => {
+        const groupBounds = getGroupBounds(candidate.id, positions);
+
+        if (!groupBounds) {
+          return false;
+        }
+
+        return (
+          nodeBounds.left >= groupBounds.left &&
+          nodeBounds.top >= groupBounds.top &&
+          nodeBounds.right <= groupBounds.right &&
+          nodeBounds.bottom <= groupBounds.bottom
+        );
+      })
+      .sort((left, right) => {
+        const leftBounds = getNodeBoundsWithSize(
+          positions[left.id] ?? left.position,
+          draftSizes[left.id] ?? left.size,
+          left.kind,
+        );
+        const rightBounds = getNodeBoundsWithSize(
+          positions[right.id] ?? right.position,
+          draftSizes[right.id] ?? right.size,
+          right.kind,
+        );
+        const leftArea = (leftBounds.right - leftBounds.left) * (leftBounds.bottom - leftBounds.top);
+        const rightArea =
+          (rightBounds.right - rightBounds.left) * (rightBounds.bottom - rightBounds.top);
+
+        return leftArea - rightArea;
+      });
+
+    return containingGroups[0]?.id ?? null;
+  }
+
+  function resolveInsertionPosition(node: Pick<FilePageNode, 'kind' | 'size'>) {
     const localPoint = contextMenuPointRef.current ?? {
       x: CANVAS_PADDING,
       y: CANVAS_PADDING,
@@ -498,7 +979,24 @@ export function FileCanvasView({
         anchor: desiredPosition,
       },
       {
-        anchor: size,
+        anchor: node.size,
+      },
+      (_leftNodeId, rightNodeId) =>
+        canNodesShareSpace(
+          {
+            id: 'anchor',
+            label: '',
+            description: '',
+            groupId: null,
+            kind: node.kind,
+            icon: 'shapes',
+            position: desiredPosition,
+            size: node.size,
+          },
+          nodesRef.current.find((entry) => entry.id === rightNodeId),
+        ),
+      {
+        getNodeKind: (nodeId) => (nodeId === 'anchor' ? node.kind : undefined),
       },
     );
 
@@ -508,7 +1006,7 @@ export function FileCanvasView({
   function addNodeAtContext(node: Omit<FilePageNode, 'position'>) {
     const nextNode = {
       ...node,
-      position: resolveInsertionPosition(node.size),
+      position: resolveInsertionPosition(node),
     };
 
     onAddNode(nextNode);
@@ -585,11 +1083,15 @@ export function FileCanvasView({
       return false;
     }
 
-    const resizedBounds = getNodeBoundsWithSize(resizingNode.position, size);
+    const resizedBounds = getNodeBoundsWithSize(resizingNode.position, size, resizingNode.kind);
 
     return !nodesRef.current
       .filter((node) => node.id !== nodeId)
-      .some((node) => boundsOverlap(resizedBounds, getNodeBoundsWithSize(node.position, node.size)));
+      .some(
+        (node) =>
+          !canNodesShareSpace(resizingNode, node) &&
+          boundsOverlap(resizedBounds, getNodeBoundsWithSize(node.position, node.size, node.kind)),
+      );
   }
 
   function previewNodeResize(node: FilePageNode, size: FilePageNode['size']) {
@@ -682,9 +1184,63 @@ export function FileCanvasView({
     onHoverNodeChange(null);
   }
 
+  function deleteCanvasNode(node: FilePageNode) {
+    if (node.kind !== 'group') {
+      onDeleteNode(node.id);
+      return;
+    }
+
+    const childNodes = nodesRef.current.filter((candidate) => candidate.groupId === node.id);
+    const dispersedPositions: Record<string, Point> = {};
+    const stationaryNodes = nodesRef.current.filter(
+      (candidate) => candidate.id !== node.id && candidate.groupId !== node.id,
+    );
+    const resolvedChildren: FilePageNode[] = [];
+
+    childNodes.forEach((childNode) => {
+      const desiredPosition = {
+        x: snapToSlotX(childNode.position.x),
+        y: snapToSlotY(childNode.position.y),
+      };
+      const resolvedPositions = resolveSnapPositions(
+        {
+          [childNode.id]: desiredPosition,
+        },
+        [childNode.id],
+        [...stationaryNodes, ...resolvedChildren],
+        {
+          [childNode.id]: desiredPosition,
+        },
+        {
+          [childNode.id]: draftSizes[childNode.id] ?? childNode.size,
+        },
+        undefined,
+        {
+          getNodeKind: (nodeId) => (nodeId === childNode.id ? childNode.kind : undefined),
+        },
+      );
+      const nextPosition = resolvedPositions[childNode.id] ?? desiredPosition;
+
+      dispersedPositions[childNode.id] = nextPosition;
+      resolvedChildren.push({
+        ...childNode,
+        groupId: null,
+        position: nextPosition,
+      });
+      onUpdateNode(childNode.id, { groupId: null });
+    });
+
+    if (Object.keys(dispersedPositions).length > 0) {
+      onMoveNodes(dispersedPositions);
+    }
+
+    onDeleteNode(node.id);
+  }
+
   function beginNodeResize(
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
+    axis: 'x' | 'y' | 'both',
   ) {
     if (event.button !== 0) {
       return;
@@ -701,6 +1257,7 @@ export function FileCanvasView({
 
     const nextResizeState = {
       nodeId: node.id,
+      axis,
       origin: localPoint,
       baseSize: draftSizes[node.id] ?? node.size,
       minimumSize: getMinimumNodeSize(node),
@@ -758,7 +1315,7 @@ export function FileCanvasView({
                 return;
               }
 
-              const nextPanState = {
+        const nextPanState = {
                 origin: { x: event.clientX, y: event.clientY },
                 baseViewport: viewport,
               };
@@ -781,7 +1338,7 @@ export function FileCanvasView({
             className="absolute inset-0"
             style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
           >
-            {nodes.map((node) => {
+            {renderedNodes.map((node) => {
             return (
               <FileCanvasNode
                 key={node.id}
@@ -808,7 +1365,7 @@ export function FileCanvasView({
                   selectSingleNode(node.id);
                 }}
                 onContextMenuOpenChange={(open) => setNodeContextMenuOpen(node, open)}
-                onDelete={() => onDeleteNode(node.id)}
+                onDelete={() => deleteCanvasNode(node)}
                 onEditingLabelChange={setEditingLabel}
                 onHoverChange={(hovered) => setNodeHover(node, hovered)}
                 onPointerDown={(event) => handleNodePointerDown(event, node)}
@@ -816,7 +1373,7 @@ export function FileCanvasView({
                 onPreviewResize={(size) => previewNodeResize(node, size)}
                 onResizeHandlePointerDown={
                   node.kind === 'group'
-                    ? (event) => beginNodeResize(event, node)
+                    ? (event, axis) => beginNodeResize(event, node, axis)
                     : undefined
                 }
                 onSelect={() => selectSingleNode(node.id)}

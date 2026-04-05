@@ -23,6 +23,7 @@ export interface FilePageNode {
   id: string;
   label: string;
   description: string;
+  groupId?: string | null;
   kind: FilePageNodeKind;
   icon: FilePageElementIcon;
   position: Point;
