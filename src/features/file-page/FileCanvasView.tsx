@@ -241,10 +241,22 @@ export function FileCanvasView({
         {
           id: `${node.parentNodeId}->${node.id}`,
           path: getConnectorPath(parentBounds, childBounds),
+          layer:
+            node.groupId && parentNode.groupId === node.groupId
+              ? 'above-group'
+              : 'below-group',
         },
       ];
     });
   }, [draftPositions, draftSizes, renderedNodes]);
+  const belowGroupConnectorPaths = useMemo(
+    () => connectorPaths.filter((connector) => connector.layer === 'below-group'),
+    [connectorPaths],
+  );
+  const aboveGroupConnectorPaths = useMemo(
+    () => connectorPaths.filter((connector) => connector.layer === 'above-group'),
+    [connectorPaths],
+  );
   const outerCanvasFields = useMemo(() => {
     const baseFieldPadding = GRID_SIZE * 1.5;
     const activeFieldPadding = GRID_SIZE * 2.5;
@@ -748,9 +760,14 @@ export function FileCanvasView({
                 },
               )
           : desiredSnapPositions;
+        const predictiveLandingPositions = pushDraggedLayoutsOutsideGroups(
+          nextSnapPositions,
+          liveDragState.nodeIds,
+          constrainedCandidateGroupIds,
+        );
         rawDragPositionsRef.current = rawNextPositions;
         draftPositionsRef.current = constrainedDraftPositions;
-        snapPreviewPositionsRef.current = nextSnapPositions;
+        snapPreviewPositionsRef.current = predictiveLandingPositions;
         activeSnapPreviewIdsRef.current = nextActiveSnapPreviewIds;
 
         if (frameRef.current === null) {
@@ -1284,6 +1301,40 @@ export function FileCanvasView({
 
     let nextPositions = { ...positions };
     const stationaryNodes = nodesRef.current.filter((node) => !nodeIds.includes(node.id));
+    const applySharedShift = (
+      sourcePositions: Record<string, Point>,
+      shiftX: number,
+      shiftY: number,
+    ) => {
+      const layoutBounds = getLayoutBounds(sourcePositions, outsideNodeIds);
+
+      if (!layoutBounds) {
+        return null;
+      }
+
+      if (shiftX < 0 && layoutBounds.left + shiftX < CANVAS_PADDING) {
+        return null;
+      }
+
+      if (shiftY < 0 && layoutBounds.top + shiftY < CANVAS_PADDING) {
+        return null;
+      }
+
+      return outsideNodeIds.reduce<Record<string, Point>>((accumulator, nodeId) => {
+        const position = accumulator[nodeId];
+
+        if (!position) {
+          return accumulator;
+        }
+
+        accumulator[nodeId] = {
+          x: position.x + shiftX,
+          y: position.y + shiftY,
+        };
+
+        return accumulator;
+      }, { ...sourcePositions });
+    };
 
     groupNodes.forEach((groupNode) => {
       const layoutBounds = getLayoutBounds(nextPositions, outsideNodeIds);
@@ -1313,90 +1364,95 @@ export function FileCanvasView({
         { x: 0, y: groupBounds.top - layoutBounds.bottom },
         { x: 0, y: groupBounds.bottom - layoutBounds.top },
       ].sort((left, right) => Math.hypot(left.x, left.y) - Math.hypot(right.x, right.y));
-      const chosenShift = candidateShifts[0];
+      let resolvedPositions: Record<string, Point> | null = null;
 
-      nextPositions = outsideNodeIds.reduce<Record<string, Point>>((accumulator, nodeId) => {
-        const position = accumulator[nodeId];
+      for (const chosenShift of candidateShifts) {
+        let candidatePositions = applySharedShift(nextPositions, chosenShift.x, chosenShift.y);
 
-        if (!position) {
-          return accumulator;
+        if (!candidatePositions) {
+          continue;
         }
 
-        accumulator[nodeId] = {
-          x: clampToCanvas(position.x + chosenShift.x),
-          y: clampToCanvas(position.y + chosenShift.y),
-        };
+        const axis = Math.abs(chosenShift.x) > Math.abs(chosenShift.y) ? 'x' : 'y';
+        const direction =
+          axis === 'x' ? Math.sign(chosenShift.x || 1) : Math.sign(chosenShift.y || 1);
+        let candidateValid = true;
 
-        return accumulator;
-      }, nextPositions);
+        for (let iteration = 0; iteration < 12; iteration += 1) {
+          let extraShift = 0;
+          const currentCandidatePositions = candidatePositions;
 
-      const axis = Math.abs(chosenShift.x) > Math.abs(chosenShift.y) ? 'x' : 'y';
-      const direction = axis === 'x' ? Math.sign(chosenShift.x || 1) : Math.sign(chosenShift.y || 1);
+          outsideNodeIds.forEach((nodeId) => {
+            const movingNode = getNodeById(nodeId);
+            const movingPosition = currentCandidatePositions[nodeId];
 
-      for (let iteration = 0; iteration < 12; iteration += 1) {
-        let extraShift = 0;
-
-        outsideNodeIds.forEach((nodeId) => {
-          const movingNode = getNodeById(nodeId);
-          const movingPosition = nextPositions[nodeId];
-
-          if (!movingNode || !movingPosition) {
-            return;
-          }
-
-          const movingBounds = getNodeBoundsWithSize(
-            movingPosition,
-            draftSizesRef.current[nodeId] ?? movingNode.size,
-            movingNode.kind,
-          );
-
-          stationaryNodes.forEach((stationaryNode) => {
-            if (canNodesShareSpace(movingNode, stationaryNode, candidateGroupIds)) {
+            if (!movingNode || !movingPosition) {
               return;
             }
 
-            const stationaryBounds = getNodeBoundsWithSize(
-              nextPositions[stationaryNode.id] ?? stationaryNode.position,
-              draftSizesRef.current[stationaryNode.id] ?? stationaryNode.size,
-              stationaryNode.kind,
+            const movingBounds = getNodeBoundsWithSize(
+              movingPosition,
+              draftSizesRef.current[nodeId] ?? movingNode.size,
+              movingNode.kind,
             );
 
-            if (!boundsOverlap(movingBounds, stationaryBounds)) {
-              return;
-            }
-
-            if (axis === 'x') {
-              if (direction < 0) {
-                extraShift = Math.max(extraShift, movingBounds.right - stationaryBounds.left + 1);
-              } else {
-                extraShift = Math.max(extraShift, stationaryBounds.right - movingBounds.left + 1);
+            stationaryNodes.forEach((stationaryNode) => {
+              if (canNodesShareSpace(movingNode, stationaryNode, candidateGroupIds)) {
+                return;
               }
-            } else if (direction < 0) {
-              extraShift = Math.max(extraShift, movingBounds.bottom - stationaryBounds.top + 1);
-            } else {
-              extraShift = Math.max(extraShift, stationaryBounds.bottom - movingBounds.top + 1);
-            }
-          });
-        });
 
-        if (extraShift <= 0) {
+              const stationaryBounds = getNodeBoundsWithSize(
+                currentCandidatePositions[stationaryNode.id] ?? stationaryNode.position,
+                draftSizesRef.current[stationaryNode.id] ?? stationaryNode.size,
+                stationaryNode.kind,
+              );
+
+              if (!boundsOverlap(movingBounds, stationaryBounds)) {
+                return;
+              }
+
+              if (axis === 'x') {
+                if (direction < 0) {
+                  extraShift = Math.max(extraShift, movingBounds.right - stationaryBounds.left + 1);
+                } else {
+                  extraShift = Math.max(extraShift, stationaryBounds.right - movingBounds.left + 1);
+                }
+              } else if (direction < 0) {
+                extraShift = Math.max(extraShift, movingBounds.bottom - stationaryBounds.top + 1);
+              } else {
+                extraShift = Math.max(extraShift, stationaryBounds.bottom - movingBounds.top + 1);
+              }
+            });
+          });
+
+          if (extraShift <= 0) {
+            resolvedPositions = candidatePositions;
+            break;
+          }
+
+          candidatePositions = applySharedShift(
+            candidatePositions,
+            axis === 'x' ? direction * extraShift : 0,
+            axis === 'y' ? direction * extraShift : 0,
+          );
+
+          if (!candidatePositions) {
+            candidateValid = false;
+            break;
+          }
+        }
+
+        if (resolvedPositions) {
           break;
         }
 
-        nextPositions = outsideNodeIds.reduce<Record<string, Point>>((accumulator, nodeId) => {
-          const position = accumulator[nodeId];
+        if (!candidateValid) {
+          continue;
+        }
+      }
 
-          if (!position) {
-            return accumulator;
-          }
-
-          accumulator[nodeId] = {
-            x: clampToCanvas(position.x + (axis === 'x' ? direction * extraShift : 0)),
-            y: clampToCanvas(position.y + (axis === 'y' ? direction * extraShift : 0)),
-          };
-
-          return accumulator;
-        }, nextPositions);
+      if (resolvedPositions) {
+        nextPositions = resolvedPositions;
       }
     });
 
@@ -2260,13 +2316,38 @@ export function FileCanvasView({
                 }}
               />
             ))}
-            {groupNodes.map((node) => renderGroupShellOverlay(node))}
-            {connectorPaths.length > 0 ? (
+            {belowGroupConnectorPaths.length > 0 ? (
               <svg
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-0 overflow-visible"
               >
-                {connectorPaths.map((connector) => (
+                {belowGroupConnectorPaths.map((connector) => (
+                  <g key={connector.id}>
+                    <path
+                      d={connector.path}
+                      fill="none"
+                      stroke="rgba(148, 163, 184, 0.18)"
+                      strokeWidth={5}
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d={connector.path}
+                      fill="none"
+                      stroke="rgba(100, 116, 139, 0.6)"
+                      strokeWidth={1.6}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                ))}
+              </svg>
+            ) : null}
+            {groupNodes.map((node) => renderGroupShellOverlay(node))}
+            {aboveGroupConnectorPaths.length > 0 ? (
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-visible"
+              >
+                {aboveGroupConnectorPaths.map((connector) => (
                   <g key={connector.id}>
                     <path
                       d={connector.path}
