@@ -1,3 +1,4 @@
+import { memo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   ExpandIcon,
@@ -49,31 +50,32 @@ interface FileCanvasNodeProps {
   isSelected: boolean;
   node: FilePageNode;
   snapPreviewPosition?: Point;
-  onApplyIcon: (icon: FilePageElementIcon) => void;
-  onApplyResize: (size: FilePageNode['size']) => void;
-  onClearIconPreview: () => void;
-  onClearSizePreview: () => void;
-  onCommitRename: () => void;
-  onContextMenu: () => void;
-  onContextMenuOpenChange: (open: boolean) => void;
-  onDelete: () => void;
+  onApplyIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
+  onApplyResize: (node: FilePageNode, size: FilePageNode['size']) => void;
+  onClearIconPreview: (nodeId?: string) => void;
+  onClearSizePreview: (nodeId?: string) => void;
+  onCommitRename: (node: FilePageNode) => void;
+  onContextMenu: (node: FilePageNode) => void;
+  onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
+  onDelete: (node: FilePageNode) => void;
   onEditingLabelChange: (value: string) => void;
-  onHoverChange: (hovered: boolean) => void;
-  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
-  onPreviewIcon: (icon: FilePageElementIcon) => void;
-  onPreviewResize: (size: FilePageNode['size']) => void;
+  onHoverChange: (node: FilePageNode, hovered: boolean) => void;
+  onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FilePageNode) => void;
+  onPreviewIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
+  onPreviewResize: (node: FilePageNode, size: FilePageNode['size']) => void;
   onResizeHandlePointerDown?: (
     event: ReactPointerEvent<HTMLSpanElement>,
+    node: FilePageNode,
     axis: 'x' | 'y' | 'both',
   ) => void;
-  onSelect: () => void;
+  onSelect: (nodeId: string) => void;
   showGroupHeader?: boolean;
-  onStartRename: () => void;
+  onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
-  canResize: (size: FilePageNode['size']) => boolean;
+  canResize: (nodeId: string, size: FilePageNode['size']) => boolean;
 }
 
-export function FileCanvasNode({
+function FileCanvasNodeComponent({
   draftIcon,
   displayPosition,
   displaySize,
@@ -131,24 +133,26 @@ export function FileCanvasNode({
     <button
       type="button"
       data-canvas-node="true"
-      onPointerDown={onPointerDown}
-      onPointerEnter={() => onHoverChange(true)}
+      onPointerDown={(event) => onPointerDown(event, node)}
+      onPointerEnter={() => onHoverChange(node, true)}
       onPointerLeave={() => {
         if (!isContextMenuOpen) {
-          onHoverChange(false);
+          onHoverChange(node, false);
         }
       }}
       onContextMenu={(event) => {
         event.stopPropagation();
-        onContextMenu();
-        onSelect();
+        onContextMenu(node);
+        onSelect(node.id);
       }}
       className={cn(
         NODE_CARD_CLASS,
         'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
         meta.className,
         isGroupNode && 'overflow-hidden',
-        isDragging && 'z-40 shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)] transition-none',
+        isDragging && 'z-40 transition-none',
+        isDragging && isGroupNode && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
+        isDragging && !isGroupNode && 'shadow-none',
         !isDragging &&
           'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
         snapPreviewPosition && isDragging && 'opacity-94',
@@ -211,10 +215,10 @@ export function FileCanvasNode({
                     autoFocus
                     value={editingLabel}
                     onChange={(event) => onEditingLabelChange(event.target.value)}
-                    onBlur={onCommitRename}
+                    onBlur={() => onCommitRename(node)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
-                        onCommitRename();
+                        onCommitRename(node);
                       }
                       if (event.key === 'Escape') {
                         onStopRename();
@@ -241,17 +245,17 @@ export function FileCanvasNode({
             <>
               <span
                 role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'x')}
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'x')}
                 className="absolute inset-y-0 right-0 z-20 w-5 cursor-ew-resize"
               />
               <span
                 role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'y')}
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'y')}
                 className="absolute bottom-0 left-0 right-0 z-20 h-5 cursor-ns-resize"
               />
               <span
                 role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, 'both')}
+                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'both')}
                 className={cn(
                   'absolute bottom-2 right-2 z-30 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
                   groupResizeHandleClass,
@@ -295,10 +299,10 @@ export function FileCanvasNode({
                     autoFocus
                     value={editingLabel}
                     onChange={(event) => onEditingLabelChange(event.target.value)}
-                    onBlur={onCommitRename}
+                    onBlur={() => onCommitRename(node)}
                     onKeyDown={(event) => {
                       if (event.key === 'Enter') {
-                        onCommitRename();
+                        onCommitRename(node);
                       }
                       if (event.key === 'Escape') {
                         onStopRename();
@@ -330,11 +334,11 @@ export function FileCanvasNode({
   return (
     <ContextMenu
       onOpenChange={(open) => {
-        onContextMenuOpenChange(open);
+        onContextMenuOpenChange(node, open);
 
         if (!open) {
-          onClearSizePreview();
-          onClearIconPreview();
+          onClearSizePreview(node.id);
+          onClearIconPreview(node.id);
         }
       }}
     >
@@ -368,7 +372,7 @@ export function FileCanvasNode({
           <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
         )}
         <ContextMenuContent side="right" className="ml-2 w-52">
-          <ContextMenuItem onSelect={onStartRename}>
+          <ContextMenuItem onSelect={() => onStartRename(node)}>
             <PencilLineIcon className="size-4" />
             Rename
           </ContextMenuItem>
@@ -378,7 +382,7 @@ export function FileCanvasNode({
                 <Icon className="size-4" />
                 Change icon
               </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-48" onPointerLeave={onClearIconPreview}>
+              <ContextMenuSubContent className="w-48" onPointerLeave={() => onClearIconPreview(node.id)}>
                 <div className="grid grid-cols-2 gap-1.5 p-1">
                   {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
                     const IconOption = iconMeta.icon;
@@ -386,9 +390,9 @@ export function FileCanvasNode({
                     return (
                       <ContextMenuItem
                         key={iconKey}
-                        onFocus={() => onPreviewIcon(iconKey as FilePageElementIcon)}
-                        onPointerEnter={() => onPreviewIcon(iconKey as FilePageElementIcon)}
-                        onSelect={() => onApplyIcon(iconKey as FilePageElementIcon)}
+                        onFocus={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
+                        onPointerEnter={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
+                        onSelect={() => onApplyIcon(node, iconKey as FilePageElementIcon)}
                         className={cn(
                           'min-h-0 rounded-xl p-2',
                           elementIcon === iconKey && 'bg-sidebar-accent/55',
@@ -413,10 +417,10 @@ export function FileCanvasNode({
                 <ExpandIcon className="size-4" />
                 Resize
               </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-[15rem]" onPointerLeave={onClearSizePreview}>
+              <ContextMenuSubContent className="w-[15rem]" onPointerLeave={() => onClearSizePreview(node.id)}>
                 <div className="grid grid-cols-3 gap-1.5 p-1">
                   {RESIZE_OPTIONS.map((size) => {
-                    const isAvailable = canResize(size);
+                    const isAvailable = canResize(node.id, size);
                     const isCurrent =
                       node.size.widthUnits === size.widthUnits &&
                       node.size.heightUnits === size.heightUnits;
@@ -425,9 +429,9 @@ export function FileCanvasNode({
                       <ContextMenuItem
                         key={`${size.widthUnits}x${size.heightUnits}`}
                         disabled={!isAvailable}
-                        onFocus={() => onPreviewResize(size)}
-                        onPointerEnter={() => onPreviewResize(size)}
-                        onSelect={() => onApplyResize(size)}
+                        onFocus={() => onPreviewResize(node, size)}
+                        onPointerEnter={() => onPreviewResize(node, size)}
+                        onSelect={() => onApplyResize(node, size)}
                         className={cn(
                           'min-h-0 flex-col items-start gap-1.5 rounded-xl p-2',
                           isCurrent && 'bg-sidebar-accent/55',
@@ -447,7 +451,7 @@ export function FileCanvasNode({
             </ContextMenuSub>
           ) : null}
           <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+          <ContextMenuItem variant="destructive" onSelect={() => onDelete(node)}>
             <Trash2Icon className="size-4" />
             Delete
           </ContextMenuItem>
@@ -456,3 +460,58 @@ export function FileCanvasNode({
     </ContextMenu>
   );
 }
+
+function arePointsEqual(left?: Point, right?: Point) {
+  return left?.x === right?.x && left?.y === right?.y;
+}
+
+function areSizesEqual(
+  left: FilePageNode['size'],
+  right: FilePageNode['size'],
+) {
+  return left.widthUnits === right.widthUnits && left.heightUnits === right.heightUnits;
+}
+
+function areFileCanvasNodePropsEqual(
+  previous: FileCanvasNodeProps,
+  next: FileCanvasNodeProps,
+) {
+  if (previous.node !== next.node) {
+    return false;
+  }
+
+  if (previous.draftIcon !== next.draftIcon) {
+    return false;
+  }
+
+  if (!arePointsEqual(previous.displayPosition, next.displayPosition)) {
+    return false;
+  }
+
+  if (!arePointsEqual(previous.snapPreviewPosition, next.snapPreviewPosition)) {
+    return false;
+  }
+
+  if (!areSizesEqual(previous.displaySize, next.displaySize)) {
+    return false;
+  }
+
+  if (
+    previous.isContextMenuOpen !== next.isContextMenuOpen ||
+    previous.isDragging !== next.isDragging ||
+    previous.isEditing !== next.isEditing ||
+    previous.isResizing !== next.isResizing ||
+    previous.isSelected !== next.isSelected ||
+    previous.showGroupHeader !== next.showGroupHeader
+  ) {
+    return false;
+  }
+
+  if ((previous.isEditing || next.isEditing) && previous.editingLabel !== next.editingLabel) {
+    return false;
+  }
+
+  return true;
+}
+
+export const FileCanvasNode = memo(FileCanvasNodeComponent, areFileCanvasNodePropsEqual);
