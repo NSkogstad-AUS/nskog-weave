@@ -1085,6 +1085,28 @@ export function FileCanvasView({
       return false;
     }
 
+    if (resizingNode.kind === 'group') {
+      const resizedContentBounds = getGroupContentBounds(resizingNode.position, size);
+      const childFitsWithinGroup = nodesRef.current
+        .filter((node) => node.groupId === resizingNode.id)
+        .every((node) => {
+          const childPosition = draftPositionsRef.current[node.id] ?? node.position;
+          const childSize = draftSizes[node.id] ?? node.size;
+          const childBounds = getNodeBoundsWithSize(childPosition, childSize, node.kind);
+
+          return (
+            childBounds.left >= resizedContentBounds.left &&
+            childBounds.top >= resizedContentBounds.top &&
+            childBounds.right <= resizedContentBounds.right &&
+            childBounds.bottom <= resizedContentBounds.bottom
+          );
+        });
+
+      if (!childFitsWithinGroup) {
+        return false;
+      }
+    }
+
     const resizedBounds = getNodeBoundsWithSize(resizingNode.position, size, resizingNode.kind);
 
     return !nodesRef.current
