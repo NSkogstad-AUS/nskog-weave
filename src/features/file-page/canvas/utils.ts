@@ -85,24 +85,24 @@ export function getNodeBoundsWithSize(
 ) {
   const dimensions = getNodeDimensionsForKind(size, kind);
   const left = kind === 'group' ? position.x - GROUP_CONTENT_INSET_X : position.x;
+  const top = kind === 'group' ? position.y - GROUP_CONTENT_INSET_TOP : position.y;
 
   return {
     left,
-    top: position.y,
+    top,
     right: left + dimensions.width,
-    bottom: position.y + dimensions.height,
+    bottom: top + dimensions.height,
   };
 }
 
 export function getGroupContentBounds(position: Point, size: FilePageNodeSize) {
-  const bounds = getNodeBoundsWithSize(position, size, 'group');
   const innerDimensions = getNodeDimensions(size);
 
   return {
     left: position.x,
-    top: bounds.top + GROUP_CONTENT_INSET_TOP,
+    top: position.y,
     right: position.x + innerDimensions.width,
-    bottom: bounds.top + GROUP_CONTENT_INSET_TOP + innerDimensions.height,
+    bottom: position.y + innerDimensions.height,
   };
 }
 
