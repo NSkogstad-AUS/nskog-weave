@@ -24,11 +24,16 @@ export interface FilePageNode {
   label: string;
   description: string;
   groupId?: string | null;
+  parentNodeId?: string | null;
   kind: FilePageNodeKind;
   icon: FilePageElementIcon;
   position: Point;
   size: FilePageNodeSize;
 }
+
+export type FilePageNodeUpdates = Partial<
+  Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId' | 'parentNodeId'>
+>;
 
 export interface FilePageState {
   view: FilePageView;

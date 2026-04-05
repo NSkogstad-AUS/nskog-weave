@@ -73,6 +73,7 @@ function createNode(
           ? 'message-square'
           : 'sparkles',
     groupId: null,
+    parentNodeId: null,
     position: { x, y },
     size: {
       widthUnits: 1,

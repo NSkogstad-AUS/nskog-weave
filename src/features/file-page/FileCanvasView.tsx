@@ -37,7 +37,12 @@ import {
   snapToSlotX,
   snapToSlotY,
 } from './canvas/utils';
-import type { FilePageElementIcon, FilePageNode, FilePageNodeSize } from '@/types/filePage';
+import type {
+  FilePageElementIcon,
+  FilePageNode,
+  FilePageNodeSize,
+  FilePageNodeUpdates,
+} from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 interface FileCanvasViewProps {
@@ -46,13 +51,13 @@ interface FileCanvasViewProps {
   onMoveNodes: (positions: Record<string, Point>) => void;
   onResizeNode: (nodeId: string, size: FilePageNodeSize) => void;
   onAddNode: (node: FilePageNode) => void;
-  onUpdateNode: (
-    nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
-  ) => void;
+  onUpdateNode: (nodeId: string, updates: FilePageNodeUpdates) => void;
   onDeleteNode: (nodeId: string) => void;
   onHoverNodeChange: (node: FilePageNode | null) => void;
   onSelectNodes: (nodeIds: string[]) => void;
+  getFolderExpandState?: (node: FilePageNode) => 'hidden' | 'expand' | 'collapse';
+  onExpandFolder?: (node: FilePageNode) => void;
+  onCollapseFolder?: (node: FilePageNode) => void;
 }
 
 type DragState = {
@@ -88,6 +93,50 @@ function arePointsEqual(left?: Point, right?: Point) {
   return left?.x === right?.x && left?.y === right?.y;
 }
 
+function getConnectorPath(
+  parentBounds: ReturnType<typeof getNodeBoundsWithSize>,
+  childBounds: ReturnType<typeof getNodeBoundsWithSize>,
+) {
+  const parentCenter = {
+    x: (parentBounds.left + parentBounds.right) / 2,
+    y: (parentBounds.top + parentBounds.bottom) / 2,
+  };
+  const childCenter = {
+    x: (childBounds.left + childBounds.right) / 2,
+    y: (childBounds.top + childBounds.bottom) / 2,
+  };
+  const deltaX = childCenter.x - parentCenter.x;
+  const deltaY = childCenter.y - parentCenter.y;
+
+  if (Math.abs(deltaX) >= Math.abs(deltaY)) {
+    const direction = deltaX >= 0 ? 1 : -1;
+    const start = {
+      x: direction > 0 ? parentBounds.right : parentBounds.left,
+      y: parentCenter.y,
+    };
+    const end = {
+      x: direction > 0 ? childBounds.left : childBounds.right,
+      y: childCenter.y,
+    };
+    const controlOffset = Math.max(32, Math.abs(end.x - start.x) * 0.45);
+
+    return `M ${start.x} ${start.y} C ${start.x + controlOffset * direction} ${start.y}, ${end.x - controlOffset * direction} ${end.y}, ${end.x} ${end.y}`;
+  }
+
+  const direction = deltaY >= 0 ? 1 : -1;
+  const start = {
+    x: parentCenter.x,
+    y: direction > 0 ? parentBounds.bottom : parentBounds.top,
+  };
+  const end = {
+    x: childCenter.x,
+    y: direction > 0 ? childBounds.top : childBounds.bottom,
+  };
+  const controlOffset = Math.max(28, Math.abs(end.y - start.y) * 0.45);
+
+  return `M ${start.x} ${start.y} C ${start.x} ${start.y + controlOffset * direction}, ${end.x} ${end.y - controlOffset * direction}, ${end.x} ${end.y}`;
+}
+
 export function FileCanvasView({
   nodes,
   selectedNodeIds,
@@ -98,6 +147,9 @@ export function FileCanvasView({
   onDeleteNode,
   onHoverNodeChange,
   onSelectNodes,
+  getFolderExpandState,
+  onExpandFolder,
+  onCollapseFolder,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const releaseTimerRef = useRef<number | null>(null);
@@ -153,6 +205,39 @@ export function FileCanvasView({
   const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
   const selectedIdSet = useMemo(() => new Set(displaySelectedNodeIds), [displaySelectedNodeIds]);
   const dragNodeIdSet = useMemo(() => new Set(dragState?.nodeIds ?? []), [dragState?.nodeIds]);
+  const connectorPaths = useMemo(() => {
+    const nodeMap = new Map(renderedNodes.map((node) => [node.id, node]));
+
+    return renderedNodes.flatMap((node) => {
+      if (!node.parentNodeId) {
+        return [];
+      }
+
+      const parentNode = nodeMap.get(node.parentNodeId);
+
+      if (!parentNode) {
+        return [];
+      }
+
+      const parentBounds = getNodeBoundsWithSize(
+        draftPositions[node.parentNodeId] ?? parentNode.position,
+        draftSizes[node.parentNodeId] ?? parentNode.size,
+        parentNode.kind,
+      );
+      const childBounds = getNodeBoundsWithSize(
+        draftPositions[node.id] ?? node.position,
+        draftSizes[node.id] ?? node.size,
+        node.kind,
+      );
+
+      return [
+        {
+          id: `${node.parentNodeId}->${node.id}`,
+          path: getConnectorPath(parentBounds, childBounds),
+        },
+      ];
+    });
+  }, [draftPositions, draftSizes, renderedNodes]);
   const outerCanvasFields = useMemo(() => {
     const baseFieldPadding = GRID_SIZE * 1.5;
     const activeFieldPadding = GRID_SIZE * 2.5;
@@ -1720,6 +1805,31 @@ export function FileCanvasView({
                 }}
               />
             ))}
+            {connectorPaths.length > 0 ? (
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-visible"
+              >
+                {connectorPaths.map((connector) => (
+                  <g key={connector.id}>
+                    <path
+                      d={connector.path}
+                      fill="none"
+                      stroke="rgba(148, 163, 184, 0.18)"
+                      strokeWidth={5}
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d={connector.path}
+                      fill="none"
+                      stroke="rgba(100, 116, 139, 0.6)"
+                      strokeWidth={1.6}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                ))}
+              </svg>
+            ) : null}
             {renderedNodes.map((node) => {
             const displayPosition = draftPositions[node.id] ?? node.position;
             const previewPosition = snapPreviewPositions[node.id];
@@ -1727,6 +1837,7 @@ export function FileCanvasView({
               activeSnapPreviewIds[node.id] &&
               previewPosition &&
               !arePointsEqual(previewPosition, displayPosition);
+            const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
 
             return (
               <FileCanvasNode
@@ -1758,6 +1869,9 @@ export function FileCanvasView({
                 onPreviewResize={previewNodeResize}
                 onResizeHandlePointerDown={node.kind === 'group' ? beginNodeResize : undefined}
                 onSelect={selectSingleNode}
+                onCollapseFolder={onCollapseFolder}
+                onExpandFolder={onExpandFolder}
+                folderExpandState={folderExpandState}
                 showGroupHeader={node.kind !== 'group'}
                 onStartRename={startNodeRename}
                 onStopRename={stopNodeRename}

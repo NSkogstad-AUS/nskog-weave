@@ -2,7 +2,7 @@ import { useCallback } from 'react';
 import { FileTextIcon } from 'lucide-react';
 
 import type { WorkspaceFile, WorkspaceFolder } from '@/data/sidebarNavigation';
-import type { FilePageNode, FilePageNodeSize, FilePageView } from '@/types/filePage';
+import type { FilePageNode, FilePageNodeSize, FilePageNodeUpdates, FilePageView } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 import { FileWorkspaceHeader } from './FileWorkspaceHeader';
 import { FileCanvasView } from './FileCanvasView';
@@ -19,10 +19,7 @@ interface FileWorkspaceProps {
   onMoveNodes: (positions: Record<string, Point>) => void;
   onResizeNode: (nodeId: string, size: FilePageNodeSize) => void;
   onAddNode: (node: FilePageNode) => void;
-  onUpdateNode: (
-    nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
-  ) => void;
+  onUpdateNode: (nodeId: string, updates: FilePageNodeUpdates) => void;
   onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   onHoveredSidebarItemChange: (
@@ -128,6 +125,15 @@ export function FileWorkspace({
             onDeleteNode={activeFile ? onDeleteNode : folderCanvasState.deleteNode}
             onHoverNodeChange={handleHoverNodeChange}
             onSelectNodes={activeFile ? onSelectNodes : folderCanvasState.selectNodes}
+            getFolderExpandState={
+              activeFile ? undefined : folderCanvasState.getFolderExpandState
+            }
+            onExpandFolder={
+              activeFile ? undefined : folderCanvasState.expandFolderNode
+            }
+            onCollapseFolder={
+              activeFile ? undefined : folderCanvasState.collapseFolderNode
+            }
           />
         ) : (
           <FileExplorerView

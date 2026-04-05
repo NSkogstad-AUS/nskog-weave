@@ -11,6 +11,7 @@ import {
   type FilePageNode,
   type FilePageNodeKind,
   type FilePageNodeSize,
+  type FilePageNodeUpdates,
   type FilePageState,
   type FilePageView,
 } from '@/types/filePage';
@@ -69,6 +70,10 @@ function hydrateFilePages(): FilePagesStore {
             typeof node?.groupId === 'string' && node.groupId.trim().length > 0
               ? node.groupId
               : null;
+          const parentNodeId =
+            typeof node?.parentNodeId === 'string' && node.parentNodeId.trim().length > 0
+              ? node.parentNodeId
+              : null;
 
           if (
             typeof node?.id !== 'string' ||
@@ -86,6 +91,7 @@ function hydrateFilePages(): FilePagesStore {
               label: node.label,
               description: typeof node.description === 'string' ? node.description : '',
               groupId,
+              parentNodeId,
               kind,
               icon: normalizeIcon(node.icon),
               position: {
@@ -213,7 +219,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   function updateNode(
     nodeId: string,
-    updates: Partial<Pick<FilePageNode, 'label' | 'description' | 'icon' | 'size' | 'groupId'>>,
+    updates: FilePageNodeUpdates,
   ) {
     updateActivePage((page) => ({
       ...page,

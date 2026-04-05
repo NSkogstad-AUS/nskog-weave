@@ -43,6 +43,7 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
+  folderExpandState?: 'hidden' | 'expand' | 'collapse';
   isContextMenuOpen: boolean;
   isDragging: boolean;
   isEditing: boolean;
@@ -59,6 +60,8 @@ interface FileCanvasNodeProps {
   onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
   onDelete: (node: FilePageNode) => void;
   onEditingLabelChange: (value: string) => void;
+  onCollapseFolder?: (node: FilePageNode) => void;
+  onExpandFolder?: (node: FilePageNode) => void;
   onHoverChange: (node: FilePageNode, hovered: boolean) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FilePageNode) => void;
   onPreviewIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
@@ -80,6 +83,7 @@ function FileCanvasNodeComponent({
   displayPosition,
   displaySize,
   editingLabel,
+  folderExpandState = 'hidden',
   isContextMenuOpen,
   isDragging,
   isEditing,
@@ -96,6 +100,8 @@ function FileCanvasNodeComponent({
   onContextMenuOpenChange,
   onDelete,
   onEditingLabelChange,
+  onCollapseFolder,
+  onExpandFolder,
   onHoverChange,
   onPointerDown,
   onPreviewIcon,
@@ -376,6 +382,18 @@ function FileCanvasNodeComponent({
             <PencilLineIcon className="size-4" />
             Rename
           </ContextMenuItem>
+          {folderExpandState === 'expand' && onExpandFolder ? (
+            <ContextMenuItem onSelect={() => onExpandFolder(node)}>
+              <ExpandIcon className="size-4" />
+              Expand folder
+            </ContextMenuItem>
+          ) : null}
+          {folderExpandState === 'collapse' && onCollapseFolder ? (
+            <ContextMenuItem onSelect={() => onCollapseFolder(node)}>
+              <ExpandIcon className="size-4" />
+              Collapse folder
+            </ContextMenuItem>
+          ) : null}
           {node.kind === 'element' ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
@@ -502,6 +520,7 @@ function areFileCanvasNodePropsEqual(
     previous.isEditing !== next.isEditing ||
     previous.isResizing !== next.isResizing ||
     previous.isSelected !== next.isSelected ||
+    previous.folderExpandState !== next.folderExpandState ||
     previous.showGroupHeader !== next.showGroupHeader
   ) {
     return false;
