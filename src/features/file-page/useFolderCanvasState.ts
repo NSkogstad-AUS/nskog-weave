@@ -7,8 +7,15 @@ import {
   type WorkspaceFile,
   type WorkspaceFolder,
 } from '@/data/sidebarNavigation';
-import { SLOT_STEP_X, SLOT_STEP_Y } from './canvas/constants';
-import { clampToCanvas, resolveSnapPositions } from './canvas/utils';
+import { GROUP_MIN_GRID_UNITS, SLOT_STEP_X, SLOT_STEP_Y } from './canvas/constants';
+import {
+  clampNodePositionToBounds,
+  clampToCanvas,
+  getGroupContentBounds,
+  getNodeDimensionsForKind,
+  getUnitsForDimension,
+  resolveSnapPositions,
+} from './canvas/utils';
 import type { FilePageNode, FilePageNodeSize, FilePageNodeUpdates } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -140,6 +147,59 @@ function collectDescendantNodeIds(nodes: FilePageNode[], rootNodeId: string) {
   }
 
   return descendantIds;
+}
+
+function canNodesShareGroupSpace(leftNode: FilePageNode | undefined, rightNode: FilePageNode | undefined) {
+  if (!leftNode || !rightNode || leftNode.id === rightNode.id) {
+    return false;
+  }
+
+  if (leftNode.kind === 'group' && rightNode.kind !== 'group') {
+    return rightNode.groupId === leftNode.id;
+  }
+
+  if (rightNode.kind === 'group' && leftNode.kind !== 'group') {
+    return leftNode.groupId === rightNode.id;
+  }
+
+  return false;
+}
+
+function getExpandedGroupSize(
+  groupNode: FilePageNode,
+  memberNodes: FilePageNode[],
+) {
+  const basePosition = groupNode.position;
+  const currentSize = groupNode.size;
+
+  const requiredDimensions = memberNodes.reduce(
+    (dimensions, memberNode) => {
+      const memberDimensions = getNodeDimensionsForKind(memberNode.size, memberNode.kind);
+
+      return {
+        width: Math.max(
+          dimensions.width,
+          memberNode.position.x - basePosition.x + memberDimensions.width,
+        ),
+        height: Math.max(
+          dimensions.height,
+          memberNode.position.y - basePosition.y + memberDimensions.height,
+        ),
+      };
+    },
+    getNodeDimensionsForKind(currentSize),
+  );
+
+  return {
+    widthUnits: Math.max(
+      currentSize.widthUnits,
+      getUnitsForDimension(requiredDimensions.width, SLOT_STEP_X, GROUP_MIN_GRID_UNITS),
+    ),
+    heightUnits: Math.max(
+      currentSize.heightUnits,
+      getUnitsForDimension(requiredDimensions.height, SLOT_STEP_Y, GROUP_MIN_GRID_UNITS),
+    ),
+  };
 }
 
 export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
@@ -396,12 +456,21 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
       const existingNodes = current[activeFolder.id] ?? baseNodes;
       const existingById = new Map(existingNodes.map((entry) => [entry.id, entry]));
       const parentNode = existingById.get(node.id) ?? node;
+      const parentGroupId = parentNode.groupId ?? null;
+      const parentGroupNode =
+        parentGroupId ? existingById.get(parentGroupId) ?? null : null;
       const nextNodes = [
         ...sourceFolder.children.map((folder) =>
-          createFolderNode(folder, { x: 0, y: 0 }, parentNode.id),
+          ({
+            ...createFolderNode(folder, { x: 0, y: 0 }, parentNode.id),
+            groupId: parentGroupId,
+          }) satisfies FilePageNode,
         ),
         ...sourceFolder.files.map((file) =>
-          createFileNode(file, { x: 0, y: 0 }, parentNode.id),
+          ({
+            ...createFileNode(file, { x: 0, y: 0 }, parentNode.id),
+            groupId: parentGroupId,
+          }) satisfies FilePageNode,
         ),
       ].filter((childNode) => !existingById.has(childNode.id));
 
@@ -416,19 +485,54 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
         };
         return positions;
       }, {});
+      const positionedSeedNodes = nextNodes.map((childNode) => ({
+        ...childNode,
+        position: desiredPositions[childNode.id],
+      }));
+      const nextGroupSize =
+        parentGroupNode && parentGroupNode.kind === 'group'
+          ? getExpandedGroupSize(
+              parentGroupNode,
+              [
+                ...existingNodes.filter((entry) => entry.groupId === parentGroupNode.id),
+                ...positionedSeedNodes,
+              ],
+            )
+          : null;
+      const groupBounds =
+        parentGroupNode && parentGroupNode.kind === 'group'
+          ? getGroupContentBounds(parentGroupNode.position, nextGroupSize ?? parentGroupNode.size)
+          : null;
       const resolvedPositions = resolveSnapPositions(
         desiredPositions,
         nextNodes.map((childNode) => childNode.id),
-        existingNodes,
+        existingNodes.filter((entry) => entry.id !== parentGroupId),
         desiredPositions,
         Object.fromEntries(nextNodes.map((childNode) => [childNode.id, childNode.size])),
-        undefined,
+        (leftNodeId, rightNodeId) => {
+          const leftNode =
+            nextNodes.find((childNode) => childNode.id === leftNodeId) ?? existingById.get(leftNodeId);
+          const rightNode =
+            nextNodes.find((childNode) => childNode.id === rightNodeId) ?? existingById.get(rightNodeId);
+
+          return canNodesShareGroupSpace(leftNode, rightNode);
+        },
         {
-          anchorGridOrigin: parentNode.position,
-          constrainPosition: (position) => ({
-            x: clampToCanvas(position.x),
-            y: clampToCanvas(position.y),
-          }),
+          anchorGridOrigin: groupBounds
+            ? { x: groupBounds.left, y: groupBounds.top }
+            : parentNode.position,
+          constrainPosition: (position, nodeId) => {
+            const candidateNode = nextNodes.find((childNode) => childNode.id === nodeId);
+
+            if (candidateNode && groupBounds) {
+              return clampNodePositionToBounds(position, candidateNode.size, groupBounds);
+            }
+
+            return {
+              x: clampToCanvas(position.x),
+              y: clampToCanvas(position.y),
+            };
+          },
           getNodeKind: (nodeId) =>
             nextNodes.find((childNode) => childNode.id === nodeId)?.kind ??
             existingById.get(nodeId)?.kind,
@@ -441,7 +545,17 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
 
       return {
         ...current,
-        [activeFolder.id]: [...existingNodes, ...positionedNodes],
+        [activeFolder.id]: [
+          ...existingNodes.map((entry) =>
+            nextGroupSize && entry.id === parentGroupId
+              ? {
+                  ...entry,
+                  size: nextGroupSize,
+                }
+              : entry,
+          ),
+          ...positionedNodes,
+        ],
       };
     });
   }, [activeFolder, baseNodes]);
