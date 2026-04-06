@@ -128,6 +128,9 @@ export function FileWorkspace({
             getFolderExpandState={
               activeFile ? undefined : folderCanvasState.getFolderExpandState
             }
+            getFolderContents={
+              activeFile ? undefined : folderCanvasState.getFolderContents
+            }
             onExpandFolder={
               activeFile ? undefined : folderCanvasState.expandFolderNode
             }

@@ -55,6 +55,7 @@ interface FileCanvasViewProps {
   onHoverNodeChange: (node: FilePageNode | null) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   getFolderExpandState?: (node: FilePageNode) => 'hidden' | 'expand' | 'collapse';
+  getFolderContents?: (node: FilePageNode) => Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>;
   onExpandFolder?: (node: FilePageNode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
 }
@@ -158,6 +159,7 @@ export function FileCanvasView({
   onHoverNodeChange,
   onSelectNodes,
   getFolderExpandState,
+  getFolderContents,
   onExpandFolder,
   onCollapseFolder,
 }: FileCanvasViewProps) {
@@ -222,6 +224,37 @@ export function FileCanvasView({
   );
   const contentNodes = useMemo(
     () => renderedNodes.filter((node) => node.kind !== 'group'),
+    [renderedNodes],
+  );
+  const folderContentsById = useMemo(
+    () =>
+      renderedNodes.reduce<Record<string, Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>>>(
+        (accumulator, node) => {
+          if (
+            !node.parentNodeId ||
+            (node.kind !== 'folder' && node.kind !== 'file')
+          ) {
+            return accumulator;
+          }
+
+          const existingEntries = accumulator[node.parentNodeId] ?? [];
+          existingEntries.push({
+            id: node.id,
+            kind: node.kind,
+            label: node.label,
+          });
+          accumulator[node.parentNodeId] = existingEntries.sort((left, right) =>
+            left.kind === right.kind
+              ? left.label.localeCompare(right.label)
+              : left.kind === 'folder'
+                ? -1
+                : 1,
+          );
+
+          return accumulator;
+        },
+        {},
+      ),
     [renderedNodes],
   );
   const connectorPaths = useMemo(() => {
@@ -2542,6 +2575,7 @@ export function FileCanvasView({
       previewPosition &&
       !arePointsEqual(previewPosition, displayPosition);
     const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
+    const folderContents = getFolderContents?.(node) ?? folderContentsById[node.id] ?? [];
 
     return (
       <FileCanvasNode
@@ -2551,6 +2585,7 @@ export function FileCanvasView({
         displaySize={draftSizes[node.id] ?? node.size}
         draftIcon={draftIcons[node.id]}
         editingLabel={editingLabel}
+        folderContents={folderContents}
         isContextMenuOpen={contextMenuNodeId === node.id}
         isDragging={dragNodeIdSet.has(node.id)}
         isEditing={editingNodeId === node.id}

@@ -36,6 +36,7 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
+  folderContents?: Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>;
   folderExpandState?: 'hidden' | 'expand' | 'collapse';
   isContextMenuOpen: boolean;
   isDragging: boolean;
@@ -76,6 +77,7 @@ function FileCanvasNodeComponent({
   displayPosition,
   displaySize,
   editingLabel,
+  folderContents = [],
   folderExpandState = 'hidden',
   isContextMenuOpen,
   isDragging,
@@ -116,10 +118,22 @@ function FileCanvasNodeComponent({
     ? getNodeBoundsWithSize(snapPreviewPosition, displaySize, node.kind)
     : null;
   const isGroupNode = node.kind === 'group';
+  const isFolderNode = node.kind === 'folder';
   const isCompactNode = displaySize.widthUnits === 1;
+  const showFolderContents = isFolderNode && displaySize.widthUnits >= 3 && folderContents.length > 0;
+  const visibleFolderContentCount = Math.max(0, displaySize.heightUnits * 2 - 1);
+  const visibleFolderContents = showFolderContents
+    ? folderContents.slice(0, visibleFolderContentCount)
+    : [];
+  const hiddenFolderContentCount = showFolderContents
+    ? Math.max(0, folderContents.length - visibleFolderContents.length)
+    : 0;
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
   const showNodeLabel = displaySize.widthUnits >= 2;
-  const showNodeDescription = displaySize.widthUnits >= 3 && node.description.trim().length > 0;
+  const showNodeDescription =
+    displaySize.widthUnits >= 3 &&
+    node.description.trim().length > 0 &&
+    !showFolderContents;
   const nodeClassName = isGroupNode ? getGroupFrameStateClassName({ isSelected, isResizing }) : '';
 
   const buttonNode = (
@@ -221,6 +235,39 @@ function FileCanvasNodeComponent({
                 {showNodeDescription ? (
                   <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                     {node.description}
+                  </div>
+                ) : showFolderContents ? (
+                  <div className="mt-2 space-y-1.5">
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                      Contents
+                    </div>
+                    <div className="space-y-1">
+                      {visibleFolderContents.map((childNode) => {
+                        const ChildIcon = NODE_META[childNode.kind].icon;
+
+                        return (
+                          <div
+                            key={childNode.id}
+                            className="flex items-center gap-2 rounded-lg border border-slate-200/70 bg-white/65 px-2.5 py-1.5 text-left"
+                          >
+                            <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-slate-200/70 bg-white/85">
+                              <ChildIcon className="size-3 text-slate-500" />
+                            </span>
+                            <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
+                              {childNode.label}
+                            </span>
+                            <span className="text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-400">
+                              {NODE_META[childNode.kind].eyebrow}
+                            </span>
+                          </div>
+                        );
+                      })}
+                      {hiddenFolderContentCount > 0 ? (
+                        <div className="px-1 text-[10px] font-medium text-slate-400">
+                          +{hiddenFolderContentCount} more
+                        </div>
+                      ) : null}
+                    </div>
                   </div>
                 ) : (
                   <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
@@ -424,6 +471,25 @@ function areFileCanvasNodePropsEqual(
   }
 
   if ((previous.isEditing || next.isEditing) && previous.editingLabel !== next.editingLabel) {
+    return false;
+  }
+
+  if (previous.folderContents?.length !== next.folderContents?.length) {
+    return false;
+  }
+
+  if (
+    previous.folderContents?.some((entry, index) => {
+      const nextEntry = next.folderContents?.[index];
+
+      return (
+        !nextEntry ||
+        entry.id !== nextEntry.id ||
+        entry.kind !== nextEntry.kind ||
+        entry.label !== nextEntry.label
+      );
+    })
+  ) {
     return false;
   }
 

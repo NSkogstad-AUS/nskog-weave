@@ -28,6 +28,7 @@ import type { FilePageNode, FilePageNodeSize, FilePageNodeUpdates } from '@/type
 import type { Point } from '@/types/geometry';
 
 type FolderExpandState = 'hidden' | 'expand' | 'collapse';
+type FolderContentEntry = Pick<FilePageNode, 'id' | 'kind' | 'label'>;
 
 const FOLDER_NODE_PREFIX = 'folder:';
 const FILE_NODE_PREFIX = 'file:';
@@ -458,6 +459,37 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     return missingChildExists ? 'expand' : 'hidden';
   }, [activeFolder, activeNodes]);
 
+  const getFolderContents = useCallback((node: FilePageNode): FolderContentEntry[] => {
+    if (!activeFolder || node.kind !== 'folder') {
+      return [];
+    }
+
+    const folderId = getWorkspaceFolderId(node.id);
+
+    if (!folderId) {
+      return [];
+    }
+
+    const sourceFolder = findFolderById([activeFolder], folderId);
+
+    if (!sourceFolder) {
+      return [];
+    }
+
+    return [
+      ...sourceFolder.children.map((folder) => ({
+        id: `${FOLDER_NODE_PREFIX}${folder.id}`,
+        kind: 'folder' as const,
+        label: folder.label,
+      })),
+      ...sourceFolder.files.map((file) => ({
+        id: `${FILE_NODE_PREFIX}${file.id}`,
+        kind: 'file' as const,
+        label: file.label,
+      })),
+    ];
+  }, [activeFolder]);
+
   const expandFolderNode = useCallback((node: FilePageNode) => {
     if (!activeFolder || node.kind !== 'folder') {
       return;
@@ -616,6 +648,7 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     deleteNode,
     selectNodes,
     getFolderExpandState,
+    getFolderContents,
     expandFolderNode,
     collapseFolderNode,
   };
