@@ -2197,10 +2197,20 @@ export function FileCanvasView({
   const clearNodeSizePreview = useCallback((nodeId?: string) => {
     if (!nodeId) {
       setDraftSizes({});
+      setDraftPositions({});
       return;
     }
 
     setDraftSizes((current) => {
+      if (!(nodeId in current)) {
+        return current;
+      }
+
+      const next = { ...current };
+      delete next[nodeId];
+      return next;
+    });
+    setDraftPositions((current) => {
       if (!(nodeId in current)) {
         return current;
       }
@@ -2228,7 +2238,7 @@ export function FileCanvasView({
     });
   }, []);
 
-  const canResizeNode = useCallback((
+  const getResizePlacement = useCallback((
     nodeId: string,
     size: FilePageNode['size'],
     positionOverride?: Point,
@@ -2236,46 +2246,95 @@ export function FileCanvasView({
     const resizingNode = getNodeById(nodeId);
 
     if (!resizingNode) {
-      return false;
+      return null;
     }
 
-    const resizedPosition = positionOverride ?? resizingNode.position;
+    const basePosition = resizingNode.position;
+    const widthGrowth = Math.max(0, size.widthUnits - resizingNode.size.widthUnits);
+    const heightGrowth = Math.max(0, size.heightUnits - resizingNode.size.heightUnits);
+    const candidatePositions = positionOverride
+      ? [positionOverride]
+      : Array.from({ length: widthGrowth + 1 }, (_, leftShiftUnits) =>
+          Array.from({ length: heightGrowth + 1 }, (_, upShiftUnits) => ({
+            position: {
+              x: basePosition.x - leftShiftUnits * SLOT_STEP_X,
+              y: basePosition.y - upShiftUnits * SLOT_STEP_Y,
+            },
+            distance: leftShiftUnits + upShiftUnits,
+          })),
+        )
+          .flat()
+          .sort((left, right) => left.distance - right.distance)
+          .map(({ position }) => position);
 
-    if (resizingNode.kind === 'group') {
-      const resizedContentBounds = getGroupContentBounds(resizedPosition, size);
-      const childFitsWithinGroup = nodesRef.current
-        .filter((node) => node.groupId === resizingNode.id)
-        .every((node) => {
-          const childPosition = draftPositionsRef.current[node.id] ?? node.position;
-          const childSize = draftSizesRef.current[node.id] ?? node.size;
-          const childBounds = getNodeBoundsWithSize(childPosition, childSize, node.kind);
+    for (const resizedPosition of candidatePositions) {
+      if (resizingNode.kind === 'group') {
+        const resizedContentBounds = getGroupContentBounds(resizedPosition, size);
+        const childFitsWithinGroup = nodesRef.current
+          .filter((node) => node.groupId === resizingNode.id)
+          .every((node) => {
+            const childPosition = draftPositionsRef.current[node.id] ?? node.position;
+            const childSize = draftSizesRef.current[node.id] ?? node.size;
+            const childBounds = getNodeBoundsWithSize(childPosition, childSize, node.kind);
+
+            return (
+              childBounds.left >= resizedContentBounds.left &&
+              childBounds.top >= resizedContentBounds.top &&
+              childBounds.right <= resizedContentBounds.right &&
+              childBounds.bottom <= resizedContentBounds.bottom
+            );
+          });
+
+        if (!childFitsWithinGroup) {
+          continue;
+        }
+      }
+
+      if (resizingNode.groupId) {
+        const parentBounds = getGroupBounds(resizingNode.groupId, draftPositionsRef.current);
+
+        if (!parentBounds) {
+          continue;
+        }
+
+        const clampedPosition = clampNodePositionToBounds(resizedPosition, size, parentBounds);
+
+        if (clampedPosition.x !== resizedPosition.x || clampedPosition.y !== resizedPosition.y) {
+          continue;
+        }
+      }
+
+      const resizedBounds = getNodeBoundsWithSize(resizedPosition, size, resizingNode.kind);
+      const collides = nodesRef.current
+        .filter((node) => node.id !== nodeId)
+        .some((node) => {
+          const otherPosition = draftPositionsRef.current[node.id] ?? node.position;
+          const otherSize = draftSizesRef.current[node.id] ?? node.size;
 
           return (
-            childBounds.left >= resizedContentBounds.left &&
-            childBounds.top >= resizedContentBounds.top &&
-            childBounds.right <= resizedContentBounds.right &&
-            childBounds.bottom <= resizedContentBounds.bottom
+            !canNodesShareSpace(resizingNode, node) &&
+            boundsOverlap(resizedBounds, getNodeBoundsWithSize(otherPosition, otherSize, node.kind))
           );
         });
 
-      if (!childFitsWithinGroup) {
-        return false;
+      if (!collides) {
+        return resizedPosition;
       }
     }
 
-    const resizedBounds = getNodeBoundsWithSize(resizedPosition, size, resizingNode.kind);
+    return null;
+  }, [canNodesShareSpace, getGroupBounds, getNodeById]);
 
-    return !nodesRef.current
-      .filter((node) => node.id !== nodeId)
-      .some(
-        (node) =>
-          !canNodesShareSpace(resizingNode, node) &&
-          boundsOverlap(resizedBounds, getNodeBoundsWithSize(node.position, node.size, node.kind)),
-      );
-  }, [canNodesShareSpace, getNodeById]);
+  const canResizeNode = useCallback((
+    nodeId: string,
+    size: FilePageNode['size'],
+    positionOverride?: Point,
+  ) => Boolean(getResizePlacement(nodeId, size, positionOverride)), [getResizePlacement]);
 
   const previewNodeResize = useCallback((node: FilePageNode, size: FilePageNode['size']) => {
-    if (!canResizeNode(node.id, size)) {
+    const resizePlacement = getResizePlacement(node.id, size);
+
+    if (!resizePlacement) {
       return;
     }
 
@@ -2283,17 +2342,28 @@ export function FileCanvasView({
       ...current,
       [node.id]: size,
     }));
-  }, [canResizeNode]);
+    setDraftPositions((current) => ({
+      ...current,
+      [node.id]: resizePlacement,
+    }));
+  }, [getResizePlacement]);
 
   const applyNodeResize = useCallback((node: FilePageNode, size: FilePageNode['size']) => {
-    if (!canResizeNode(node.id, size)) {
+    const resizePlacement = getResizePlacement(node.id, size);
+
+    if (!resizePlacement) {
       return;
     }
 
     clearNodeSizePreview(node.id);
+    if (!arePointsEqual(resizePlacement, node.position)) {
+      onMoveNodesRef.current({
+        [node.id]: resizePlacement,
+      });
+    }
     onResizeNodeRef.current(node.id, size);
     onSelectNodesRef.current([node.id]);
-  }, [canResizeNode, clearNodeSizePreview]);
+  }, [clearNodeSizePreview, getResizePlacement]);
 
   const previewNodeIcon = useCallback((node: FilePageNode, icon: FilePageElementIcon) => {
     if (node.kind !== 'element') {
