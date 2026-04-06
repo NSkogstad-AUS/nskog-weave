@@ -13,13 +13,9 @@ import {
   CANVAS_PADDING,
   CANVAS_WORLD_LIMIT,
   GRID_SIZE,
-  GROUP_CONTENT_INSET_BOTTOM,
   GROUP_CONTENT_INSET_LEFT,
-  GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
-  GROUP_HEADER_HEIGHT,
   GROUP_MIN_GRID_UNITS,
-  GROUP_TITLE_UNDERLINE_INSET,
   SLOT_GAP_X,
   SLOT_GAP_Y,
   SLOT_STEP_X,
@@ -2456,130 +2452,52 @@ export function FileCanvasView({
     }));
   }, [getLocalPoint, selectSingleNode]);
 
-  function renderGroupShellOverlay(node: FilePageNode) {
+  function renderCanvasNode(node: FilePageNode) {
     const displayPosition = draftPositions[node.id] ?? node.position;
-    const displaySize = draftSizes[node.id] ?? node.size;
-    const bounds = getNodeBoundsWithSize(displayPosition, displaySize, node.kind);
-    const width = bounds.right - bounds.left;
-    const height = bounds.bottom - bounds.top;
-    const topShellHeight = GROUP_CONTENT_INSET_TOP;
-    const leftShellWidth = GROUP_CONTENT_INSET_LEFT;
-    const rightShellWidth = GROUP_CONTENT_INSET_RIGHT;
-    const bottomShellHeight = GROUP_CONTENT_INSET_BOTTOM;
-    const isSelected = selectedIdSet.has(node.id);
-    const isResizing = resizeState?.nodeId === node.id;
-    const resizeAccentClass =
-      isResizing || isSelected ? 'bg-sky-300/80' : 'bg-slate-300/70';
-    const resizeAxis = isResizing ? resizeState?.axis : null;
-    const topAccentClass =
-      resizeAxis === 'top-left' ? 'bg-sky-300/80' : 'bg-slate-300/80';
-    const leftAccentClass =
-      resizeAxis === 'top-left' ? 'bg-sky-300/80' : resizeAccentClass;
-    const rightAccentClass =
-      resizeAxis === 'top-left' ? 'bg-slate-300/70' : resizeAccentClass;
-    const bottomAccentClass =
-      resizeAxis === 'top-left' ? 'bg-slate-300/70' : resizeAccentClass;
-    const resizeHandleClass =
-      isResizing || isSelected
-        ? 'border-sky-300/80 bg-sky-50/95 text-sky-600 shadow-[0_10px_24px_-16px_rgba(14,165,233,0.55)]'
-        : 'border-slate-300/80 bg-white/92 text-slate-500 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)]';
+    const previewPosition = snapPreviewPositions[node.id];
+    const showSnapPreview =
+      activeSnapPreviewIds[node.id] &&
+      previewPosition &&
+      !arePointsEqual(previewPosition, displayPosition);
+    const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
 
     return (
-      <div
-        key={`${node.id}-shell`}
-        aria-hidden="true"
-        className="pointer-events-none absolute z-30"
-        style={{
-          left: bounds.left,
-          top: bounds.top,
-          width,
-          height,
-        }}
-      >
-        <div
-          className={cn(
-            'absolute inset-0 rounded-2xl border bg-transparent shadow-[0_10px_26px_-22px_rgba(15,23,42,0.28)] transition-colors duration-150',
-            isResizing
-              ? 'border-sky-300/85 ring-2 ring-sky-200/80'
-              : isSelected
-                ? 'border-slate-900/25 ring-2 ring-slate-900/8'
-                : 'border-slate-300/85',
-          )}
-        />
-        <div className="absolute inset-x-0 top-0 rounded-t-2xl bg-[#fffbf1]/95" style={{ height: topShellHeight }} />
-        <div className="absolute left-0 bg-[#fffbf1]/95" style={{ top: topShellHeight, bottom: bottomShellHeight, width: leftShellWidth }} />
-        <div className="absolute right-0 bg-[#fffbf1]/95" style={{ top: topShellHeight, bottom: bottomShellHeight, width: rightShellWidth }} />
-        <div className="absolute inset-x-0 bottom-0 rounded-b-2xl bg-[#fffbf1]/95" style={{ height: bottomShellHeight }} />
-        <div className="absolute left-4 right-4 top-4" style={{ height: GROUP_HEADER_HEIGHT - 16 }}>
-          <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
-          <span
-            className={cn('absolute bottom-0 h-px transition-colors duration-150', topAccentClass)}
-            style={{
-              left: 52,
-              right: 52,
-            }}
-          />
-        </div>
-        <span
-          className={cn('absolute transition-colors duration-150', bottomAccentClass)}
-          style={{
-            left: 52,
-            right: 52,
-            bottom: 18,
-            height: 1,
-          }}
-        />
-        <span
-          className={cn('absolute transition-colors duration-150', leftAccentClass)}
-          style={{
-            top: topShellHeight + 18,
-            bottom: 52,
-            left: 18,
-            width: 1,
-          }}
-        />
-        <span
-          className={cn('absolute transition-colors duration-150', rightAccentClass)}
-          style={{
-            top: topShellHeight + 18,
-            bottom: 52,
-            right: 18,
-            width: 1,
-          }}
-        />
-        <span
-          role="presentation"
-          onPointerDown={(event) => beginNodeResize(event, node, 'top-left')}
-          className={cn(
-            'pointer-events-auto absolute left-2 top-11 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
-            resizeHandleClass,
-          )}
-        >
-          <span className="size-3 rounded-tl-[7px] border-l-2 border-t-2 border-current" />
-        </span>
-        <span
-          role="presentation"
-          onPointerDown={(event) => beginNodeResize(event, node, 'x')}
-          className="pointer-events-auto absolute right-0 top-0 w-5 cursor-ew-resize"
-          style={{ bottom: 44 }}
-        />
-        <span
-          role="presentation"
-          onPointerDown={(event) => beginNodeResize(event, node, 'y')}
-          className="pointer-events-auto absolute bottom-0 left-0 h-5 cursor-ns-resize"
-          style={{ right: 44 }}
-        />
-        <span
-          role="presentation"
-          onPointerDown={(event) => beginNodeResize(event, node, 'both')}
-          className={cn(
-            'pointer-events-auto absolute bottom-2 right-2 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
-            resizeHandleClass,
-          )}
-        >
-          <span className="size-3 rounded-br-[7px] border-b-2 border-r-2 border-current" />
-        </span>
-      </div>
+      <FileCanvasNode
+        key={node.id}
+        canResize={canResizeNode}
+        displayPosition={displayPosition}
+        displaySize={draftSizes[node.id] ?? node.size}
+        draftIcon={draftIcons[node.id]}
+        editingLabel={editingLabel}
+        isContextMenuOpen={contextMenuNodeId === node.id}
+        isDragging={dragNodeIdSet.has(node.id)}
+        isEditing={editingNodeId === node.id}
+        isResizing={resizeState?.nodeId === node.id}
+        resizeAxis={resizeState?.nodeId === node.id ? resizeState.axis : undefined}
+        isSelected={selectedIdSet.has(node.id)}
+        node={node}
+        snapPreviewPosition={showSnapPreview ? previewPosition : undefined}
+        onApplyIcon={applyNodeIcon}
+        onApplyResize={applyNodeResize}
+        onClearIconPreview={clearNodeIconPreview}
+        onClearSizePreview={clearNodeSizePreview}
+        onCommitRename={commitNodeRename}
+        onContextMenu={openNodeContextMenu}
+        onContextMenuOpenChange={setNodeContextMenuOpen}
+        onDelete={deleteCanvasNode}
+        onEditingLabelChange={setEditingLabel}
+        onHoverChange={setNodeHover}
+        onPointerDown={handleNodePointerDown}
+        onPreviewIcon={previewNodeIcon}
+        onPreviewResize={previewNodeResize}
+        onResizeHandlePointerDown={node.kind === 'group' ? beginNodeResize : undefined}
+        onSelect={selectSingleNode}
+        onCollapseFolder={onCollapseFolder}
+        onExpandFolder={onExpandFolder}
+        folderExpandState={folderExpandState}
+        onStartRename={startNodeRename}
+        onStopRename={stopNodeRename}
+      />
     );
   }
 
@@ -2675,54 +2593,7 @@ export function FileCanvasView({
                 }}
               />
             ))}
-            {groupNodes.map((node) => {
-            const displayPosition = draftPositions[node.id] ?? node.position;
-            const previewPosition = snapPreviewPositions[node.id];
-            const showSnapPreview =
-              activeSnapPreviewIds[node.id] &&
-              previewPosition &&
-              !arePointsEqual(previewPosition, displayPosition);
-            const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
-
-            return (
-              <FileCanvasNode
-                key={node.id}
-                canResize={canResizeNode}
-                displayPosition={displayPosition}
-                displaySize={draftSizes[node.id] ?? node.size}
-                draftIcon={draftIcons[node.id]}
-                editingLabel={editingLabel}
-                isContextMenuOpen={contextMenuNodeId === node.id}
-                isDragging={dragNodeIdSet.has(node.id)}
-                isEditing={editingNodeId === node.id}
-                isResizing={resizeState?.nodeId === node.id}
-                isSelected={selectedIdSet.has(node.id)}
-                node={node}
-                snapPreviewPosition={showSnapPreview ? previewPosition : undefined}
-                onApplyIcon={applyNodeIcon}
-                onApplyResize={applyNodeResize}
-                onClearIconPreview={clearNodeIconPreview}
-                onClearSizePreview={clearNodeSizePreview}
-                onCommitRename={commitNodeRename}
-                onContextMenu={openNodeContextMenu}
-                onContextMenuOpenChange={setNodeContextMenuOpen}
-                onDelete={deleteCanvasNode}
-                onEditingLabelChange={setEditingLabel}
-                onHoverChange={setNodeHover}
-                onPointerDown={handleNodePointerDown}
-                onPreviewIcon={previewNodeIcon}
-                onPreviewResize={previewNodeResize}
-                onResizeHandlePointerDown={node.kind === 'group' ? beginNodeResize : undefined}
-                onSelect={selectSingleNode}
-                onCollapseFolder={onCollapseFolder}
-                onExpandFolder={onExpandFolder}
-                folderExpandState={folderExpandState}
-                showGroupHeader={node.kind !== 'group'}
-                onStartRename={startNodeRename}
-                onStopRename={stopNodeRename}
-              />
-            );
-          })}
+            {groupNodes.map((node) => renderCanvasNode(node))}
             {groupCanvasFields.map((field) => (
               <div
                 key={field.id}
@@ -2777,7 +2648,6 @@ export function FileCanvasView({
                 ))}
               </svg>
             ) : null}
-            {groupNodes.map((node) => renderGroupShellOverlay(node))}
             {aboveGroupConnectorPaths.length > 0 ? (
               <svg
                 aria-hidden="true"
@@ -2803,54 +2673,7 @@ export function FileCanvasView({
                 ))}
               </svg>
             ) : null}
-            {contentNodes.map((node) => {
-            const displayPosition = draftPositions[node.id] ?? node.position;
-            const previewPosition = snapPreviewPositions[node.id];
-            const showSnapPreview =
-              activeSnapPreviewIds[node.id] &&
-              previewPosition &&
-              !arePointsEqual(previewPosition, displayPosition);
-            const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
-
-            return (
-              <FileCanvasNode
-                key={node.id}
-                canResize={canResizeNode}
-                displayPosition={displayPosition}
-                displaySize={draftSizes[node.id] ?? node.size}
-                draftIcon={draftIcons[node.id]}
-                editingLabel={editingLabel}
-                isContextMenuOpen={contextMenuNodeId === node.id}
-                isDragging={dragNodeIdSet.has(node.id)}
-                isEditing={editingNodeId === node.id}
-                isResizing={resizeState?.nodeId === node.id}
-                isSelected={selectedIdSet.has(node.id)}
-                node={node}
-                snapPreviewPosition={showSnapPreview ? previewPosition : undefined}
-                onApplyIcon={applyNodeIcon}
-                onApplyResize={applyNodeResize}
-                onClearIconPreview={clearNodeIconPreview}
-                onClearSizePreview={clearNodeSizePreview}
-                onCommitRename={commitNodeRename}
-                onContextMenu={openNodeContextMenu}
-                onContextMenuOpenChange={setNodeContextMenuOpen}
-                onDelete={deleteCanvasNode}
-                onEditingLabelChange={setEditingLabel}
-                onHoverChange={setNodeHover}
-                onPointerDown={handleNodePointerDown}
-                onPreviewIcon={previewNodeIcon}
-                onPreviewResize={previewNodeResize}
-                onResizeHandlePointerDown={node.kind === 'group' ? beginNodeResize : undefined}
-                onSelect={selectSingleNode}
-                onCollapseFolder={onCollapseFolder}
-                onExpandFolder={onExpandFolder}
-                folderExpandState={folderExpandState}
-                showGroupHeader={node.kind !== 'group'}
-                onStartRename={startNodeRename}
-                onStopRename={stopNodeRename}
-              />
-            );
-          })}
+            {contentNodes.map((node) => renderCanvasNode(node))}
 
             {marqueeState ? (
               <div

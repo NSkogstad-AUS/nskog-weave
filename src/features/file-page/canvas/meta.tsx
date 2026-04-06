@@ -10,6 +10,7 @@ import {
 
 import { cn } from '@/lib/utils';
 import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
+import { GROUP_CHROME } from './groupChrome';
 
 export const NODE_META = {
   folder: {
@@ -25,7 +26,7 @@ export const NODE_META = {
   group: {
     icon: ShapesIcon,
     eyebrow: 'Group',
-    className: 'border-slate-300/85 bg-[#fffbf1]/95',
+    className: GROUP_CHROME.frameClassName,
   },
   element: {
     icon: SparklesIcon,

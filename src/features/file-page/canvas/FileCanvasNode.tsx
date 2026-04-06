@@ -22,15 +22,9 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/animate-ui/components/animate/tooltip';
-import {
-  GROUP_CONTENT_INSET_BOTTOM,
-  GROUP_CONTENT_INSET_LEFT,
-  GROUP_CONTENT_INSET_RIGHT,
-  GROUP_CONTENT_INSET_TOP,
-  GROUP_HEADER_HEIGHT,
-  GROUP_TITLE_UNDERLINE_INSET,
-  NODE_CARD_CLASS,
-} from './constants';
+import { NODE_CARD_CLASS } from './constants';
+import { FileCanvasGroupChrome } from './FileCanvasGroupChrome';
+import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
 import { cn } from '@/lib/utils';
@@ -47,6 +41,7 @@ interface FileCanvasNodeProps {
   isDragging: boolean;
   isEditing: boolean;
   isResizing?: boolean;
+  resizeAxis?: GroupResizeAxis;
   isSelected: boolean;
   node: FilePageNode;
   snapPreviewPosition?: Point;
@@ -68,10 +63,9 @@ interface FileCanvasNodeProps {
   onResizeHandlePointerDown?: (
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
-    axis: 'x' | 'y' | 'both',
+    axis: 'x' | 'y' | 'both' | 'top-left',
   ) => void;
   onSelect: (nodeId: string) => void;
-  showGroupHeader?: boolean;
   onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
   canResize: (nodeId: string, size: FilePageNode['size']) => boolean;
@@ -87,6 +81,7 @@ function FileCanvasNodeComponent({
   isDragging,
   isEditing,
   isResizing = false,
+  resizeAxis,
   isSelected,
   node,
   snapPreviewPosition,
@@ -107,7 +102,6 @@ function FileCanvasNodeComponent({
   onPreviewResize,
   onResizeHandlePointerDown,
   onSelect,
-  showGroupHeader = true,
   onStartRename,
   onStopRename,
   canResize,
@@ -126,14 +120,7 @@ function FileCanvasNodeComponent({
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
   const showNodeLabel = displaySize.widthUnits >= 2;
   const showNodeDescription = displaySize.widthUnits >= 3 && node.description.trim().length > 0;
-  const showOverlayGroupShell = isGroupNode && !showGroupHeader;
-  const showResizeHandle = isGroupNode && !showOverlayGroupShell && onResizeHandlePointerDown;
-  const groupResizeAccentClass =
-    isResizing || isSelected ? 'bg-sky-300/80' : 'bg-slate-300/70';
-  const groupResizeHandleClass =
-    isResizing || isSelected
-      ? 'border-sky-300/80 bg-sky-50/95 text-sky-600 shadow-[0_10px_24px_-16px_rgba(14,165,233,0.55)]'
-      : 'border-slate-300/80 bg-white/92 text-slate-500 shadow-[0_10px_24px_-18px_rgba(15,23,42,0.22)]';
+  const nodeClassName = isGroupNode ? getGroupFrameStateClassName({ isSelected, isResizing }) : '';
 
   const buttonNode = (
     <button
@@ -154,18 +141,15 @@ function FileCanvasNodeComponent({
       className={cn(
         NODE_CARD_CLASS,
         'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
-        showOverlayGroupShell ? 'border-transparent bg-transparent shadow-none' : meta.className,
+        meta.className,
+        nodeClassName,
         isGroupNode && 'overflow-hidden',
         isDragging && 'z-40 transition-none',
-        isDragging &&
-          isGroupNode &&
-          (showOverlayGroupShell ? 'shadow-none' : 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]'),
+        isDragging && isGroupNode && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
         isDragging && !isGroupNode && 'shadow-none',
         !isDragging &&
           'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
         snapPreviewPosition && isDragging && 'opacity-94',
-        isSelected && !showOverlayGroupShell && 'border-slate-900/25 ring-2 ring-slate-900/8',
-        isResizing && !showOverlayGroupShell && 'border-sky-300/85 ring-2 ring-sky-200/80',
       )}
       style={{
         width: dimensions.width,
@@ -174,97 +158,18 @@ function FileCanvasNodeComponent({
       }}
     >
       {isGroupNode ? (
-        <>
-          {!showOverlayGroupShell ? (
-            <>
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'pointer-events-none absolute bottom-[18px] transition-colors duration-150',
-                  groupResizeAccentClass,
-                )}
-                style={{
-                  left: GROUP_CONTENT_INSET_LEFT,
-                  right: GROUP_CONTENT_INSET_RIGHT + 22,
-                  height: 1,
-                }}
-              />
-              <span
-                aria-hidden="true"
-                className={cn(
-                  'pointer-events-none absolute right-[18px] transition-colors duration-150',
-                  groupResizeAccentClass,
-                )}
-                style={{
-                  top: GROUP_CONTENT_INSET_TOP,
-                  bottom: GROUP_CONTENT_INSET_BOTTOM + 22,
-                  width: 1,
-                }}
-              />
-            </>
-          ) : null}
-          {showGroupHeader ? (
-            <div className="relative z-10 h-full">
-              <div
-                className="absolute left-4 right-4 top-4"
-                style={{ height: GROUP_HEADER_HEIGHT - 16 }}
-              >
-                {isEditing ? (
-                  <input
-                    autoFocus
-                    value={editingLabel}
-                    onChange={(event) => onEditingLabelChange(event.target.value)}
-                    onBlur={() => onCommitRename(node)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        onCommitRename(node);
-                      }
-                      if (event.key === 'Escape') {
-                        onStopRename();
-                      }
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
-                  />
-                ) : (
-                  <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
-                )}
-                <span
-                  aria-hidden="true"
-                  className="pointer-events-none absolute bottom-0 h-px bg-slate-300/80"
-                  style={{
-                    left: GROUP_TITLE_UNDERLINE_INSET,
-                    right: GROUP_TITLE_UNDERLINE_INSET,
-                  }}
-                />
-              </div>
-            </div>
-          ) : null}
-          {showResizeHandle ? (
-            <>
-              <span
-                role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'x')}
-                className="absolute inset-y-0 right-0 z-20 w-5 cursor-ew-resize"
-              />
-              <span
-                role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'y')}
-                className="absolute bottom-0 left-0 right-0 z-20 h-5 cursor-ns-resize"
-              />
-              <span
-                role="presentation"
-                onPointerDown={(event) => onResizeHandlePointerDown?.(event, node, 'both')}
-                className={cn(
-                  'absolute bottom-2 right-2 z-30 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
-                  groupResizeHandleClass,
-                )}
-              >
-                <span className="size-3 rounded-br-[7px] border-b-2 border-r-2 border-current" />
-              </span>
-            </>
-          ) : null}
-        </>
+        <FileCanvasGroupChrome
+          editingLabel={editingLabel}
+          isEditing={isEditing}
+          isResizing={isResizing}
+          resizeAxis={resizeAxis}
+          isSelected={isSelected}
+          node={node}
+          onCommitRename={onCommitRename}
+          onEditingLabelChange={onEditingLabelChange}
+          onResizeHandlePointerDown={onResizeHandlePointerDown}
+          onStopRename={onStopRename}
+        />
       ) : (
         <div
           className={cn(
@@ -513,8 +418,7 @@ function areFileCanvasNodePropsEqual(
     previous.isEditing !== next.isEditing ||
     previous.isResizing !== next.isResizing ||
     previous.isSelected !== next.isSelected ||
-    previous.folderExpandState !== next.folderExpandState ||
-    previous.showGroupHeader !== next.showGroupHeader
+    previous.folderExpandState !== next.folderExpandState
   ) {
     return false;
   }
