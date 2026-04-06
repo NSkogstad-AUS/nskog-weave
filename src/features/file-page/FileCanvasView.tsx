@@ -1956,6 +1956,14 @@ export function FileCanvasView({
       const offsetY = triggerBaseSnapPosition.y - baseAnchorSnapPosition.y;
       const needsEdgeCandidates =
         triggerNode.kind === 'group' || targetNode.kind === 'group';
+      const outsideTopY =
+        targetSnapPosition.y - triggerSize.heightUnits * SLOT_STEP_Y - offsetY;
+      const outsideBottomY =
+        targetSnapPosition.y + targetSize.heightUnits * SLOT_STEP_Y - offsetY;
+      const outsideLeftX =
+        targetSnapPosition.x - triggerSize.widthUnits * SLOT_STEP_X - offsetX;
+      const outsideRightX =
+        targetSnapPosition.x + targetSize.widthUnits * SLOT_STEP_X - offsetX;
       const buildSlotCandidates = (startOffset: number, endOffset: number, step: number) =>
         Array.from({ length: endOffset - startOffset + 1 }, (_, index) =>
           (startOffset + index) * step,
@@ -1980,20 +1988,24 @@ export function FileCanvasView({
           ? [
               ...horizontalAnchorCandidates.map((x) => ({
                 x,
-                y: targetSnapPosition.y - triggerSize.heightUnits * SLOT_STEP_Y - offsetY,
+                y: outsideTopY,
               })),
               ...horizontalAnchorCandidates.map((x) => ({
                 x,
-                y: targetSnapPosition.y + targetSize.heightUnits * SLOT_STEP_Y - offsetY,
+                y: outsideBottomY,
               })),
               ...verticalAnchorCandidates.map((y) => ({
-                x: targetSnapPosition.x - triggerSize.widthUnits * SLOT_STEP_X - offsetX,
+                x: outsideLeftX,
                 y,
               })),
               ...verticalAnchorCandidates.map((y) => ({
-                x: targetSnapPosition.x + targetSize.widthUnits * SLOT_STEP_X - offsetX,
+                x: outsideRightX,
                 y,
               })),
+              { x: outsideLeftX, y: outsideTopY },
+              { x: outsideRightX, y: outsideTopY },
+              { x: outsideLeftX, y: outsideBottomY },
+              { x: outsideRightX, y: outsideBottomY },
             ]
           : undefined,
       };
