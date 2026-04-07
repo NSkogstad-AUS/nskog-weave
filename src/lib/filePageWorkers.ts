@@ -3,10 +3,12 @@ import type {
   FilePageWorkerFocus,
   FilePageWorkerMode,
   FilePageWorkerOutputMode,
+  FilePageWorkerRunMode,
 } from '@/types/filePage';
 
 export const DEFAULT_FILE_PAGE_WORKER_MODE: FilePageWorkerMode = 'ai-ready';
 export const DEFAULT_FILE_PAGE_WORKER_FOCUS: FilePageWorkerFocus = 'general';
+export const DEFAULT_FILE_PAGE_WORKER_RUN_MODE: FilePageWorkerRunMode = 'balanced';
 export const DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE: FilePageWorkerOutputMode = 'per-file';
 
 type WorkerFocusMeta = {
@@ -18,6 +20,13 @@ type WorkerFocusMeta = {
 type WorkerOutputModeMeta = {
   label: string;
   shortLabel: string;
+};
+
+type WorkerRunModeMeta = {
+  label: string;
+  shortLabel: string;
+  timeoutLabel: string;
+  clientTimeoutMs: number;
 };
 
 type WorkerModeMeta = {
@@ -110,6 +119,27 @@ const WORKER_OUTPUT_MODE_META: Record<FilePageWorkerOutputMode, WorkerOutputMode
   },
 };
 
+const WORKER_RUN_MODE_META: Record<FilePageWorkerRunMode, WorkerRunModeMeta> = {
+  fast: {
+    label: 'Fast',
+    shortLabel: 'Fast',
+    timeoutLabel: '30s',
+    clientTimeoutMs: 30_000,
+  },
+  balanced: {
+    label: 'Balanced',
+    shortLabel: 'Balanced',
+    timeoutLabel: '50s',
+    clientTimeoutMs: 50_000,
+  },
+  thorough: {
+    label: 'Thorough',
+    shortLabel: 'Thorough',
+    timeoutLabel: '75s',
+    clientTimeoutMs: 75_000,
+  },
+};
+
 export function resolveWorkerMode(mode: FilePageNode['workerMode']): FilePageWorkerMode {
   return mode ?? DEFAULT_FILE_PAGE_WORKER_MODE;
 }
@@ -133,6 +163,23 @@ export function getWorkerFocusOptions() {
   }));
 }
 
+export function resolveWorkerRunMode(
+  runMode: FilePageNode['workerRunMode'],
+): FilePageWorkerRunMode {
+  return runMode ?? DEFAULT_FILE_PAGE_WORKER_RUN_MODE;
+}
+
+export function getWorkerRunModeMeta(runMode: FilePageNode['workerRunMode']) {
+  return WORKER_RUN_MODE_META[resolveWorkerRunMode(runMode)];
+}
+
+export function getWorkerRunModeOptions() {
+  return Object.entries(WORKER_RUN_MODE_META).map(([value, meta]) => ({
+    value: value as FilePageWorkerRunMode,
+    label: meta.label,
+  }));
+}
+
 export function resolveWorkerOutputMode(
   outputMode: FilePageNode['workerOutputMode'],
 ): FilePageWorkerOutputMode {
@@ -148,6 +195,10 @@ export function getWorkerOutputModeOptions() {
     value: value as FilePageWorkerOutputMode,
     label: meta.label,
   }));
+}
+
+export function getWorkerClientTimeoutMs(runMode: FilePageNode['workerRunMode']) {
+  return getWorkerRunModeMeta(runMode).clientTimeoutMs;
 }
 
 export function getWorkerStatusMessage(

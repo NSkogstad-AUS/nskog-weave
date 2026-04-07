@@ -19,6 +19,8 @@ export const FILE_PAGE_WORKER_MODES = ['ai-ready', 'sort-data'] as const;
 export type FilePageWorkerMode = (typeof FILE_PAGE_WORKER_MODES)[number];
 export const FILE_PAGE_WORKER_FOCUSES = ['general', 'coding', 'describing', 'research'] as const;
 export type FilePageWorkerFocus = (typeof FILE_PAGE_WORKER_FOCUSES)[number];
+export const FILE_PAGE_WORKER_RUN_MODES = ['fast', 'balanced', 'thorough'] as const;
+export type FilePageWorkerRunMode = (typeof FILE_PAGE_WORKER_RUN_MODES)[number];
 export const FILE_PAGE_WORKER_OUTPUT_MODES = ['per-file', 'collated'] as const;
 export type FilePageWorkerOutputMode = (typeof FILE_PAGE_WORKER_OUTPUT_MODES)[number];
 export const FILE_PAGE_WORKER_STATUSES = ['idle', 'processing', 'complete', 'error'] as const;
@@ -57,6 +59,7 @@ export interface FilePageNode {
   size: FilePageNodeSize;
   workerMode?: FilePageWorkerMode | null;
   workerFocus?: FilePageWorkerFocus | null;
+  workerRunMode?: FilePageWorkerRunMode | null;
   workerOutputMode?: FilePageWorkerOutputMode | null;
   workerStatus?: FilePageWorkerStatus | null;
   workerProgress?: number | null;
@@ -78,6 +81,7 @@ export type FilePageNodeUpdates = Partial<
     | 'generatedByWorkerId'
     | 'workerMode'
     | 'workerFocus'
+    | 'workerRunMode'
     | 'workerOutputMode'
     | 'workerStatus'
     | 'workerProgress'

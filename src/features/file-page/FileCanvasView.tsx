@@ -121,6 +121,15 @@ type WorkerConnectionDragState = {
   targetNodeId: string | null;
 };
 
+type ConnectorPath = {
+  id: string;
+  parentNodeId: string;
+  childNodeId: string;
+  path: string;
+  layer: 'below-group' | 'above-group';
+  deletable: boolean;
+};
+
 const OUTER_WIDGET_SNAP_THRESHOLD = 4;
 const GROUP_SNAP_TOLERANCE = Math.round(Math.min(SLOT_STEP_X, SLOT_STEP_Y) * 0.25);
 const WORKER_CONNECTION_THRESHOLD_X = SLOT_STEP_X * 1.25;
@@ -352,6 +361,7 @@ export function FileCanvasView({
   const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
+  const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
   const renderedNodes = useMemo(
     () =>
       [...nodes].sort((left, right) => {
@@ -449,7 +459,7 @@ export function FileCanvasView({
   const connectorPaths = useMemo(() => {
     const nodeMap = new Map(renderedNodes.map((node) => [node.id, node]));
 
-    return renderedNodes.flatMap((node) => {
+    return renderedNodes.flatMap((node): ConnectorPath[] => {
       if (!node.parentNodeId) {
         return [];
       }
@@ -474,11 +484,14 @@ export function FileCanvasView({
       return [
         {
           id: `${node.parentNodeId}->${node.id}`,
+          parentNodeId: node.parentNodeId,
+          childNodeId: node.id,
           path: getConnectorPath(parentBounds, childBounds),
           layer:
             node.groupId && parentNode.groupId === node.groupId
               ? 'above-group'
               : 'below-group',
+          deletable: node.generatedByWorkerId !== node.parentNodeId,
         },
       ];
     });
@@ -3928,6 +3941,24 @@ export function FileCanvasView({
     selectSingleNode(node.id);
   }, [selectSingleNode]);
 
+  const deleteConnector = useCallback((connector: ConnectorPath) => {
+    if (!connector.deletable) {
+      return;
+    }
+
+    const childNode = getNodeById(connector.childNodeId);
+
+    if (!childNode || childNode.parentNodeId !== connector.parentNodeId) {
+      return;
+    }
+
+    setHoveredConnectorId((current) => (current === connector.id ? null : current));
+    onPreviewContentItemChange?.(null);
+    onUpdateNodeRef.current(childNode.id, {
+      parentNodeId: null,
+    });
+  }, [getNodeById, onPreviewContentItemChange]);
+
   const deleteCanvasNode = useCallback((node: FilePageNode) => {
     if (node.kind === 'worker') {
       cancelWorkerRequest(node.id);
@@ -4151,6 +4182,67 @@ export function FileCanvasView({
     );
   }
 
+  useEffect(() => {
+    if (
+      hoveredConnectorId &&
+      !connectorPaths.some((connector) => connector.id === hoveredConnectorId)
+    ) {
+      setHoveredConnectorId(null);
+    }
+  }, [connectorPaths, hoveredConnectorId]);
+
+  function renderConnector(connector: ConnectorPath) {
+    const isHovered = hoveredConnectorId === connector.id;
+    const glowStroke = isHovered && connector.deletable
+      ? 'rgba(244, 63, 94, 0.22)'
+      : 'rgba(148, 163, 184, 0.18)';
+    const lineStroke = isHovered && connector.deletable
+      ? 'rgba(225, 29, 72, 0.88)'
+      : 'rgba(100, 116, 139, 0.6)';
+
+    return (
+      <g key={connector.id}>
+        <path
+          d={connector.path}
+          fill="none"
+          stroke={glowStroke}
+          strokeWidth={5}
+          strokeLinecap="round"
+        />
+        <path
+          d={connector.path}
+          fill="none"
+          stroke={lineStroke}
+          strokeWidth={1.6}
+          strokeLinecap="round"
+        />
+        {connector.deletable ? (
+          <path
+            d={connector.path}
+            fill="none"
+            stroke="transparent"
+            strokeWidth={14}
+            strokeLinecap="round"
+            className="pointer-events-auto cursor-crosshair"
+            onPointerEnter={() => setHoveredConnectorId(connector.id)}
+            onPointerLeave={() =>
+              setHoveredConnectorId((current) => (current === connector.id ? null : current))
+            }
+            onPointerDown={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+            }}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              deleteConnector(connector);
+            }}
+          />
+        ) : null}
+      </g>
+    );
+  }
+
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -4265,51 +4357,17 @@ export function FileCanvasView({
             {belowGroupConnectorPaths.length > 0 ? (
               <svg
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 overflow-visible"
+                className="absolute inset-0 overflow-visible"
               >
-                {belowGroupConnectorPaths.map((connector) => (
-                  <g key={connector.id}>
-                    <path
-                      d={connector.path}
-                      fill="none"
-                      stroke="rgba(148, 163, 184, 0.18)"
-                      strokeWidth={5}
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d={connector.path}
-                      fill="none"
-                      stroke="rgba(100, 116, 139, 0.6)"
-                      strokeWidth={1.6}
-                      strokeLinecap="round"
-                    />
-                  </g>
-                ))}
+                {belowGroupConnectorPaths.map((connector) => renderConnector(connector))}
               </svg>
             ) : null}
             {aboveGroupConnectorPaths.length > 0 ? (
               <svg
                 aria-hidden="true"
-                className="pointer-events-none absolute inset-0 overflow-visible"
+                className="absolute inset-0 overflow-visible"
               >
-                {aboveGroupConnectorPaths.map((connector) => (
-                  <g key={connector.id}>
-                    <path
-                      d={connector.path}
-                      fill="none"
-                      stroke="rgba(148, 163, 184, 0.18)"
-                      strokeWidth={5}
-                      strokeLinecap="round"
-                    />
-                    <path
-                      d={connector.path}
-                      fill="none"
-                      stroke="rgba(100, 116, 139, 0.6)"
-                      strokeWidth={1.6}
-                      strokeLinecap="round"
-                    />
-                  </g>
-                ))}
+                {aboveGroupConnectorPaths.map((connector) => renderConnector(connector))}
               </svg>
             ) : null}
             {contentNodes.map((node) => renderCanvasNode(node))}
