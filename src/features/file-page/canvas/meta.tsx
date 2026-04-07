@@ -16,12 +16,12 @@ export const NODE_META = {
   folder: {
     icon: FolderIcon,
     eyebrow: 'Folder',
-    className: 'border-slate-200/80 bg-white/95',
+    className: 'border-slate-200/85 bg-white/98',
   },
   file: {
     icon: FileTextIcon,
     eyebrow: 'File',
-    className: 'border-slate-200/80 bg-white/98',
+    className: 'border-slate-200/85 bg-white/98',
   },
   group: {
     icon: ShapesIcon,
@@ -31,7 +31,7 @@ export const NODE_META = {
   element: {
     icon: SparklesIcon,
     eyebrow: 'Element',
-    className: 'border-slate-200/80 bg-white/95',
+    className: 'border-slate-200/85 bg-white/98',
   },
 } satisfies Record<
   FilePageNode['kind'],

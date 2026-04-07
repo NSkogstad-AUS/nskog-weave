@@ -134,30 +134,41 @@ function FileCanvasNodeComponent({
   const hiddenFolderContentCount = showFolderContents
     ? Math.max(0, folderContents.length - visibleFolderContents.length)
     : 0;
+  const folderItemCountLabel = `${folderContents.length} item${folderContents.length === 1 ? '' : 's'}`;
   const folderFileCount = folderContents.filter((childNode) => childNode.kind === 'file').length;
   const folderSubfolderCount = folderContents.filter((childNode) => childNode.kind === 'folder').length;
-  const folderSummaryLabel = (() => {
-    if (folderFileCount > 0 && folderSubfolderCount > 0) {
-      return `+${folderContents.length} items`;
-    }
-
-    if (folderFileCount > 0) {
-      return `+${folderFileCount} files`;
-    }
-
-    if (folderSubfolderCount > 0) {
-      return `+${folderSubfolderCount} folders`;
-    }
-
-    return `+${folderContents.length} items`;
-  })();
+  const folderMetricTokens = [
+    folderFileCount > 0 ? `${folderFileCount} file${folderFileCount === 1 ? '' : 's'}` : null,
+    folderSubfolderCount > 0
+      ? `${folderSubfolderCount} folder${folderSubfolderCount === 1 ? '' : 's'}`
+      : null,
+  ].filter((token): token is string => Boolean(token));
+  const folderSummaryText =
+    folderContents.length === 0
+      ? 'Empty folder'
+      : folderMetricTokens.length > 0
+        ? folderMetricTokens.join(' · ')
+        : folderItemCountLabel;
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
   const showNodeLabel = displaySize.widthUnits >= 2;
-  const showNodeDescription =
-    displaySize.widthUnits >= 3 &&
-    node.description.trim().length > 0 &&
-    !canShowFolderSection;
   const nodeClassName = isGroupNode ? getGroupFrameStateClassName({ isSelected, isResizing }) : '';
+  const secondaryText = isFolderNode
+    ? folderSummaryText
+    : displaySize.widthUnits >= 3 && node.description.trim().length > 0
+      ? node.description.trim()
+      : node.kind === 'element'
+        ? (elementMeta?.label ?? null)
+        : null;
+  const elementIconToneClassName =
+    elementIcon === 'lightbulb'
+      ? 'border-amber-200/80 bg-amber-50/85 text-amber-600'
+      : elementIcon === 'message-square'
+        ? 'border-sky-200/80 bg-sky-50/85 text-sky-600'
+        : elementIcon === 'target'
+          ? 'border-rose-200/80 bg-rose-50/85 text-rose-600'
+          : elementIcon === 'shapes'
+            ? 'border-violet-200/80 bg-violet-50/85 text-violet-600'
+            : 'border-emerald-200/80 bg-emerald-50/85 text-emerald-600';
 
   const buttonNode = (
     <button
@@ -244,118 +255,117 @@ function FileCanvasNodeComponent({
       ) : (
         <div
           className={cn(
-            'flex h-full items-start justify-between gap-3',
-            isCompactNode && 'items-center justify-center p-0',
+            'flex h-full flex-col',
+            isCompactNode ? 'items-center justify-center p-0' : 'gap-3.5',
           )}
         >
-          <div
-            className={cn(
-              'flex items-start gap-2.5',
-              isCompactNode && 'h-full w-full items-center justify-center gap-0',
-            )}
-          >
+          {isCompactNode ? (
             <span
               className={cn(
-                'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
-                isFilesystemNode && 'size-5 self-start rounded-none border-transparent bg-transparent',
-                isCompactNode && 'size-12 rounded-none border-transparent bg-transparent shadow-none',
+                'flex size-12 items-center justify-center',
+                !isFilesystemNode &&
+                  'rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
+                !isFilesystemNode && elementIconToneClassName,
               )}
             >
               <Icon
                 className={cn(
-                  'size-4 text-slate-600',
-                  isFilesystemNode && 'size-5 text-slate-500',
-                  isCompactNode && 'size-7 text-slate-500',
+                  'size-7',
+                  isFilesystemNode ? 'text-slate-500' : 'text-current',
                 )}
               />
             </span>
-            {!isCompactNode ? (
-              <div className="min-w-0 self-start">
-                {isEditing ? (
-                  <input
-                    autoFocus
-                    value={editingLabel}
-                    onChange={(event) => onEditingLabelChange(event.target.value)}
-                    onBlur={() => onCommitRename(node)}
-                    onKeyDown={(event) => {
-                      if (event.key === 'Enter') {
-                        onCommitRename(node);
-                      }
-                      if (event.key === 'Escape') {
-                        onStopRename();
-                      }
-                    }}
-                    onPointerDown={(event) => event.stopPropagation()}
-                    className="w-full rounded-md border border-slate-200/90 bg-white/90 px-2 py-1 text-sm font-medium text-slate-950 outline-none ring-0"
-                  />
-                ) : showNodeLabel ? (
-                  <div className="truncate text-sm font-medium text-slate-950">{node.label}</div>
-                ) : null}
-                {showNodeDescription ? (
-                  <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
-                    {node.description}
-                  </div>
-                ) : canShowFolderSection ? (
-                  <div className={cn('space-y-2', showFolderContents ? 'mt-4' : 'mt-3')}>
-                    <div className="pl-0.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                      Contents
-                    </div>
-                    {showFolderContents ? (
-                      <div className="overflow-hidden rounded-xl border border-slate-200/75 bg-slate-50/60">
-                        {visibleFolderContents.map((childNode) => {
-                          const ChildIcon = NODE_META[childNode.kind].icon;
-
-                          return (
-                            <div
-                              key={childNode.id}
-                              onPointerDown={(event) => {
-                                event.preventDefault();
-                                event.stopPropagation();
-                                onSelectFolderContentNode?.(childNode.id);
-                              }}
-                              className={cn(
-                                'flex cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-white/85',
-                                hiddenFolderContentCount > 0 ||
-                                  childNode.id !== visibleFolderContents.at(-1)?.id
-                                  ? 'border-b border-slate-200/70'
-                                  : '',
-                              )}
-                            >
-                              <span className="flex size-4 shrink-0 items-center justify-center">
-                                <ChildIcon className="size-3.5 text-slate-400" />
-                              </span>
-                              <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
-                                {childNode.label}
-                              </span>
-                              <span className="rounded-md bg-white/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
-                                {NODE_META[childNode.kind].eyebrow}
-                              </span>
-                            </div>
-                          );
-                        })}
-                        {hiddenFolderContentCount > 0 ? (
-                          <div className="bg-white/45 px-3 py-2 text-[10px] font-medium text-slate-400">
-                            +{hiddenFolderContentCount} more
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : (
-                      <div className="rounded-lg border border-slate-200/70 bg-slate-50/55 px-3 py-2.5 text-xs font-medium text-slate-500">
-                        {folderSummaryLabel}
-                        <span className="ml-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                          in this folder
-                        </span>
-                      </div>
+          ) : (
+            <>
+              <div className="flex min-w-0 items-start gap-3">
+                <span
+                  className={cn(
+                    'mt-0.5 flex shrink-0 items-center justify-center',
+                    isFilesystemNode
+                      ? 'size-5 text-slate-500'
+                      : 'size-9 rounded-2xl border shadow-[0_10px_24px_-22px_rgba(15,23,42,0.14)]',
+                    !isFilesystemNode && elementIconToneClassName,
+                  )}
+                >
+                  <Icon
+                    className={cn(
+                      'size-5',
+                      isFilesystemNode ? 'text-slate-500' : 'text-current',
                     )}
-                  </div>
-                ) : (
-                  <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-                    {elementMeta?.label ?? meta.eyebrow}
-                  </div>
-                )}
+                  />
+                </span>
+                <div className="min-w-0 flex-1">
+                  {isEditing ? (
+                    <input
+                      autoFocus
+                      value={editingLabel}
+                      onChange={(event) => onEditingLabelChange(event.target.value)}
+                      onBlur={() => onCommitRename(node)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          onCommitRename(node);
+                        }
+                        if (event.key === 'Escape') {
+                          onStopRename();
+                        }
+                      }}
+                      onPointerDown={(event) => event.stopPropagation()}
+                      className="w-full rounded-xl border border-slate-200/90 bg-white/94 px-2.5 py-1.5 text-sm font-semibold text-slate-950 outline-none ring-0"
+                    />
+                  ) : showNodeLabel ? (
+                    <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                      {node.label}
+                    </div>
+                  ) : null}
+
+                  {secondaryText ? (
+                    <div className="mt-1 text-[12px] leading-5 text-slate-500">
+                      {secondaryText}
+                    </div>
+                  ) : null}
+                </div>
               </div>
-            ) : null}
-          </div>
+
+              {canShowFolderSection && showFolderContents ? (
+                <div className="border-t border-slate-200/75 pt-4">
+                  <div className="mb-2 text-[11px] font-medium text-slate-400">Contents</div>
+                  <div className="space-y-0.5">
+                    {visibleFolderContents.map((childNode) => {
+                      const ChildIcon = NODE_META[childNode.kind].icon;
+
+                      return (
+                        <div
+                          key={childNode.id}
+                          onPointerDown={(event) => {
+                            event.preventDefault();
+                            event.stopPropagation();
+                            onSelectFolderContentNode?.(childNode.id);
+                          }}
+                          className={cn(
+                            'flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-50',
+                            childNode.id !== visibleFolderContents.at(-1)?.id &&
+                              'border-b border-slate-100',
+                          )}
+                        >
+                          <span className="flex size-4 shrink-0 items-center justify-center">
+                            <ChildIcon className="size-3.5 text-slate-400" />
+                          </span>
+                          <span className="min-w-0 truncate text-[12px] font-medium text-slate-600">
+                            {childNode.label}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {hiddenFolderContentCount > 0 ? (
+                      <div className="px-2.5 pt-2 text-[11px] text-slate-400">
+                        +{hiddenFolderContentCount} more
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+              ) : null}
+            </>
+          )}
         </div>
       )}
     </button>
