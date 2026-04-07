@@ -9,9 +9,12 @@ import {
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import {
+  DEFAULT_FILE_PAGE_WORKER_FOCUS,
+  DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
   getWorkerModeMeta,
   getWorkerOutputItemLabel,
   resolveWorkerMode,
+  resolveWorkerOutputMode,
 } from '@/lib/filePageWorkers';
 import { buildContentSnippet } from '@/lib/workspaceFiles';
 import { cn } from '@/lib/utils';
@@ -49,7 +52,9 @@ import type {
   FilePageNode,
   FilePageNodeSize,
   FilePageNodeUpdates,
+  FilePageWorkerFocus,
   FilePageWorkerMode,
+  FilePageWorkerOutputMode,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -146,6 +151,56 @@ function createContentHash(value: string | null | undefined) {
   return hash.toString(16);
 }
 
+function sanitizeFileNameSegment(value: string, fallback: string) {
+  const normalizedValue = value
+    .trim()
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .replace(/-{2,}/g, '-');
+
+  return normalizedValue.length > 0 ? normalizedValue : fallback;
+}
+
+function formatOutputTimestampParts(value: string) {
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return {
+      datePart: 'unknown-date',
+      timePart: 'unknown-time',
+    };
+  }
+
+  const year = date.getFullYear().toString().padStart(4, '0');
+  const month = `${date.getMonth() + 1}`.padStart(2, '0');
+  const day = `${date.getDate()}`.padStart(2, '0');
+  const hours = `${date.getHours()}`.padStart(2, '0');
+  const minutes = `${date.getMinutes()}`.padStart(2, '0');
+  const seconds = `${date.getSeconds()}`.padStart(2, '0');
+
+  return {
+    datePart: `${year}${month}${day}`,
+    timePart: `${hours}${minutes}${seconds}`,
+  };
+}
+
+function buildAiOutputItemId(workerId: string, sourceItemId: string) {
+  return `${workerId}:ai:${sourceItemId}`;
+}
+
+function buildAiOutputFileLabel(
+  workerLabel: string,
+  sourceLabel: string,
+  version: number,
+  generatedAt: string,
+) {
+  const workerSegment = sanitizeFileNameSegment(workerLabel, 'AI-Worker');
+  const sourceSegment = sanitizeFileNameSegment(sourceLabel, 'Output');
+  const { datePart, timePart } = formatOutputTimestampParts(generatedAt);
+
+  return `${workerSegment}_${sourceSegment}_v${version}_${datePart}_${timePart}.md`;
+}
+
 function createFallbackFileItem(node: FilePageNode): FilePageContentItem {
   return {
     id: node.id,
@@ -227,6 +282,9 @@ function getConnectorPath(
   return `M ${start.x} ${start.y} C ${start.x} ${start.y + controlOffset * direction}, ${end.x} ${end.y - controlOffset * direction}, ${end.x} ${end.y}`;
 }
 
+const AI_WORKER_REQUEST_TIMEOUT_MS = 45_000;
+const COLLATED_WORKER_SOURCE_ITEM_ID = '__collated__';
+
 export function FileCanvasView({
   nodes,
   selectedNodeIds,
@@ -260,6 +318,9 @@ export function FileCanvasView({
   const draftSelectedNodeIdsRef = useRef<string[] | null>(null);
   const contextMenuPointRef = useRef<Point | null>(null);
   const workerProcessTimersRef = useRef<Record<string, number>>({});
+  const workerRequestControllersRef = useRef<Record<string, AbortController>>({});
+  const workerRequestTimeoutsRef = useRef<Record<string, number>>({});
+  const workerRequestSignaturesRef = useRef<Record<string, string>>({});
   const nodesRef = useRef(nodes);
   const nodeMapRef = useRef(new Map(nodes.map((node) => [node.id, node])));
   const viewportRef = useRef<Point>({ x: 0, y: 0 });
@@ -639,6 +700,15 @@ export function FileCanvasView({
         window.clearInterval(timerId);
       });
       workerProcessTimersRef.current = {};
+      Object.values(workerRequestControllersRef.current).forEach((controller) => {
+        controller.abort();
+      });
+      workerRequestControllersRef.current = {};
+      Object.values(workerRequestTimeoutsRef.current).forEach((timeoutId) => {
+        window.clearTimeout(timeoutId);
+      });
+      workerRequestTimeoutsRef.current = {};
+      workerRequestSignaturesRef.current = {};
       if (releaseTimerRef.current !== null) {
         window.clearTimeout(releaseTimerRef.current);
       }
@@ -2563,6 +2633,21 @@ export function FileCanvasView({
     return sortCanvasContentItems([...dedupedByKey.values()]);
   }, [collectFolderSourceFiles, getWorkerInputNodes, resolveSourceFileItem]);
 
+  const buildWorkerSourceSignature = useCallback((
+    worker: FilePageNode,
+    item: FilePageContentItem,
+  ) =>
+    JSON.stringify({
+      workerMode: resolveWorkerMode(worker.workerMode),
+      workerFocus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerOutputMode: worker.workerOutputMode ?? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
+      workerLabel: worker.label,
+      sourceItemId: item.id,
+      sourceLabel: item.label,
+      mimeType: item.mimeType ?? '',
+      textHash: createContentHash(item.textContent),
+    }), []);
+
   const buildSortWorkerOutputItems = useCallback((workerId: string) => {
     const worker = getNodeById(workerId);
 
@@ -2599,16 +2684,17 @@ export function FileCanvasView({
 
     return JSON.stringify({
       workerMode,
+      workerFocus: worker?.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerOutputMode: worker?.workerOutputMode ?? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
+      workerLabel: worker?.label ?? '',
       inputs: inputs
         .map((node) => `${node.id}:${node.label}:${node.kind}`)
         .sort((left, right) => left.localeCompare(right)),
       files: files
-        .map((item) =>
-          [item.id, item.label, createContentHash(item.textContent), item.mimeType ?? ''].join(':'),
-        )
+        .map((item) => (worker ? buildWorkerSourceSignature(worker, item) : item.id))
         .sort((left, right) => left.localeCompare(right)),
     });
-  }, [collectWorkerSourceFiles, getNodeById, getWorkerInputNodes]);
+  }, [buildWorkerSourceSignature, collectWorkerSourceFiles, getNodeById, getWorkerInputNodes]);
 
   const clearWorkerProcessTimer = useCallback((workerId: string) => {
     const timerId = workerProcessTimersRef.current[workerId];
@@ -2619,17 +2705,41 @@ export function FileCanvasView({
     }
   }, []);
 
+  const clearWorkerRequestTimeout = useCallback((workerId: string) => {
+    const timeoutId = workerRequestTimeoutsRef.current[workerId];
+
+    if (typeof timeoutId === 'number') {
+      window.clearTimeout(timeoutId);
+      delete workerRequestTimeoutsRef.current[workerId];
+    }
+  }, []);
+
+  const cancelWorkerRequest = useCallback((workerId: string) => {
+    const controller = workerRequestControllersRef.current[workerId];
+
+    if (controller) {
+      controller.abort();
+      delete workerRequestControllersRef.current[workerId];
+    }
+
+    clearWorkerRequestTimeout(workerId);
+    delete workerRequestSignaturesRef.current[workerId];
+  }, [clearWorkerRequestTimeout]);
+
+  const getExistingWorkerOutputFolder = useCallback((worker: FilePageNode) =>
+    (worker.workerOutputFolderId ? getNodeById(worker.workerOutputFolderId) : null) ??
+    nodesRef.current.find(
+      (node) => node.kind === 'folder' && node.generatedByWorkerId === worker.id,
+    ) ??
+    null, [getNodeById]);
+
   const removeWorkerOutputFolder = useCallback((worker: FilePageNode) => {
-    const outputFolderId =
-      worker.workerOutputFolderId ??
-      nodesRef.current.find(
-        (node) => node.kind === 'folder' && node.generatedByWorkerId === worker.id,
-      )?.id;
+    const outputFolderId = getExistingWorkerOutputFolder(worker)?.id;
 
     if (outputFolderId) {
       onDeleteNodeRef.current(outputFolderId);
     }
-  }, []);
+  }, [getExistingWorkerOutputFolder]);
 
   const commitWorkerOutput = useCallback((
     workerId: string,
@@ -2644,12 +2754,7 @@ export function FileCanvasView({
     }
 
     const workerMeta = getWorkerModeMeta(worker.workerMode);
-    const existingOutputFolder =
-      (worker.workerOutputFolderId ? getNodeById(worker.workerOutputFolderId) : null) ??
-      nodesRef.current.find(
-        (node) => node.kind === 'folder' && node.generatedByWorkerId === workerId,
-      ) ??
-      null;
+    const existingOutputFolder = getExistingWorkerOutputFolder(worker);
 
     if (outputItems.length === 0) {
       if (existingOutputFolder) {
@@ -2756,7 +2861,7 @@ export function FileCanvasView({
       workerOutputFolderId: existingOutputFolder.id,
       workerLastError: null,
     });
-  }, [clearWorkerProcessTimer, getGroupBounds, getNodeById]);
+  }, [clearWorkerProcessTimer, getExistingWorkerOutputFolder, getGroupBounds, getNodeById]);
 
   const failWorkerProcessing = useCallback((workerId: string, errorMessage: string) => {
     clearWorkerProcessTimer(workerId);
@@ -2825,20 +2930,233 @@ export function FileCanvasView({
       return;
     }
 
+    if (
+      worker.workerStatus === 'processing' ||
+      workerRequestControllersRef.current[workerId]
+    ) {
+      return;
+    }
+
+    const workerOutputMode = resolveWorkerOutputMode(worker.workerOutputMode);
     const inputSignature = buildWorkerInputSignature(workerId);
     const sourceFiles = collectWorkerSourceFiles(workerId);
+    const existingOutputFolder = getExistingWorkerOutputFolder(worker);
+    const existingOutputItems = (existingOutputFolder?.contentItems ?? []).filter(
+      (item): item is FilePageContentItem => item.kind === 'file',
+    );
+    const outputFolderExists = Boolean(existingOutputFolder);
+
+    if (
+      worker.workerStatus === 'complete' &&
+      worker.workerInputSignature === inputSignature &&
+      outputFolderExists &&
+      !worker.workerLastError
+    ) {
+      return;
+    }
 
     if (sourceFiles.length === 0) {
       failWorkerProcessing(workerId, 'Connect at least one file or folder before running the worker.');
       return;
     }
 
-    if (!sourceFiles.some((item) => (item.textContent ?? '').trim().length > 0)) {
+    const sourceEntries = sourceFiles.map((item) => ({
+      ...item,
+      sourceItemId: item.id,
+      sourceSignature: buildWorkerSourceSignature(worker, item),
+    }));
+    const processableSourceFiles = sourceEntries.filter(
+      (item) => (item.textContent ?? '').trim().length > 0,
+    );
+
+    if (workerOutputMode === 'collated') {
+      if (processableSourceFiles.length === 0) {
+        failWorkerProcessing(workerId, 'No previewable text was found in the connected inputs.');
+        return;
+      }
+
+      startWorkerProgressLoop(workerId);
+      const controller = new AbortController();
+      let didTimeout = false;
+
+      workerRequestControllersRef.current[workerId] = controller;
+      workerRequestSignaturesRef.current[workerId] = inputSignature;
+      workerRequestTimeoutsRef.current[workerId] = window.setTimeout(() => {
+        didTimeout = true;
+        controller.abort();
+      }, AI_WORKER_REQUEST_TIMEOUT_MS);
+
+      try {
+        const response = await fetch('/api/worker/run', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          signal: controller.signal,
+          body: JSON.stringify({
+            mode: resolveWorkerMode(worker.workerMode),
+            focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+            outputMode: workerOutputMode,
+            workerLabel: worker.label,
+            inputs: processableSourceFiles.map((item) => ({
+              sourceItemId: item.sourceItemId,
+              label: item.label,
+              description: item.description ?? '',
+              textContent: item.textContent ?? '',
+              mimeType: item.mimeType ?? null,
+            })),
+          }),
+        });
+        const payload = await response.json().catch(() => null);
+
+        if (!response.ok) {
+          const errorMessage =
+            typeof payload?.error === 'string' && payload.error.trim().length > 0
+              ? payload.error
+              : 'The AI worker request failed.';
+          throw new Error(errorMessage);
+        }
+
+        const generatedFile =
+          Array.isArray(payload?.files)
+            ? payload.files.find(
+                (file: unknown) =>
+                  typeof file === 'object' &&
+                  file !== null &&
+                  typeof (file as { contentText?: unknown }).contentText === 'string' &&
+                  (file as { contentText: string }).contentText.trim().length > 0,
+              ) ?? null
+            : null;
+
+        if (!generatedFile) {
+          throw new Error('The AI worker returned no usable output.');
+        }
+
+        const contentText = (generatedFile as { contentText: string }).contentText.trim();
+        const descriptionValue =
+          typeof (generatedFile as { description?: unknown }).description === 'string'
+            ? (generatedFile as { description: string }).description.trim()
+            : '';
+        const existingCollatedOutput =
+          existingOutputItems.find((item) => item.sourceItemId === COLLATED_WORKER_SOURCE_ITEM_ID) ??
+          existingOutputItems[0] ??
+          null;
+        const nextVersion =
+          typeof existingCollatedOutput?.outputVersion === 'number' &&
+          Number.isFinite(existingCollatedOutput.outputVersion)
+            ? Math.max(1, existingCollatedOutput.outputVersion) + 1
+            : 1;
+        const generatedAt = new Date().toISOString();
+        const collatedItem: FilePageContentItem = {
+          id: buildAiOutputItemId(workerId, COLLATED_WORKER_SOURCE_ITEM_ID),
+          kind: 'file',
+          label: buildAiOutputFileLabel(worker.label, 'Collated', nextVersion, generatedAt),
+          description:
+            descriptionValue ||
+            buildContentSnippet(contentText, 'Collated AI-ready output from the connected inputs.'),
+          textContent: contentText,
+          mimeType: 'text/markdown',
+          sizeBytes: contentText.length,
+          sourceItemId: COLLATED_WORKER_SOURCE_ITEM_ID,
+          sourceSignature: inputSignature,
+          outputVersion: nextVersion,
+          generatedAt,
+        };
+
+        commitWorkerOutput(workerId, inputSignature, [collatedItem]);
+      } catch (error) {
+        if (controller.signal.aborted && !didTimeout) {
+          return;
+        }
+
+        failWorkerProcessing(
+          workerId,
+          didTimeout
+            ? 'AI worker timed out. Try fewer or smaller files.'
+            : error instanceof Error
+              ? error.message
+              : 'The AI worker request failed.',
+        );
+      } finally {
+        if (workerRequestControllersRef.current[workerId] === controller) {
+          delete workerRequestControllersRef.current[workerId];
+        }
+
+        clearWorkerRequestTimeout(workerId);
+        delete workerRequestSignaturesRef.current[workerId];
+      }
+
+      return;
+    }
+
+    const existingOutputsBySourceId = new Map(
+      existingOutputItems.flatMap((item) =>
+        typeof item.sourceItemId === 'string' && item.sourceItemId.trim().length > 0
+          ? [[item.sourceItemId, item] as const]
+          : [],
+      ),
+    );
+    const reusableOutputItems = sourceEntries.flatMap((item) => {
+      const existingOutput = existingOutputsBySourceId.get(item.sourceItemId);
+
+      if (!existingOutput || existingOutput.sourceSignature !== item.sourceSignature) {
+        return [];
+      }
+
+      return [
+        {
+          ...existingOutput,
+          sourceItemId: item.sourceItemId,
+          sourceSignature: item.sourceSignature,
+          outputVersion:
+            typeof existingOutput.outputVersion === 'number' && Number.isFinite(existingOutput.outputVersion)
+              ? Math.max(1, existingOutput.outputVersion)
+              : 1,
+        },
+      ];
+    });
+    const pendingSourceFiles = sourceEntries.filter(
+      (item) => !reusableOutputItems.some((output) => output.sourceItemId === item.sourceItemId),
+    );
+    const processablePendingSourceFiles = pendingSourceFiles.filter(
+      (item) => (item.textContent ?? '').trim().length > 0,
+    );
+    const preservedLegacyOutputItems = existingOutputItems.filter(
+      (item) =>
+        typeof item.sourceItemId !== 'string' ||
+        item.sourceItemId.trim().length === 0 ||
+        typeof item.sourceSignature !== 'string' ||
+        item.sourceSignature.trim().length === 0,
+    );
+    const preservedOutputItems = sortCanvasContentItems([
+      ...preservedLegacyOutputItems,
+      ...reusableOutputItems,
+    ]);
+
+    if (
+      processablePendingSourceFiles.length === 0 &&
+      preservedOutputItems.length === 0 &&
+      !sourceFiles.some((item) => (item.textContent ?? '').trim().length > 0)
+    ) {
       failWorkerProcessing(workerId, 'No previewable text was found in the connected inputs.');
       return;
     }
 
+    if (processablePendingSourceFiles.length === 0) {
+      commitWorkerOutput(workerId, inputSignature, preservedOutputItems);
+      return;
+    }
+
     startWorkerProgressLoop(workerId);
+    const controller = new AbortController();
+    let didTimeout = false;
+
+    workerRequestControllersRef.current[workerId] = controller;
+    workerRequestSignaturesRef.current[workerId] = inputSignature;
+    workerRequestTimeoutsRef.current[workerId] = window.setTimeout(() => {
+      didTimeout = true;
+      controller.abort();
+    }, AI_WORKER_REQUEST_TIMEOUT_MS);
 
     try {
       const response = await fetch('/api/worker/run', {
@@ -2846,10 +3164,14 @@ export function FileCanvasView({
         headers: {
           'Content-Type': 'application/json',
         },
+        signal: controller.signal,
         body: JSON.stringify({
           mode: resolveWorkerMode(worker.workerMode),
+          focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+          outputMode: workerOutputMode,
           workerLabel: worker.label,
-          inputs: sourceFiles.map((item) => ({
+          inputs: processablePendingSourceFiles.map((item) => ({
+            sourceItemId: item.sourceItemId,
             label: item.label,
             description: item.description ?? '',
             textContent: item.textContent ?? '',
@@ -2867,55 +3189,119 @@ export function FileCanvasView({
         throw new Error(errorMessage);
       }
 
-      const outputItems = Array.isArray(payload?.files)
+      const claimedSourceIds = new Set<string>();
+      const generatedOutputItems = Array.isArray(payload?.files)
         ? payload.files.flatMap((file: unknown, index: number) => {
             if (
               typeof file !== 'object' ||
               file === null ||
-              typeof (file as { label?: unknown }).label !== 'string' ||
               typeof (file as { contentText?: unknown }).contentText !== 'string'
             ) {
               return [];
             }
 
-            const label = (file as { label: string }).label.trim() || `AI Output ${index + 1}`;
             const contentText = (file as { contentText: string }).contentText.trim();
 
             if (contentText.length === 0) {
               return [];
             }
 
+            const explicitSourceItemId =
+              typeof (file as { sourceItemId?: unknown }).sourceItemId === 'string'
+                ? (file as { sourceItemId: string }).sourceItemId.trim()
+                : '';
+            const explicitSourceMatch =
+              explicitSourceItemId.length > 0 && !claimedSourceIds.has(explicitSourceItemId)
+                ? processablePendingSourceFiles.find((item) => item.sourceItemId === explicitSourceItemId)
+                : undefined;
+            const matchedSource =
+              explicitSourceMatch ??
+              processablePendingSourceFiles.find(
+                (item, pendingIndex) => pendingIndex === index && !claimedSourceIds.has(item.sourceItemId),
+              ) ??
+              processablePendingSourceFiles.find((item) => !claimedSourceIds.has(item.sourceItemId));
+
+            if (!matchedSource) {
+              return [];
+            }
+
+            claimedSourceIds.add(matchedSource.sourceItemId);
+
             const descriptionValue =
               typeof (file as { description?: unknown }).description === 'string'
                 ? (file as { description: string }).description.trim()
                 : '';
+            const existingOutput = existingOutputsBySourceId.get(matchedSource.sourceItemId);
+            const nextVersion =
+              typeof existingOutput?.outputVersion === 'number' && Number.isFinite(existingOutput.outputVersion)
+                ? Math.max(1, existingOutput.outputVersion) + 1
+                : 1;
+            const generatedAt = new Date().toISOString();
+            const label = buildAiOutputFileLabel(
+              worker.label,
+              matchedSource.label,
+              nextVersion,
+              generatedAt,
+            );
 
             return [
               {
-                id: `${workerId}:ai:${index}:${label.toLowerCase().replace(/\s+/g, '-')}`,
+                id: buildAiOutputItemId(workerId, matchedSource.sourceItemId),
                 kind: 'file' as const,
                 label,
-                description: descriptionValue || buildContentSnippet(contentText, 'Generated by the AI worker.'),
+                description:
+                  descriptionValue ||
+                  buildContentSnippet(contentText, `AI-ready output for ${matchedSource.label}.`),
                 textContent: contentText,
                 mimeType: 'text/markdown',
                 sizeBytes: contentText.length,
+                sourceItemId: matchedSource.sourceItemId,
+                sourceSignature: matchedSource.sourceSignature,
+                outputVersion: nextVersion,
+                generatedAt,
               },
             ];
           })
         : [];
 
-      commitWorkerOutput(workerId, inputSignature, outputItems);
+      if (generatedOutputItems.length === 0) {
+        throw new Error('The AI worker returned no usable output.');
+      }
+
+      commitWorkerOutput(
+        workerId,
+        inputSignature,
+        sortCanvasContentItems([...preservedOutputItems, ...generatedOutputItems]),
+      );
     } catch (error) {
+      if (controller.signal.aborted && !didTimeout) {
+        return;
+      }
+
       failWorkerProcessing(
         workerId,
-        error instanceof Error ? error.message : 'The AI worker request failed.',
+        didTimeout
+          ? 'AI worker timed out. Try fewer or smaller files.'
+          : error instanceof Error
+            ? error.message
+            : 'The AI worker request failed.',
       );
+    } finally {
+      if (workerRequestControllersRef.current[workerId] === controller) {
+        delete workerRequestControllersRef.current[workerId];
+      }
+
+      clearWorkerRequestTimeout(workerId);
+      delete workerRequestSignaturesRef.current[workerId];
     }
   }, [
     buildWorkerInputSignature,
+    buildWorkerSourceSignature,
+    clearWorkerRequestTimeout,
     collectWorkerSourceFiles,
     commitWorkerOutput,
     failWorkerProcessing,
+    getExistingWorkerOutputFolder,
     getNodeById,
     startWorkerProgressLoop,
   ]);
@@ -3038,6 +3424,11 @@ export function FileCanvasView({
         clearWorkerProcessTimer(workerId);
       }
     });
+    Object.keys(workerRequestControllersRef.current).forEach((workerId) => {
+      if (!activeWorkerIds.has(workerId)) {
+        cancelWorkerRequest(workerId);
+      }
+    });
 
     nodes.forEach((node) => {
       if (node.kind !== 'worker') {
@@ -3056,6 +3447,7 @@ export function FileCanvasView({
           );
 
       if (inputNodes.length === 0) {
+        cancelWorkerRequest(node.id);
         clearWorkerProcessTimer(node.id);
 
         if (outputFolderExists) {
@@ -3082,6 +3474,18 @@ export function FileCanvasView({
 
       if (workerMode === 'ai-ready') {
         if (node.workerStatus === 'processing') {
+          if (
+            workerRequestSignaturesRef.current[node.id] &&
+            workerRequestSignaturesRef.current[node.id] !== inputSignature
+          ) {
+            cancelWorkerRequest(node.id);
+            clearWorkerProcessTimer(node.id);
+            onUpdateNodeRef.current(node.id, {
+              workerStatus: 'idle',
+              workerProgress: 0,
+              workerLastError: null,
+            });
+          }
           return;
         }
 
@@ -3112,6 +3516,7 @@ export function FileCanvasView({
     });
   }, [
     buildWorkerInputSignature,
+    cancelWorkerRequest,
     clearWorkerProcessTimer,
     getNodeById,
     getWorkerInputNodes,
@@ -3186,6 +3591,8 @@ export function FileCanvasView({
       contentItems: [],
       generatedByWorkerId: null,
       workerMode: mode,
+      workerFocus: DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerOutputMode: DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
       workerStatus: 'idle',
       workerProgress: 0,
       workerOutputFolderId: null,
@@ -3523,6 +3930,7 @@ export function FileCanvasView({
 
   const deleteCanvasNode = useCallback((node: FilePageNode) => {
     if (node.kind === 'worker') {
+      cancelWorkerRequest(node.id);
       clearWorkerProcessTimer(node.id);
       const connectedNodes = nodesRef.current.filter((candidate) => candidate.parentNodeId === node.id);
 
@@ -3591,7 +3999,7 @@ export function FileCanvasView({
     }
 
     onDeleteNodeRef.current(node.id);
-  }, [clearWorkerProcessTimer]);
+  }, [cancelWorkerRequest, clearWorkerProcessTimer]);
 
   const beginNodeResize = useCallback((
     event: ReactPointerEvent<HTMLSpanElement>,
@@ -3642,13 +4050,16 @@ export function FileCanvasView({
       previewPosition &&
       !arePointsEqual(previewPosition, displayPosition);
     const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
+    const derivedFolderContents = folderContentsById[node.id];
+    const sourceFolderContents = getFolderContents?.(node);
     const folderContents =
       node.kind === 'worker'
         ? workerInputContentsById[node.id] ?? []
-        : getFolderContents?.(node) ??
-          folderContentsById[node.id] ??
-          node.contentItems ??
-          [];
+        : sourceFolderContents && sourceFolderContents.length > 0
+          ? sourceFolderContents
+          : derivedFolderContents && derivedFolderContents.length > 0
+            ? derivedFolderContents
+            : node.contentItems ?? [];
 
     return (
       <FileCanvasNode
@@ -3677,6 +4088,34 @@ export function FileCanvasView({
         onContextMenuOpenChange={setNodeContextMenuOpen}
         onDelete={deleteCanvasNode}
         onEditingLabelChange={setEditingLabel}
+        onChangeWorkerFocus={
+          node.kind === 'worker' && node.workerMode === 'ai-ready'
+            ? (workerNode, focus) => {
+                onUpdateNodeRef.current(workerNode.id, {
+                  workerFocus: focus,
+                  workerOutputFolderId: null,
+                  workerStatus: 'idle',
+                  workerProgress: 0,
+                  workerInputSignature: null,
+                  workerLastError: null,
+                });
+              }
+            : undefined
+        }
+        onChangeWorkerOutputMode={
+          node.kind === 'worker' && node.workerMode === 'ai-ready'
+            ? (workerNode, outputMode) => {
+                onUpdateNodeRef.current(workerNode.id, {
+                  workerOutputMode: outputMode,
+                  workerOutputFolderId: null,
+                  workerStatus: 'idle',
+                  workerProgress: 0,
+                  workerInputSignature: null,
+                  workerLastError: null,
+                });
+              }
+            : undefined
+        }
         onHoverChange={setNodeHover}
         onPointerDown={handleNodePointerDown}
         onPreviewIcon={previewNodeIcon}

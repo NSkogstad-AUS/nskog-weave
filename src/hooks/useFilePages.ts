@@ -8,7 +8,9 @@ import {
 import {
   FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
+  FILE_PAGE_WORKER_FOCUSES,
   FILE_PAGE_WORKER_MODES,
+  FILE_PAGE_WORKER_OUTPUT_MODES,
   FILE_PAGE_WORKER_STATUSES,
   type FilePageElementIcon,
   type FilePageContentItem,
@@ -54,6 +56,18 @@ function normalizeWorkerMode(value: unknown): FilePageNode['workerMode'] {
     : null;
 }
 
+function normalizeWorkerFocus(value: unknown): FilePageNode['workerFocus'] {
+  return FILE_PAGE_WORKER_FOCUSES.includes(value as NonNullable<FilePageNode['workerFocus']>)
+    ? (value as NonNullable<FilePageNode['workerFocus']>)
+    : null;
+}
+
+function normalizeWorkerOutputMode(value: unknown): FilePageNode['workerOutputMode'] {
+  return FILE_PAGE_WORKER_OUTPUT_MODES.includes(value as NonNullable<FilePageNode['workerOutputMode']>)
+    ? (value as NonNullable<FilePageNode['workerOutputMode']>)
+    : null;
+}
+
 function normalizeWorkerStatus(value: unknown): FilePageNode['workerStatus'] {
   return FILE_PAGE_WORKER_STATUSES.includes(value as NonNullable<FilePageNode['workerStatus']>)
     ? (value as NonNullable<FilePageNode['workerStatus']>)
@@ -92,6 +106,21 @@ function normalizeContentItems(value: unknown): FilePageContentItem[] {
             ? item.mimeType
             : null,
         sizeBytes: Number.isFinite(item?.sizeBytes) ? Math.max(0, Number(item.sizeBytes)) : null,
+        sourceItemId:
+          typeof item?.sourceItemId === 'string' && item.sourceItemId.trim().length > 0
+            ? item.sourceItemId
+            : null,
+        sourceSignature:
+          typeof item?.sourceSignature === 'string' && item.sourceSignature.trim().length > 0
+            ? item.sourceSignature
+            : null,
+        outputVersion: Number.isFinite(item?.outputVersion)
+          ? Math.max(1, Math.round(Number(item.outputVersion)))
+          : null,
+        generatedAt:
+          typeof item?.generatedAt === 'string' && item.generatedAt.trim().length > 0
+            ? item.generatedAt
+            : null,
       },
     ];
   });
@@ -164,6 +193,8 @@ function hydrateFilePages(): FilePagesStore {
                 heightUnits: normalizeUnit(node?.size?.heightUnits),
               },
               workerMode: normalizeWorkerMode(node?.workerMode),
+              workerFocus: normalizeWorkerFocus(node?.workerFocus),
+              workerOutputMode: normalizeWorkerOutputMode(node?.workerOutputMode),
               workerStatus: normalizeWorkerStatus(node?.workerStatus),
               workerProgress: Number.isFinite(node?.workerProgress)
                 ? Math.max(0, Math.min(100, Math.round(Number(node.workerProgress))))
@@ -247,6 +278,30 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
       return {
         ...current,
         [activeFile.id]: recipe(currentPage),
+      };
+    });
+  }
+
+  function updatePageByFileId(
+    fileId: string,
+    recipe: (page: FilePageState) => FilePageState,
+  ) {
+    setPages((current) => {
+      const seedFile =
+        activeFile && activeFile.id === fileId
+          ? activeFile
+          : null;
+      const currentPage =
+        current[fileId] ??
+        (seedFile ? createDefaultFilePage(seedFile) : null);
+
+      if (!currentPage) {
+        return current;
+      }
+
+      return {
+        ...current,
+        [fileId]: recipe(currentPage),
       };
     });
   }
@@ -346,6 +401,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     resizeNode,
     addNode,
     updateNode,
+    updatePageByFileId,
     deleteNode,
     removeFilePage,
   };

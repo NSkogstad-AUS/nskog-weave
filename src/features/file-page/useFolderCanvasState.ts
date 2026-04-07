@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 
 import {
   findFileById,
@@ -28,7 +28,9 @@ import { workspaceFileToContentItem } from '@/lib/workspaceFiles';
 import {
   FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
+  FILE_PAGE_WORKER_FOCUSES,
   FILE_PAGE_WORKER_MODES,
+  FILE_PAGE_WORKER_OUTPUT_MODES,
   FILE_PAGE_WORKER_STATUSES,
   type FilePageContentItem,
   type FilePageNode,
@@ -39,11 +41,12 @@ import {
 import type { Point } from '@/types/geometry';
 
 type FolderExpandState = 'hidden' | 'expand' | 'collapse';
-type FolderCanvasStore = Record<string, FilePageNode[]>;
+export type FolderCanvasStore = Record<string, FilePageNode[]>;
 
 const FOLDER_NODE_PREFIX = 'folder:';
 const FILE_NODE_PREFIX = 'file:';
-const FOLDER_CANVAS_STORAGE_KEY = 'weave:folder-canvas:v1';
+export const FOLDER_CANVAS_STORAGE_KEY = 'weave:folder-canvas:v1';
+export const FOLDER_CANVAS_UPDATED_EVENT = 'weave:folder-canvas:updated';
 const MAX_STORED_GRID_UNITS = 12;
 
 function normalizeUnit(value: unknown, minimum = 1) {
@@ -72,6 +75,18 @@ function normalizeIcon(value: unknown): FilePageNode['icon'] {
 function normalizeWorkerMode(value: unknown): FilePageNode['workerMode'] {
   return FILE_PAGE_WORKER_MODES.includes(value as NonNullable<FilePageNode['workerMode']>)
     ? (value as NonNullable<FilePageNode['workerMode']>)
+    : null;
+}
+
+function normalizeWorkerFocus(value: unknown): FilePageNode['workerFocus'] {
+  return FILE_PAGE_WORKER_FOCUSES.includes(value as NonNullable<FilePageNode['workerFocus']>)
+    ? (value as NonNullable<FilePageNode['workerFocus']>)
+    : null;
+}
+
+function normalizeWorkerOutputMode(value: unknown): FilePageNode['workerOutputMode'] {
+  return FILE_PAGE_WORKER_OUTPUT_MODES.includes(value as NonNullable<FilePageNode['workerOutputMode']>)
+    ? (value as NonNullable<FilePageNode['workerOutputMode']>)
     : null;
 }
 
@@ -113,23 +128,32 @@ function normalizeContentItems(value: unknown): FilePageContentItem[] {
             ? item.mimeType
             : null,
         sizeBytes: Number.isFinite(item?.sizeBytes) ? Math.max(0, Number(item.sizeBytes)) : null,
+        sourceItemId:
+          typeof item?.sourceItemId === 'string' && item.sourceItemId.trim().length > 0
+            ? item.sourceItemId
+            : null,
+        sourceSignature:
+          typeof item?.sourceSignature === 'string' && item.sourceSignature.trim().length > 0
+            ? item.sourceSignature
+            : null,
+        outputVersion: Number.isFinite(item?.outputVersion)
+          ? Math.max(1, Math.round(Number(item.outputVersion)))
+          : null,
+        generatedAt:
+          typeof item?.generatedAt === 'string' && item.generatedAt.trim().length > 0
+            ? item.generatedAt
+            : null,
       },
     ];
   });
 }
 
-function hydrateFolderCanvasNodes(): FolderCanvasStore {
-  if (typeof window === 'undefined') {
+function normalizeStoredFolderCanvasNodes(raw: string | null): FolderCanvasStore {
+  if (!raw) {
     return {};
   }
 
   try {
-    const raw = window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY);
-
-    if (!raw) {
-      return {};
-    }
-
     const parsed = JSON.parse(raw) as Record<string, Partial<FilePageNode>[]>;
 
     return Object.fromEntries(
@@ -185,6 +209,8 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
                 heightUnits: normalizeUnit(node?.size?.heightUnits),
               },
               workerMode: normalizeWorkerMode(node?.workerMode),
+              workerFocus: normalizeWorkerFocus(node?.workerFocus),
+              workerOutputMode: normalizeWorkerOutputMode(node?.workerOutputMode),
               workerStatus: normalizeWorkerStatus(node?.workerStatus),
               workerProgress: Number.isFinite(node?.workerProgress)
                 ? Math.max(0, Math.min(100, Math.round(Number(node.workerProgress))))
@@ -214,6 +240,46 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
   } catch {
     return {};
   }
+}
+
+export function readStoredFolderCanvasNodes(): FolderCanvasStore {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  return normalizeStoredFolderCanvasNodes(window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY));
+}
+
+function hydrateFolderCanvasNodes(): FolderCanvasStore {
+  return readStoredFolderCanvasNodes();
+}
+
+function writeStoredFolderCanvasNodes(store: FolderCanvasStore) {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const serializedStore = JSON.stringify(store);
+  window.localStorage.setItem(FOLDER_CANVAS_STORAGE_KEY, serializedStore);
+  window.dispatchEvent(
+    new CustomEvent(FOLDER_CANVAS_UPDATED_EVENT, {
+      detail: serializedStore,
+    }),
+  );
+}
+
+export function updateStoredFolderCanvasNodes(
+  folderId: string,
+  recipe: (nodes: FilePageNode[]) => FilePageNode[],
+) {
+  const currentStore = readStoredFolderCanvasNodes();
+  const nextStore = {
+    ...currentStore,
+    [folderId]: recipe(currentStore[folderId] ?? []),
+  };
+
+  writeStoredFolderCanvasNodes(nextStore);
+  return nextStore;
 }
 
 function buildDefaultPosition(index: number) {
@@ -428,10 +494,42 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
   const [folderCanvasNodes, setFolderCanvasNodes] =
     useState<FolderCanvasStore>(hydrateFolderCanvasNodes);
   const [folderSelectedNodeIds, setFolderSelectedNodeIds] = useState<Record<string, string[]>>({});
+  const lastPersistedStoreRef = useRef('');
 
   useEffect(() => {
-    window.localStorage.setItem(FOLDER_CANVAS_STORAGE_KEY, JSON.stringify(folderCanvasNodes));
+    const serializedStore = JSON.stringify(folderCanvasNodes);
+
+    lastPersistedStoreRef.current = serializedStore;
+    writeStoredFolderCanvasNodes(folderCanvasNodes);
   }, [folderCanvasNodes]);
+
+  useEffect(() => {
+    const syncFromStorage = () => {
+      const nextRaw = window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY) ?? '';
+
+      if (nextRaw === lastPersistedStoreRef.current) {
+        return;
+      }
+
+      const nextStore = normalizeStoredFolderCanvasNodes(nextRaw);
+      const serializedNextStore = JSON.stringify(nextStore);
+
+      if (serializedNextStore === lastPersistedStoreRef.current) {
+        return;
+      }
+
+      lastPersistedStoreRef.current = serializedNextStore;
+      setFolderCanvasNodes(nextStore);
+    };
+
+    window.addEventListener(FOLDER_CANVAS_UPDATED_EVENT, syncFromStorage);
+    window.addEventListener('storage', syncFromStorage);
+
+    return () => {
+      window.removeEventListener(FOLDER_CANVAS_UPDATED_EVENT, syncFromStorage);
+      window.removeEventListener('storage', syncFromStorage);
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeFolder) {
@@ -483,8 +581,6 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
         }
 
         if (
-          node.kind === 'folder' ||
-          node.kind === 'file' ||
           node.id.startsWith(FOLDER_NODE_PREFIX) ||
           node.id.startsWith(FILE_NODE_PREFIX)
         ) {

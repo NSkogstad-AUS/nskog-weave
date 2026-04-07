@@ -1,20 +1,27 @@
+import { createHash } from 'node:crypto';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import type { Plugin } from 'vite';
 
 type WorkerRunInput = {
+  sourceItemId: string;
   label: string;
   description: string;
   textContent: string;
   mimeType: string | null;
 };
 
+type WorkerRunOutputMode = 'per-file' | 'collated';
+
 type WorkerRunRequest = {
   mode: string;
+  focus: 'general' | 'coding' | 'describing' | 'research';
+  outputMode: WorkerRunOutputMode;
   workerLabel: string;
   inputs: WorkerRunInput[];
 };
 
 type WorkerOutputFile = {
+  sourceItemId: string;
   label: string;
   description: string;
   contentText: string;
@@ -34,11 +41,23 @@ type WorkerProviderConfig =
 
 const MAX_INPUT_FILES = 8;
 const MAX_INPUT_CHARACTERS_PER_FILE = 24_000;
+const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
+const OPENROUTER_MAX_TOKENS = 1_200;
+const OPENAI_MAX_OUTPUT_TOKENS = 1_200;
+const COLLATED_WORKER_SOURCE_ITEM_ID = '__collated__';
+const OPENROUTER_EMPTY_BODY_RETRY_DELAY_MS = 600;
+const inFlightWorkerRuns = new Map<string, Promise<string>>();
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
   response.setHeader('Content-Type', 'application/json; charset=utf-8');
   response.end(JSON.stringify(payload));
+}
+
+function delay(milliseconds: number) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function readRequestBody(request: IncomingMessage) {
@@ -52,6 +71,54 @@ function readRequestBody(request: IncomingMessage) {
     request.on('end', () => resolve(body));
     request.on('error', reject);
   });
+}
+
+async function fetchJsonWithTimeout(input: string, init: RequestInit) {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => {
+    controller.abort();
+  }, PROVIDER_REQUEST_TIMEOUT_MS);
+
+  try {
+    const response = await fetch(input, {
+      ...init,
+      signal: controller.signal,
+    });
+    const rawText = await response.text().catch(() => '');
+    const contentType = response.headers.get('content-type')?.trim() ?? '';
+    let payload: unknown = null;
+    let jsonParseError: string | null = null;
+    let didParseJson = false;
+
+    if (rawText.trim().length > 0) {
+      try {
+        payload = JSON.parse(rawText) as unknown;
+        didParseJson = true;
+      } catch (error) {
+        jsonParseError =
+          error instanceof Error && error.message.trim().length > 0
+            ? error.message
+            : 'The response body was not valid JSON.';
+      }
+    }
+
+    return {
+      response,
+      payload,
+      rawText,
+      contentType,
+      jsonParseError,
+      didParseJson,
+    };
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error('The model provider timed out. Try fewer or smaller files, or a faster model.');
+    }
+
+    throw error;
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }
 
 function extractResponseText(payload: unknown) {
@@ -74,27 +141,214 @@ function extractResponseText(payload: unknown) {
 }
 
 function extractOpenRouterResponseText(payload: unknown) {
-  const content = (payload as {
+  const choices = (payload as {
     choices?: Array<{
+      text?: unknown;
       message?: {
         content?: unknown;
       };
     }>;
-  })?.choices?.[0]?.message?.content;
+  })?.choices;
 
-  if (typeof content === 'string') {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
+  if (!Array.isArray(choices)) {
     return '';
   }
 
-  return content
-    .flatMap((item) =>
-      typeof item?.text === 'string' ? [item.text] : [],
-    )
+  return choices
+    .flatMap((choice) => {
+      if (typeof choice?.text === 'string' && choice.text.trim().length > 0) {
+        return [choice.text.trim()];
+      }
+
+      const content = choice?.message?.content;
+
+      if (typeof content === 'string' && content.trim().length > 0) {
+        return [content.trim()];
+      }
+
+      if (!Array.isArray(content)) {
+        return [];
+      }
+
+      return content.flatMap((item) =>
+        typeof item?.text === 'string' && item.text.trim().length > 0
+          ? [item.text.trim()]
+          : [],
+      );
+    })
     .join('\n');
+}
+
+function readOpenRouterChoiceError(payload: unknown) {
+  const choiceError = (payload as {
+    choices?: Array<{
+      error?: unknown;
+    }>;
+  })?.choices?.find((choice) => Boolean(choice?.error))?.error;
+
+  if (!choiceError) {
+    return '';
+  }
+
+  return readProviderErrorMessage({ error: choiceError }, 'The OpenRouter completion failed.');
+}
+
+function readOpenRouterNoContentReason(payload: unknown) {
+  const firstChoice = (payload as {
+    choices?: Array<{
+      finish_reason?: unknown;
+      native_finish_reason?: unknown;
+      message?: {
+        tool_calls?: unknown;
+      };
+    }>;
+  })?.choices?.[0];
+
+  if (!firstChoice) {
+    return '';
+  }
+
+  const finishReason =
+    typeof firstChoice.finish_reason === 'string' && firstChoice.finish_reason.trim().length > 0
+      ? firstChoice.finish_reason.trim()
+      : '';
+  const nativeFinishReason =
+    typeof firstChoice.native_finish_reason === 'string' &&
+    firstChoice.native_finish_reason.trim().length > 0
+      ? firstChoice.native_finish_reason.trim()
+      : '';
+  const hasToolCalls = Array.isArray(firstChoice.message?.tool_calls) && firstChoice.message.tool_calls.length > 0;
+  const detailParts = [
+    finishReason ? `finish_reason: ${finishReason}` : '',
+    nativeFinishReason ? `native_finish_reason: ${nativeFinishReason}` : '',
+    hasToolCalls ? 'tool calls returned instead of text' : '',
+  ].filter(Boolean);
+
+  return detailParts.length > 0 ? ` (${detailParts.join('; ')})` : '';
+}
+
+function buildOpenRouterFallbackResponseText(
+  payload: unknown,
+  upstreamResponse: Response,
+  rawText: string,
+  contentType: string,
+  jsonParseError: string | null,
+  didParseJson: boolean,
+  requestBody: WorkerRunRequest,
+) {
+  const firstChoice = (payload as {
+    choices?: Array<{
+      finish_reason?: unknown;
+      native_finish_reason?: unknown;
+      message?: {
+        role?: unknown;
+      };
+    }>;
+  })?.choices?.[0];
+  const noContentReason = readOpenRouterNoContentReason(payload);
+  const trimmedRawText = rawText.trim();
+  const rawBodyPreview =
+    trimmedRawText.length > 0
+      ? trimmedRawText.slice(0, 4_000)
+      : '';
+  const bodySummary =
+    didParseJson
+      ? 'The provider returned JSON, but it did not contain extractable assistant text.'
+      : rawBodyPreview.length === 0
+        ? 'The provider response body was empty.'
+        : 'The provider response body was not valid JSON.'
+  ;
+
+  return JSON.stringify(
+    {
+      files:
+        requestBody.outputMode === 'collated'
+          ? [
+              {
+                sourceItemId: COLLATED_WORKER_SOURCE_ITEM_ID,
+                label: 'Collated AI Output',
+                description: 'Fallback output captured from a non-standard OpenRouter response.',
+                contentText: [
+                  '# Provider Response',
+                  '',
+                  'OpenRouter returned a successful HTTP status, but no standard assistant text content was extracted.',
+                  '',
+                  `http_status: ${upstreamResponse.status}${upstreamResponse.statusText ? ` ${upstreamResponse.statusText}` : ''}`,
+                  contentType ? `content_type: ${contentType}` : '',
+                  firstChoice?.message?.role ? `role: ${String(firstChoice.message.role)}` : '',
+                  typeof firstChoice?.finish_reason === 'string'
+                    ? `finish_reason: ${firstChoice.finish_reason}`
+                    : '',
+                  typeof firstChoice?.native_finish_reason === 'string'
+                    ? `native_finish_reason: ${firstChoice.native_finish_reason}`
+                    : '',
+                  noContentReason ? `details:${noContentReason}` : '',
+                  jsonParseError ? `json_parse_error: ${jsonParseError}` : '',
+                  '',
+                  bodySummary,
+                  '',
+                  payload === null
+                    ? rawBodyPreview
+                      ? '```text'
+                      : ''
+                    : '```json',
+                  payload === null
+                    ? rawBodyPreview
+                    : JSON.stringify(payload, null, 2),
+                  payload === null
+                    ? rawBodyPreview
+                      ? '```'
+                      : ''
+                    : '```',
+                ]
+                  .filter(Boolean)
+                  .join('\n'),
+              },
+            ]
+          : requestBody.inputs.map((input, index) => ({
+              sourceItemId: input.sourceItemId,
+              label: input.label.trim() || `AI Output ${index + 1}`,
+              description: 'Fallback output captured from a non-standard OpenRouter response.',
+              contentText: [
+                '# Provider Response',
+                '',
+                'OpenRouter returned a successful HTTP status, but no standard assistant text content was extracted.',
+                '',
+                `http_status: ${upstreamResponse.status}${upstreamResponse.statusText ? ` ${upstreamResponse.statusText}` : ''}`,
+                contentType ? `content_type: ${contentType}` : '',
+                firstChoice?.message?.role ? `role: ${String(firstChoice.message.role)}` : '',
+                typeof firstChoice?.finish_reason === 'string'
+                  ? `finish_reason: ${firstChoice.finish_reason}`
+                  : '',
+                typeof firstChoice?.native_finish_reason === 'string'
+                  ? `native_finish_reason: ${firstChoice.native_finish_reason}`
+                  : '',
+                noContentReason ? `details:${noContentReason}` : '',
+                jsonParseError ? `json_parse_error: ${jsonParseError}` : '',
+                '',
+                bodySummary,
+                '',
+                payload === null
+                  ? rawBodyPreview
+                    ? '```text'
+                    : ''
+                  : '```json',
+                payload === null
+                  ? rawBodyPreview
+                  : JSON.stringify(payload, null, 2),
+                payload === null
+                  ? rawBodyPreview
+                    ? '```'
+                    : ''
+                  : '```',
+              ]
+                .filter(Boolean)
+                .join('\n'),
+            })),
+    },
+    null,
+    2,
+  );
 }
 
 function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
@@ -112,21 +366,24 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
     if (
       typeof input !== 'object' ||
       input === null ||
+      typeof (input as { sourceItemId?: unknown }).sourceItemId !== 'string' ||
       typeof (input as { label?: unknown }).label !== 'string' ||
       typeof (input as { textContent?: unknown }).textContent !== 'string'
     ) {
       return [];
     }
 
+    const sourceItemId = (input as { sourceItemId: string }).sourceItemId.trim();
     const label = (input as { label: string }).label.trim();
     const textContent = (input as { textContent: string }).textContent.trim();
 
-    if (!label || !textContent) {
+    if (!sourceItemId || !label || !textContent) {
       return [];
     }
 
     return [
       {
+        sourceItemId,
         label,
         description:
           typeof (input as { description?: unknown }).description === 'string'
@@ -144,6 +401,16 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
 
   return {
     mode: (payload as { mode: string }).mode,
+    focus:
+      (payload as { focus?: unknown }).focus === 'coding' ||
+      (payload as { focus?: unknown }).focus === 'describing' ||
+      (payload as { focus?: unknown }).focus === 'research'
+        ? (payload as { focus: 'coding' | 'describing' | 'research' }).focus
+        : 'general',
+    outputMode:
+      (payload as { outputMode?: unknown }).outputMode === 'collated'
+        ? 'collated'
+        : 'per-file',
     workerLabel: (payload as { workerLabel: string }).workerLabel.trim(),
     inputs: inputs.slice(0, MAX_INPUT_FILES),
   };
@@ -173,60 +440,117 @@ function getWorkerProviderConfig(): WorkerProviderConfig | null {
   return null;
 }
 
-function getWorkerOutputJsonSchema() {
+function getWorkerOutputJsonSchema(outputMode: WorkerRunRequest['outputMode']) {
+  const fileSchema = {
+    type: 'object',
+    additionalProperties: false,
+    properties: {
+      sourceItemId: { type: 'string' },
+      label: { type: 'string' },
+      description: { type: 'string' },
+      contentText: { type: 'string' },
+    },
+    required: ['sourceItemId', 'label', 'description', 'contentText'],
+  } as const;
+
   return {
     type: 'object',
     additionalProperties: false,
     properties: {
       files: {
         type: 'array',
-        items: {
-          type: 'object',
-          additionalProperties: false,
-          properties: {
-            label: { type: 'string' },
-            description: { type: 'string' },
-            contentText: { type: 'string' },
-          },
-          required: ['label', 'description', 'contentText'],
-        },
+        items: fileSchema,
+        minItems: 1,
+        ...(outputMode === 'collated' ? { maxItems: 1 } : null),
       },
     },
     required: ['files'],
   } as const;
 }
 
-function getWorkerOutputJsonExample() {
-  return {
-    files: [
-      {
-        label: 'Source Pack 1',
-        description: 'Short description of the extracted source pack.',
-        contentText: '# Summary\n\nConcise markdown artifact here.',
-      },
-    ],
-  } as const;
+function getWorkerOutputJsonExample(outputMode: WorkerRunRequest['outputMode']) {
+  return outputMode === 'collated'
+    ? {
+        files: [
+          {
+            sourceItemId: COLLATED_WORKER_SOURCE_ITEM_ID,
+            label: 'Collated Source Pack',
+            description: 'Combined AI-ready source pack covering all connected inputs.',
+            contentText: '# Summary\n\nSingle combined markdown artifact here.',
+          },
+        ],
+      }
+    : {
+        files: [
+          {
+            sourceItemId: 'source-file-1',
+            label: 'Source Pack 1',
+            description: 'Short description of the extracted source pack.',
+            contentText: '# Summary\n\nConcise markdown artifact here.',
+          },
+        ],
+      } as const;
+}
+
+function getWorkerFocusInstructions(focus: WorkerRunRequest['focus']) {
+  switch (focus) {
+    case 'coding':
+      return [
+        'Prioritize code-facing details, interfaces, data structures, constraints, and implementation notes.',
+        'Use headings like Purpose, Interfaces, Data Shape, Constraints, Risks, and Implementation Notes when useful.',
+      ];
+    case 'describing':
+      return [
+        'Prioritize plain-language explanation, terminology, context, and the clearest way to describe the source to another person.',
+        'Use headings like Overview, Important Details, Terminology, and Description Notes when useful.',
+      ];
+    case 'research':
+      return [
+        'Prioritize evidence, claims, named entities, chronology, open questions, and anything that needs verification.',
+        'Use headings like Summary, Evidence, Entities, Open Questions, and Follow-ups when useful.',
+      ];
+    default:
+      return [
+        'Create a balanced AI-ready pack with summary, key facts, entities, and next-useful details.',
+        'Optimize for fast orientation by another downstream model.',
+      ];
+  }
 }
 
 function buildWorkerMessages(requestBody: WorkerRunRequest) {
+  const collatedMode = requestBody.outputMode === 'collated';
+
   return [
     {
       role: 'system',
       content:
-        'You are an AI worker that converts source files into concise markdown files optimized for downstream AI use. Produce one output file per input file. Each output should preserve critical facts while removing fluff.',
+        collatedMode
+          ? 'You are an AI worker that converts multiple source files into one concise markdown file optimized for downstream AI use. Produce one combined output file that preserves critical facts while removing fluff.'
+          : 'You are an AI worker that converts source files into concise markdown files optimized for downstream AI use. Produce one output file per input file. Each output should preserve critical facts while removing fluff.',
     },
     {
       role: 'user',
       content: JSON.stringify({
         workerLabel: requestBody.workerLabel || 'AI Worker',
+        focus: requestBody.focus,
+        outputMode: requestBody.outputMode,
         instructions: [
           'Return JSON only.',
-          'For each input, create a concise markdown artifact.',
+          collatedMode
+            ? 'Create one concise markdown artifact that combines all inputs.'
+            : 'For each input, create a concise markdown artifact.',
+          collatedMode
+            ? `Return exactly one output object with sourceItemId "${COLLATED_WORKER_SOURCE_ITEM_ID}".`
+            : 'Return exactly one output object for each input object.',
+          collatedMode
+            ? `Set "sourceItemId" to "${COLLATED_WORKER_SOURCE_ITEM_ID}" for the single combined output.`
+            : 'Copy the input "sourceItemId" into the matching output "sourceItemId" exactly.',
           'Use sections when useful: Summary, Key Facts, Entities, Open Questions, Follow-ups.',
           'Keep each output focused and practical.',
           'Always return an object with a top-level "files" array.',
-          'Each file must include: "label", "description", and "contentText".',
-          `Example shape: ${JSON.stringify(getWorkerOutputJsonExample())}`,
+          'Each file must include: "sourceItemId", "label", "description", and "contentText".',
+          `Example shape: ${JSON.stringify(getWorkerOutputJsonExample(requestBody.outputMode))}`,
+          ...getWorkerFocusInstructions(requestBody.focus),
         ],
         inputs: requestBody.inputs,
       }),
@@ -257,47 +581,107 @@ function extractJsonPayload(value: string) {
   return trimmedValue;
 }
 
+function stringifyProviderRawError(value: unknown) {
+  if (typeof value === 'string') {
+    return value.trim();
+  }
+
+  if (value === null || value === undefined) {
+    return '';
+  }
+
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return String(value);
+  }
+}
+
 function readProviderErrorMessage(payload: unknown, fallbackMessage: string) {
+  const errorPayload = (payload as {
+    error?: {
+      code?: unknown;
+      message?: unknown;
+      metadata?: {
+        provider_name?: unknown;
+        raw?: unknown;
+      };
+    };
+  })?.error;
+
   const directMessage =
-    typeof (payload as { error?: { message?: unknown } })?.error?.message === 'string'
-      ? (payload as { error: { message: string } }).error.message.trim()
+    typeof errorPayload?.message === 'string'
+      ? errorPayload.message.trim()
       : '';
 
-  if (directMessage) {
-    return directMessage;
-  }
-
-  const metadataMessage =
-    typeof (payload as { metadata?: { raw?: string } })?.metadata?.raw === 'string'
-      ? (payload as { metadata: { raw: string } }).metadata.raw.trim()
+  const providerName =
+    typeof errorPayload?.metadata?.provider_name === 'string'
+      ? errorPayload.metadata.provider_name.trim()
       : '';
+  const rawMessage = stringifyProviderRawError(errorPayload?.metadata?.raw);
+  const errorCode =
+    typeof errorPayload?.code === 'number' || typeof errorPayload?.code === 'string'
+      ? String(errorPayload.code)
+      : '';
+  const baseMessage = directMessage || rawMessage || fallbackMessage;
+  const details = [
+    providerName ? `provider: ${providerName}` : '',
+    errorCode ? `code: ${errorCode}` : '',
+    rawMessage && rawMessage !== directMessage
+      ? `raw: ${rawMessage.slice(0, 220)}${rawMessage.length > 220 ? '...' : ''}`
+      : '',
+  ].filter(Boolean);
 
-  if (metadataMessage) {
-    return metadataMessage;
-  }
+  return details.length > 0 ? `${baseMessage} (${details.join('; ')})` : baseMessage;
+}
 
-  return fallbackMessage;
+function createWorkerRunCacheKey(
+  providerConfig: WorkerProviderConfig,
+  requestBody: WorkerRunRequest,
+) {
+  return createHash('sha256')
+    .update(
+      JSON.stringify({
+        provider: providerConfig.provider,
+        model: providerConfig.model,
+        requestBody,
+      }),
+    )
+    .digest('hex');
 }
 
 async function sendOpenRouterRequest(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
   body: Record<string, unknown>,
 ) {
-  const upstreamResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${providerConfig.apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'http://localhost:5173',
-      'X-OpenRouter-Title': 'nskog-weave',
+  const {
+    response: upstreamResponse,
+    payload: upstreamPayload,
+    rawText,
+    contentType,
+    jsonParseError,
+    didParseJson,
+  } = await fetchJsonWithTimeout(
+    'https://openrouter.ai/api/v1/chat/completions',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${providerConfig.apiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': 'http://localhost:5173',
+        'X-Title': 'nskog-weave',
+      },
+      body: JSON.stringify(body),
     },
-    body: JSON.stringify(body),
-  });
-  const upstreamPayload = await upstreamResponse.json().catch(() => null);
+  );
 
   return {
     upstreamResponse,
     upstreamPayload,
+    rawText,
+    contentType,
+    jsonParseError,
+    didParseJson,
   };
 }
 
@@ -305,92 +689,152 @@ async function runOpenRouterWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
   requestBody: WorkerRunRequest,
 ) {
-  const baseRequestBody = {
+  const requestBodyPayload = {
     model: providerConfig.model,
     messages: buildWorkerMessages(requestBody),
+    max_tokens: OPENROUTER_MAX_TOKENS,
     temperature: 0.2,
     stream: false,
   } satisfies Record<string, unknown>;
+  let emptyBodyAttempts = 0;
+  let lastResponse:
+    | Awaited<ReturnType<typeof sendOpenRouterRequest>>
+    | null = null;
 
-  const strictAttempt = await sendOpenRouterRequest(providerConfig, {
-    ...baseRequestBody,
-    response_format: {
-      type: 'json_schema',
-      json_schema: {
-        name: 'worker_output_bundle',
-        strict: true,
-        schema: getWorkerOutputJsonSchema(),
-      },
-    },
-    provider: {
-      require_parameters: true,
-    },
-  });
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    lastResponse = await sendOpenRouterRequest(providerConfig, requestBodyPayload);
 
-  if (strictAttempt.upstreamResponse.ok) {
-    return extractOpenRouterResponseText(strictAttempt.upstreamPayload);
+    if (
+      lastResponse.upstreamResponse.ok &&
+      lastResponse.rawText.trim().length === 0
+    ) {
+      emptyBodyAttempts += 1;
+
+      if (attempt === 0) {
+        await delay(OPENROUTER_EMPTY_BODY_RETRY_DELAY_MS);
+        continue;
+      }
+    }
+
+    break;
   }
 
-  const fallbackAttempt = await sendOpenRouterRequest(providerConfig, {
-    ...baseRequestBody,
-    response_format: {
-      type: 'json_object',
-    },
-    plugins: [{ id: 'response-healing' }],
-  });
+  if (!lastResponse) {
+    throw new Error('The OpenRouter API request did not return a response.');
+  }
 
-  if (!fallbackAttempt.upstreamResponse.ok) {
-    const strictErrorMessage = readProviderErrorMessage(
-      strictAttempt.upstreamPayload,
-      'The OpenRouter API request failed.',
-    );
-    const fallbackErrorMessage = readProviderErrorMessage(
-      fallbackAttempt.upstreamPayload,
-      'The OpenRouter API request failed.',
-    );
+  const {
+    upstreamResponse,
+    upstreamPayload,
+    rawText,
+    contentType,
+    jsonParseError,
+    didParseJson,
+  } = lastResponse;
 
+  if (!upstreamResponse.ok) {
+    if (upstreamPayload !== null) {
+      throw new Error(
+        readProviderErrorMessage(upstreamPayload, 'The OpenRouter API request failed.'),
+      );
+    }
+
+    const rawBodySummary = rawText.trim().slice(0, 220);
     throw new Error(
-      strictErrorMessage === fallbackErrorMessage
-        ? fallbackErrorMessage
-        : `${fallbackErrorMessage} (fallback after structured-output failure: ${strictErrorMessage})`,
+      [
+        `The OpenRouter API request failed with status ${upstreamResponse.status}.`,
+        contentType ? `content-type: ${contentType}.` : '',
+        jsonParseError ? `json_parse_error: ${jsonParseError}.` : '',
+        rawBodySummary ? `raw body: ${rawBodySummary}${rawText.trim().length > 220 ? '...' : ''}` : '',
+      ]
+        .filter(Boolean)
+        .join(' '),
     );
   }
 
-  return extractOpenRouterResponseText(fallbackAttempt.upstreamPayload);
+  const choiceError = readOpenRouterChoiceError(upstreamPayload);
+
+  if (choiceError) {
+    throw new Error(choiceError);
+  }
+
+  const responseText = extractOpenRouterResponseText(upstreamPayload);
+
+  if (!responseText.trim()) {
+    const fallbackResponseText = buildOpenRouterFallbackResponseText(
+      upstreamPayload,
+      upstreamResponse,
+      rawText,
+      contentType,
+      jsonParseError,
+      didParseJson,
+      requestBody,
+    );
+
+    if (emptyBodyAttempts > 1) {
+      const parsedFallbackPayload = JSON.parse(fallbackResponseText) as {
+        files?: Array<{
+          contentText?: string;
+        }>;
+      };
+
+      if (Array.isArray(parsedFallbackPayload.files)) {
+        parsedFallbackPayload.files = parsedFallbackPayload.files.map((file) => ({
+          ...file,
+          contentText: [
+            typeof file?.contentText === 'string' ? file.contentText : '',
+            '',
+            'OpenRouter returned an empty HTTP 200 body twice, so the worker stopped after one guarded retry.',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        }));
+      }
+
+      return JSON.stringify(parsedFallbackPayload, null, 2);
+    }
+
+    return fallbackResponseText;
+  }
+
+  return responseText;
 }
 
 async function runOpenAiWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openai' }>,
   requestBody: WorkerRunRequest,
 ) {
-  const upstreamResponse = await fetch('https://api.openai.com/v1/responses', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${providerConfig.apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: providerConfig.model,
-      input: buildWorkerMessages(requestBody).map((message) => ({
-        role: message.role,
-        content: [
-          {
-            type: 'input_text',
-            text: message.content,
-          },
-        ],
-      })),
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'worker_output_bundle',
-          strict: true,
-          schema: getWorkerOutputJsonSchema(),
-        },
+  const { response: upstreamResponse, payload: upstreamPayload } = await fetchJsonWithTimeout(
+    'https://api.openai.com/v1/responses',
+    {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${providerConfig.apiKey}`,
+        'Content-Type': 'application/json',
       },
-    }),
-  });
-  const upstreamPayload = await upstreamResponse.json().catch(() => null);
+      body: JSON.stringify({
+        model: providerConfig.model,
+        input: buildWorkerMessages(requestBody).map((message) => ({
+          role: message.role,
+          content: [
+            {
+              type: 'input_text',
+              text: message.content,
+            },
+          ],
+        })),
+        max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS,
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'worker_output_bundle',
+            strict: true,
+            schema: getWorkerOutputJsonSchema(requestBody.outputMode),
+          },
+        },
+      }),
+    },
+  );
 
   if (!upstreamResponse.ok) {
     throw new Error(
@@ -404,30 +848,68 @@ async function runOpenAiWorker(
 }
 
 function parseWorkerOutputFiles(responseText: string): WorkerOutputFile[] {
-  const parsedPayload = JSON.parse(extractJsonPayload(responseText)) as {
-    files?: Array<{ label?: unknown; description?: unknown; contentText?: unknown }>;
+  let parsedPayload: {
+    files?: Array<{
+      sourceItemId?: unknown;
+      label?: unknown;
+      description?: unknown;
+      contentText?: unknown;
+      content?: unknown;
+      markdown?: unknown;
+      text?: unknown;
+    }>;
   };
+
+  try {
+    parsedPayload = JSON.parse(extractJsonPayload(responseText)) as {
+      files?: Array<{
+        sourceItemId?: unknown;
+        label?: unknown;
+        description?: unknown;
+        contentText?: unknown;
+        content?: unknown;
+        markdown?: unknown;
+        text?: unknown;
+      }>;
+    };
+  } catch {
+    return [];
+  }
 
   return Array.isArray(parsedPayload.files)
     ? parsedPayload.files.flatMap((file) => {
         if (
-          typeof file?.label !== 'string' ||
-          typeof file?.description !== 'string' ||
-          typeof file?.contentText !== 'string'
+          typeof file?.sourceItemId !== 'string' ||
+          typeof file?.label !== 'string'
         ) {
           return [];
         }
 
+        const sourceItemId = file.sourceItemId.trim();
         const label = file.label.trim();
-        const description = file.description.trim();
-        const contentText = file.contentText.trim();
+        const description =
+          typeof file.description === 'string'
+            ? file.description.trim()
+            : '';
+        const rawContent =
+          typeof file.contentText === 'string'
+            ? file.contentText
+            : typeof file.content === 'string'
+              ? file.content
+              : typeof file.markdown === 'string'
+                ? file.markdown
+                : typeof file.text === 'string'
+                  ? file.text
+                  : '';
+        const contentText = rawContent.trim();
 
-        if (!label || !contentText) {
+        if (!sourceItemId || !label || !contentText) {
           return [];
         }
 
         return [
           {
+            sourceItemId,
             label,
             description,
             contentText,
@@ -435,6 +917,33 @@ function parseWorkerOutputFiles(responseText: string): WorkerOutputFile[] {
         ];
       })
     : [];
+}
+
+function buildFallbackWorkerOutputFiles(
+  responseText: string,
+  requestBody: WorkerRunRequest,
+): WorkerOutputFile[] {
+  const trimmedResponseText = extractJsonPayload(responseText).trim() || responseText.trim();
+
+  if (!trimmedResponseText) {
+    return [];
+  }
+
+  return requestBody.outputMode === 'collated'
+    ? [
+        {
+          sourceItemId: COLLATED_WORKER_SOURCE_ITEM_ID,
+          label: 'Collated AI Output',
+          description: 'Fallback output captured from the raw model response.',
+          contentText: trimmedResponseText,
+        },
+      ]
+    : requestBody.inputs.map((input, index) => ({
+        sourceItemId: input.sourceItemId,
+        label: input.label.trim() || `AI Output ${index + 1}`,
+        description: 'Fallback output captured from the raw model response.',
+        contentText: trimmedResponseText,
+      }));
 }
 
 async function handleWorkerRun(request: IncomingMessage, response: ServerResponse) {
@@ -489,12 +998,29 @@ async function handleWorkerRun(request: IncomingMessage, response: ServerRespons
   }
 
   let responseText = '';
+  const workerRunCacheKey = createWorkerRunCacheKey(providerConfig, requestBody);
 
   try {
-    responseText =
-      providerConfig.provider === 'openrouter'
-        ? await runOpenRouterWorker(providerConfig, requestBody)
-        : await runOpenAiWorker(providerConfig, requestBody);
+    const inFlightRun = inFlightWorkerRuns.get(workerRunCacheKey);
+
+    if (inFlightRun) {
+      responseText = await inFlightRun;
+    } else {
+      const nextRun =
+        providerConfig.provider === 'openrouter'
+          ? runOpenRouterWorker(providerConfig, requestBody)
+          : runOpenAiWorker(providerConfig, requestBody);
+
+      inFlightWorkerRuns.set(workerRunCacheKey, nextRun);
+
+      try {
+        responseText = await nextRun;
+      } finally {
+        if (inFlightWorkerRuns.get(workerRunCacheKey) === nextRun) {
+          inFlightWorkerRuns.delete(workerRunCacheKey);
+        }
+      }
+    }
   } catch (error) {
     sendJson(response, 500, {
       error: error instanceof Error ? error.message : 'The model provider request failed.',
@@ -504,8 +1030,17 @@ async function handleWorkerRun(request: IncomingMessage, response: ServerRespons
 
   try {
     const files = parseWorkerOutputFiles(responseText);
+    const resolvedFiles =
+      files.length > 0 ? files : buildFallbackWorkerOutputFiles(responseText, requestBody);
 
-    sendJson(response, 200, { files });
+    if (resolvedFiles.length === 0) {
+      sendJson(response, 500, {
+        error: 'The model returned no usable worker files.',
+      });
+      return;
+    }
+
+    sendJson(response, 200, { files: resolvedFiles });
   } catch {
     sendJson(response, 500, {
       error:

@@ -1,5 +1,9 @@
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
 import type { FilePageNode, FilePageState } from '@/types/filePage';
+import {
+  DEFAULT_FILE_PAGE_WORKER_FOCUS,
+  DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
+} from './filePageWorkers';
 
 export const FILE_PAGES_STORAGE_KEY = 'weave:file-pages:v1';
 
@@ -87,6 +91,8 @@ function createNode(
       heightUnits: 1,
     },
     workerMode: kind === 'worker' ? 'ai-ready' : null,
+    workerFocus: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_FOCUS : null,
+    workerOutputMode: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE : null,
     workerStatus: kind === 'worker' ? 'idle' : null,
     workerProgress: kind === 'worker' ? 0 : null,
     workerOutputFolderId: null,

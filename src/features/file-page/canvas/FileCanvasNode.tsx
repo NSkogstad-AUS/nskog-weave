@@ -31,9 +31,24 @@ import { FileCanvasGroupChrome } from './FileCanvasGroupChrome';
 import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
-import { getWorkerModeMeta, getWorkerStatusMessage } from '@/lib/filePageWorkers';
+import {
+  getWorkerFocusMeta,
+  getWorkerFocusOptions,
+  getWorkerModeMeta,
+  getWorkerOutputModeMeta,
+  getWorkerOutputModeOptions,
+  getWorkerStatusMessage,
+  resolveWorkerFocus,
+  resolveWorkerOutputMode,
+} from '@/lib/filePageWorkers';
 import { cn } from '@/lib/utils';
-import type { FilePageContentItem, FilePageElementIcon, FilePageNode } from '@/types/filePage';
+import type {
+  FilePageContentItem,
+  FilePageElementIcon,
+  FilePageNode,
+  FilePageWorkerFocus,
+  FilePageWorkerOutputMode,
+} from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 interface FileCanvasNodeProps {
@@ -61,6 +76,8 @@ interface FileCanvasNodeProps {
   onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
   onDelete: (node: FilePageNode) => void;
   onEditingLabelChange: (value: string) => void;
+  onChangeWorkerFocus?: (node: FilePageNode, focus: FilePageWorkerFocus) => void;
+  onChangeWorkerOutputMode?: (node: FilePageNode, outputMode: FilePageWorkerOutputMode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
   onExpandFolder?: (node: FilePageNode) => void;
   onHoverChange: (node: FilePageNode, hovered: boolean) => void;
@@ -109,6 +126,8 @@ function FileCanvasNodeComponent({
   onContextMenuOpenChange,
   onDelete,
   onEditingLabelChange,
+  onChangeWorkerFocus,
+  onChangeWorkerOutputMode,
   onCollapseFolder,
   onExpandFolder,
   onHoverChange,
@@ -172,6 +191,12 @@ function FileCanvasNodeComponent({
         : null;
   const workerInputCount = folderContents.length;
   const workerModeMeta = getWorkerModeMeta(node.workerMode);
+  const workerFocus = resolveWorkerFocus(node.workerFocus);
+  const workerFocusMeta = getWorkerFocusMeta(workerFocus);
+  const workerFocusOptions = getWorkerFocusOptions();
+  const workerOutputMode = resolveWorkerOutputMode(node.workerOutputMode);
+  const workerOutputModeMeta = getWorkerOutputModeMeta(workerOutputMode);
+  const workerOutputModeOptions = getWorkerOutputModeOptions();
   const workerStatus = node.workerStatus ?? 'idle';
   const workerProgress = node.workerProgress ?? 0;
   const workerStatusMessage = getWorkerStatusMessage(
@@ -382,6 +407,56 @@ function FileCanvasNodeComponent({
                     </span>
                     <span className="shrink-0 text-slate-400">{workerModeMeta.badgeLabel}</span>
                   </div>
+                  {node.workerMode === 'ai-ready' && onChangeWorkerFocus ? (
+                    <div className="grid gap-2">
+                      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        <span className="shrink-0">Focus</span>
+                        <select
+                          value={workerFocus}
+                          onPointerDown={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onClick={(event) => {
+                            event.stopPropagation();
+                          }}
+                          onChange={(event) =>
+                            onChangeWorkerFocus(node, event.target.value as FilePageWorkerFocus)
+                          }
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                        >
+                          {workerFocusOptions.map((option) => (
+                            <option key={option.value} value={option.value}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      {onChangeWorkerOutputMode ? (
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                          <span className="shrink-0">Output</span>
+                          <select
+                            value={workerOutputMode}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onChange={(event) =>
+                              onChangeWorkerOutputMode(node, event.target.value as FilePageWorkerOutputMode)
+                            }
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                          >
+                            {workerOutputModeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {onRunWorker ? (
                     <button
                       type="button"
@@ -429,7 +504,11 @@ function FileCanvasNodeComponent({
                   </div>
                   <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
                     <span>{workerInputCount} input{workerInputCount === 1 ? '' : 's'}</span>
-                    <span>{workerModeMeta.outputPlacementMessage}</span>
+                    <span>
+                      {node.workerMode === 'ai-ready'
+                        ? `${workerFocusMeta.label} · ${workerOutputModeMeta.shortLabel}`
+                        : workerModeMeta.outputPlacementMessage}
+                    </span>
                   </div>
                 </div>
               ) : null}
@@ -531,6 +610,43 @@ function FileCanvasNodeComponent({
               <PlayIcon className="size-4" />
               {workerStatus === 'processing' ? 'Running...' : workerModeMeta.runActionLabel}
             </ContextMenuItem>
+          ) : null}
+          {isWorkerNode && node.workerMode === 'ai-ready' && onChangeWorkerFocus ? (
+            <>
+              <ContextMenuSub>
+                <ContextMenuSubTrigger>
+                  <SparklesIcon className="size-4" />
+                  Focus
+                </ContextMenuSubTrigger>
+                <ContextMenuSubContent className="w-44">
+                  {workerFocusOptions.map((option) => (
+                    <ContextMenuItem
+                      key={option.value}
+                      onSelect={() => onChangeWorkerFocus(node, option.value)}
+                      className={cn(option.value === workerFocus && 'bg-sidebar-accent/55')}
+                    >
+                      {option.label}
+                    </ContextMenuItem>
+                  ))}
+                </ContextMenuSubContent>
+              </ContextMenuSub>
+              {onChangeWorkerOutputMode ? (
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>Output</ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-52">
+                    {workerOutputModeOptions.map((option) => (
+                      <ContextMenuItem
+                        key={option.value}
+                        onSelect={() => onChangeWorkerOutputMode(node, option.value)}
+                        className={cn(option.value === workerOutputMode && 'bg-sidebar-accent/55')}
+                      >
+                        {option.label}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+              ) : null}
+            </>
           ) : null}
           {folderExpandState === 'expand' && onExpandFolder ? (
             <ContextMenuItem onSelect={() => onExpandFolder(node)}>

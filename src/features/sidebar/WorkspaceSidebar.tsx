@@ -1,11 +1,4 @@
-import { memo, useMemo, useRef, useState } from 'react';
-import {
-  HomeIcon,
-  LayoutGridIcon,
-  RefreshCcwIcon,
-  SearchIcon,
-  UploadIcon,
-} from 'lucide-react';
+import { memo, useMemo, useState } from 'react';
 
 import {
   AlertDialog,
@@ -22,27 +15,24 @@ import {
   SidebarContent,
   SidebarGroup,
   SidebarGroupContent,
-  SidebarGroupLabel,
-  SidebarHeader,
-  SidebarInput,
-  SidebarMenu,
-  SidebarMenuButton,
-  SidebarMenuItem,
   SidebarRail,
   SidebarTrigger,
 } from '@/components/animate-ui/components/radix/sidebar';
-import { Button } from '@/components/ui/button';
 import {
   addFileToFolderById,
+  addSeparatorToFolderById,
   createWorkspaceFolders,
   deleteFileById,
   deleteFolderById,
+  deleteSeparatorById,
   filterWorkspaceFolders,
   getAllFolderIds,
+  moveSeparatorById,
   renameFileById,
   renameFolderById,
   type WorkspaceFile,
   type WorkspaceFolder,
+  type WorkspaceSeparator,
 } from '@/data/sidebarNavigation';
 import { SidebarTree, type ActiveItem, type EditingItem } from './sidebar-tree';
 
@@ -52,21 +42,6 @@ type PendingFolderDelete =
       label: string;
     }
   | null;
-
-const sidebarSections = [
-  {
-    id: 'knowledge',
-    label: 'Knowledge Base',
-    icon: HomeIcon,
-    active: true,
-  },
-  {
-    id: 'dashboards',
-    label: 'Dashboards',
-    icon: LayoutGridIcon,
-    active: false,
-  },
-] as const;
 
 function queueAfterMenuClose(callback: () => void) {
   window.requestAnimationFrame(() => {
@@ -78,6 +53,7 @@ interface WorkspaceSidebarProps {
   folders?: WorkspaceFolder[];
   highlightedItem?: ActiveItem;
   onFileDelete?: (fileId: string) => void;
+  onFolderDelete?: (folderId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
   onImportFiles?: (files: File[]) => void;
   onOpenFile?: (fileId: string) => void;
@@ -88,8 +64,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   folders: controlledFolders,
   highlightedItem = null,
   onFileDelete,
+  onFolderDelete,
   onFoldersChange,
-  onImportFiles,
   onOpenFile,
   onOpenFolder,
 }: WorkspaceSidebarProps) {
@@ -97,22 +73,17 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     controlledFolders ?? createWorkspaceFolders(),
   );
   const folders = controlledFolders ?? uncontrolledFolders;
-  const [searchQuery, setSearchQuery] = useState('');
-  const [activeItem, setActiveItem] = useState<ActiveItem>({
-    type: 'folder',
-    id: 'general-knowledge',
-  });
+  const [activeItem, setActiveItem] = useState<ActiveItem>(null);
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
   const [pendingFolderDelete, setPendingFolderDelete] =
     useState<PendingFolderDelete>(null);
-  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
-    () => new Set(getAllFolderIds(createWorkspaceFolders())),
+    () => new Set(getAllFolderIds(controlledFolders ?? createWorkspaceFolders())),
   );
-  const searchActive = searchQuery.trim().length > 0;
+  const searchActive = false;
   const visibleFolders = useMemo(
-    () => filterWorkspaceFolders(folders, searchQuery),
-    [folders, searchQuery],
+    () => filterWorkspaceFolders(folders, ''),
+    [folders],
   );
 
   function updateFolders(recipe: (current: WorkspaceFolder[]) => WorkspaceFolder[]) {
@@ -123,21 +94,6 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     }
 
     onFoldersChange?.(nextFolders);
-  }
-
-  function resetSidebar() {
-    const nextFolders = createWorkspaceFolders();
-
-    if (!controlledFolders) {
-      setUncontrolledFolders(nextFolders);
-    }
-
-    onFoldersChange?.(nextFolders);
-    setSearchQuery('');
-    setActiveItem({ type: 'folder', id: 'general-knowledge' });
-    setEditingItem(null);
-    setPendingFolderDelete(null);
-    setExpandedFolderIds(new Set(getAllFolderIds(nextFolders)));
   }
 
   function commitRename() {
@@ -173,6 +129,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     if (activeItem?.type === 'folder' && activeItem.id === folderId) {
       setActiveItem(null);
     }
+
+    onFolderDelete?.(folderId);
   }
 
   function deleteFile(fileId: string) {
@@ -207,6 +165,28 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     );
   }
 
+  function createSeparatorInFolder(folderId: string) {
+    const nextSeparator: WorkspaceSeparator = {
+      id: `separator-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    };
+
+    updateFolders((current) => addSeparatorToFolderById(current, folderId, nextSeparator));
+    setExpandedFolderIds((current) => new Set(current).add(folderId));
+  }
+
+  function deleteSeparator(separatorId: string) {
+    updateFolders((current) => deleteSeparatorById(current, separatorId));
+  }
+
+  function moveSeparator(
+    separatorId: string,
+    targetFolderId: string,
+    targetIndex: number,
+  ) {
+    updateFolders((current) => moveSeparatorById(current, separatorId, targetFolderId, targetIndex));
+    setExpandedFolderIds((current) => new Set(current).add(targetFolderId));
+  }
+
   return (
     <>
       <Sidebar
@@ -216,98 +196,14 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
       >
         <div className="flex h-full bg-sidebar/95">
           <div className="flex w-[4.25rem] shrink-0 flex-col border-r border-sidebar-border/80">
-            <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80">
-              <div className="flex h-16 w-16 items-center justify-center rounded-2xl">
-                <img
-                  src="/weave2.svg"
-                  alt="Weave"
-                  className="size-[1.625rem]"
-                />
-              </div>
-            </div>
-
-            <SidebarContent className="items-center gap-3 overflow-visible px-2 py-3">
-              <SidebarMenu className="items-center gap-2">
-                {sidebarSections.map((section) => {
-                  const Icon = section.icon;
-
-                  return (
-                    <SidebarMenuItem key={section.id}>
-                      <SidebarMenuButton
-                        size="lg"
-                        isActive={section.active}
-                        tooltip={section.label}
-                        className="justify-center px-0"
-                      >
-                        <Icon />
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
-                  );
-                })}
-              </SidebarMenu>
-            </SidebarContent>
-
-            <div className="mt-auto flex flex-col items-center gap-2 border-t border-sidebar-border/80 px-2 py-3">
+            <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80 px-2">
               <SidebarTrigger className="size-9 rounded-2xl border border-sidebar-border bg-background/80 shadow-sm" />
-              <Button
-                variant="ghost"
-                size="icon"
-                className="size-9 rounded-2xl"
-                onClick={resetSidebar}
-              >
-                <RefreshCcwIcon />
-                <span className="sr-only">Reset sidebar</span>
-              </Button>
             </div>
           </div>
 
           <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
-            <SidebarHeader className="gap-3 border-b border-sidebar-border/80 px-4 py-4">
-              <div className="flex items-center justify-between gap-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                  Workspace
-                </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="rounded-xl border-sidebar-border/80 bg-white/90"
-                  onClick={() => fileInputRef.current?.click()}
-                >
-                  <UploadIcon className="size-3.5" />
-                  Import files
-                </Button>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={(event) => {
-                    const nextFiles = Array.from(event.target.files ?? []);
-
-                    if (nextFiles.length > 0) {
-                      onImportFiles?.(nextFiles);
-                    }
-
-                    event.target.value = '';
-                  }}
-                />
-              </div>
-              <div className="relative">
-                <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <SidebarInput
-                  value={searchQuery}
-                  onChange={(event) => setSearchQuery(event.target.value)}
-                  placeholder="Search"
-                  className="pl-9"
-                />
-              </div>
-            </SidebarHeader>
-
             <SidebarContent className="soft-scrollbar gap-0">
-              <SidebarGroup className="px-4 pt-4">
-                <SidebarGroupLabel className="px-0 text-[11px] uppercase tracking-[0.24em] text-muted-foreground">
-                  Folders
-                </SidebarGroupLabel>
+              <SidebarGroup className="px-4 py-4">
                 <SidebarGroupContent>
                   <SidebarTree
                     activeItem={activeItem}
@@ -329,8 +225,11 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     }
                     onCommitRename={commitRename}
                     onCreateFile={createFileInFolder}
+                    onCreateSeparator={createSeparatorInFolder}
                     onDeleteFile={deleteFile}
                     onDeleteFolder={deleteFolder}
+                    onDeleteSeparator={deleteSeparator}
+                    onMoveSeparator={moveSeparator}
                     onRequestDeleteFolder={(folderToDelete) =>
                       setPendingFolderDelete({
                         id: folderToDelete.id,

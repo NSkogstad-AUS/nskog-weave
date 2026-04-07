@@ -8,128 +8,216 @@ export interface WorkspaceFile {
   sizeBytes?: number | null;
 }
 
+export interface WorkspaceSeparator {
+  id: string;
+}
+
+export interface WorkspaceFolderOrderEntry {
+  type: 'folder' | 'file' | 'separator';
+  id: string;
+}
+
 export interface WorkspaceFolder {
   id: string;
   label: string;
   children: WorkspaceFolder[];
   files: WorkspaceFile[];
+  separators?: WorkspaceSeparator[];
+  itemOrder?: WorkspaceFolderOrderEntry[];
 }
 
-const WORKSPACE_FOLDERS_SEED: WorkspaceFolder[] = [
-  {
-    id: 'general-knowledge',
-    label: 'General Knowledge',
-    files: [
-      {
-        id: 'knowledge-map',
-        label: 'Knowledge Map',
-        description: 'Master canvas for evidence, claims, and synthesis.',
-        kind: 'canvas',
-      },
+export type OrderedWorkspaceFolderItem =
+  | {
+      type: 'folder';
+      folder: WorkspaceFolder;
+    }
+  | {
+      type: 'file';
+      file: WorkspaceFile;
+    }
+  | {
+      type: 'separator';
+      separator: WorkspaceSeparator;
+    };
+
+const WORKSPACE_FOLDERS_SEED: WorkspaceFolder[] = [];
+
+function normalizeFolderOrdering(folder: WorkspaceFolder): WorkspaceFolder {
+  const children = folder.children.map((child) => normalizeFolderOrdering(child));
+  const files = folder.files.map((file) => ({ ...file }));
+  const separators = (folder.separators ?? []).map((separator) => ({
+    ...separator,
+  }));
+  const validEntryKeys = new Set([
+    ...children.map((child) => `folder:${child.id}`),
+    ...files.map((file) => `file:${file.id}`),
+    ...separators.map((separator) => `separator:${separator.id}`),
+  ]);
+  const nextItemOrder = (folder.itemOrder ?? []).flatMap((entry) => {
+    if (
+      !entry ||
+      (entry.type !== 'folder' && entry.type !== 'file' && entry.type !== 'separator') ||
+      typeof entry.id !== 'string'
+    ) {
+      return [];
+    }
+
+    const entryKey = `${entry.type}:${entry.id}`;
+
+    return validEntryKeys.has(entryKey) ? [entry] : [];
+  });
+  const seenEntryKeys = new Set(nextItemOrder.map((entry) => `${entry.type}:${entry.id}`));
+  const appendMissingEntries = (
+    type: WorkspaceFolderOrderEntry['type'],
+    ids: string[],
+  ) =>
+    ids.flatMap((id) => {
+      const entryKey = `${type}:${id}`;
+
+      if (seenEntryKeys.has(entryKey)) {
+        return [];
+      }
+
+      seenEntryKeys.add(entryKey);
+      return [
+        {
+          type,
+          id,
+        } satisfies WorkspaceFolderOrderEntry,
+      ];
+    });
+
+  return {
+    ...folder,
+    children,
+    files,
+    separators,
+    itemOrder: [
+      ...nextItemOrder,
+      ...appendMissingEntries(
+        'folder',
+        children.map((child) => child.id),
+      ),
+      ...appendMissingEntries(
+        'file',
+        files.map((file) => file.id),
+      ),
+      ...appendMissingEntries(
+        'separator',
+        separators.map((separator) => separator.id),
+      ),
     ],
-    children: [
-      {
-        id: 'onboarding',
-        label: 'Onboarding',
-        files: [
-          {
-            id: 'onboarding-brief',
-            label: 'Onboarding Brief',
-            description: 'Working brief for first-week clarity and handoff risk.',
-            kind: 'brief',
-          },
-        ],
-        children: [
-          {
-            id: 'subfolder-1',
-            label: 'Subfolder 1',
-            files: [
-              {
-                id: 'retention-memo',
-                label: 'Retention Memo',
-                description: 'A memo that tracks early warning signals and next actions.',
-                kind: 'memo',
-              },
-            ],
-            children: [],
-          },
-          {
-            id: 'subfolder-2',
-            label: 'Subfolder 2',
-            files: [
-              {
-                id: 'research-outline',
-                label: 'Research Outline',
-                description: 'Outline for stitching notes into a product narrative.',
-                kind: 'outline',
-              },
-            ],
-            children: [],
-          },
-        ],
-      },
-      {
-        id: 'integrations',
-        label: 'Integrations',
-        files: [
-          {
-            id: 'integration-board',
-            label: 'Integration Board',
-            description: 'A canvas focused on implementation friction and dependencies.',
-            kind: 'canvas',
-          },
-        ],
-        children: [],
-      },
-      {
-        id: 'documents',
-        label: 'Documents',
-        files: [
-          {
-            id: 'document-scan',
-            label: 'Document Scan',
-            description: 'Source-heavy workspace for imported material and summaries.',
-            kind: 'brief',
-          },
-        ],
-        children: [],
-      },
-    ],
-  },
-  {
-    id: 'onboarding-design',
-    label: 'Onboarding Design',
-    files: [
-      {
-        id: 'design-review',
-        label: 'Design Review',
-        description: 'Dashboard file for interface notes, patterns, and refinements.',
-        kind: 'canvas',
-      },
-    ],
-    children: [],
-  },
-  {
-    id: 'team-interviews',
-    label: 'Team Interviews',
-    files: [
-      {
-        id: 'interview-signals',
-        label: 'Interview Signals',
-        description: 'Themed workspace for qualitative interview learnings.',
-        kind: 'memo',
-      },
-    ],
-    children: [],
-  },
-];
+  };
+}
 
 function cloneFolders(folders: WorkspaceFolder[]): WorkspaceFolder[] {
-  return folders.map((folder) => ({
-    ...folder,
-    files: folder.files.map((file) => ({ ...file })),
-    children: cloneFolders(folder.children),
-  }));
+  return folders.map((folder) => normalizeFolderOrdering(folder));
+}
+
+function mapFolders(
+  folders: WorkspaceFolder[],
+  recipe: (folder: WorkspaceFolder) => WorkspaceFolder,
+): WorkspaceFolder[] {
+  return folders.map((folder) =>
+    normalizeFolderOrdering(
+      recipe({
+        ...folder,
+        children: mapFolders(folder.children, recipe),
+        files: folder.files.map((file) => ({ ...file })),
+        separators: (folder.separators ?? []).map((separator) => ({ ...separator })),
+        itemOrder: folder.itemOrder?.map((entry) => ({ ...entry })),
+      }),
+    ),
+  );
+}
+
+function removeFolderById(folders: WorkspaceFolder[], folderId: string): WorkspaceFolder[] {
+  return folders
+    .filter((folder) => folder.id !== folderId)
+    .map((folder) =>
+      normalizeFolderOrdering({
+        ...folder,
+        children: removeFolderById(folder.children, folderId),
+      }),
+    );
+}
+
+function findSeparatorById(
+  folders: WorkspaceFolder[],
+  separatorId: string,
+): { separator: WorkspaceSeparator; folderId: string } | null {
+  for (const folder of folders) {
+    const separator = (folder.separators ?? []).find((candidate) => candidate.id === separatorId);
+
+    if (separator) {
+      return {
+        separator,
+        folderId: folder.id,
+      };
+    }
+
+    const nestedMatch = findSeparatorById(folder.children, separatorId);
+
+    if (nestedMatch) {
+      return nestedMatch;
+    }
+  }
+
+  return null;
+}
+
+function removeSeparatorByIdInternal(
+  folders: WorkspaceFolder[],
+  separatorId: string,
+): WorkspaceFolder[] {
+  return folders.map((folder) =>
+    normalizeFolderOrdering({
+      ...folder,
+      separators: (folder.separators ?? []).filter((separator) => separator.id !== separatorId),
+      children: removeSeparatorByIdInternal(folder.children, separatorId),
+    }),
+  );
+}
+
+function insertAtIndex<T>(items: T[], index: number, item: T) {
+  const nextItems = [...items];
+  const targetIndex = Math.max(0, Math.min(index, nextItems.length));
+
+  nextItems.splice(targetIndex, 0, item);
+  return nextItems;
+}
+
+function insertSeparatorIntoFolder(
+  folders: WorkspaceFolder[],
+  folderId: string,
+  separator: WorkspaceSeparator,
+  targetIndex: number,
+): WorkspaceFolder[] {
+  return folders.map((folder) => {
+    if (folder.id === folderId) {
+      const nextItemOrder = insertAtIndex(
+        (folder.itemOrder ?? []).filter(
+          (entry) => !(entry.type === 'separator' && entry.id === separator.id),
+        ),
+        targetIndex,
+        {
+          type: 'separator',
+          id: separator.id,
+        } satisfies WorkspaceFolderOrderEntry,
+      );
+
+      return normalizeFolderOrdering({
+        ...folder,
+        separators: [...(folder.separators ?? []).filter((candidate) => candidate.id !== separator.id), separator],
+        itemOrder: nextItemOrder,
+      });
+    }
+
+    return normalizeFolderOrdering({
+      ...folder,
+      children: insertSeparatorIntoFolder(folder.children, folderId, separator, targetIndex),
+    });
+  });
 }
 
 export function createWorkspaceFolders(): WorkspaceFolder[] {
@@ -161,7 +249,7 @@ export function getFolderDescendantCounts(folder: WorkspaceFolder): {
 }
 
 export function folderHasContents(folder: WorkspaceFolder) {
-  return folder.files.length > 0 || folder.children.length > 0;
+  return folder.files.length > 0 || folder.children.length > 0 || (folder.separators?.length ?? 0) > 0;
 }
 
 export function findFolderById(
@@ -261,16 +349,13 @@ export function renameFolderById(
   folderId: string,
   label: string,
 ): WorkspaceFolder[] {
-  return folders.map((folder) =>
+  return mapFolders(folders, (folder) =>
     folder.id === folderId
       ? {
           ...folder,
           label,
         }
-      : {
-          ...folder,
-          children: renameFolderById(folder.children, folderId, label),
-        },
+      : folder,
   );
 }
 
@@ -279,7 +364,7 @@ export function renameFileById(
   fileId: string,
   label: string,
 ): WorkspaceFolder[] {
-  return folders.map((folder) => ({
+  return mapFolders(folders, (folder) => ({
     ...folder,
     files: folder.files.map((file) =>
       file.id === fileId
@@ -289,7 +374,6 @@ export function renameFileById(
           }
         : file,
     ),
-    children: renameFileById(folder.children, fileId, label),
   }));
 }
 
@@ -297,22 +381,16 @@ export function deleteFolderById(
   folders: WorkspaceFolder[],
   folderId: string,
 ): WorkspaceFolder[] {
-  return folders
-    .filter((folder) => folder.id !== folderId)
-    .map((folder) => ({
-      ...folder,
-      children: deleteFolderById(folder.children, folderId),
-    }));
+  return removeFolderById(folders, folderId);
 }
 
 export function deleteFileById(
   folders: WorkspaceFolder[],
   fileId: string,
 ): WorkspaceFolder[] {
-  return folders.map((folder) => ({
+  return mapFolders(folders, (folder) => ({
     ...folder,
     files: folder.files.filter((file) => file.id !== fileId),
-    children: deleteFileById(folder.children, fileId),
   }));
 }
 
@@ -321,17 +399,144 @@ export function addFileToFolderById(
   folderId: string,
   file: WorkspaceFile,
 ): WorkspaceFolder[] {
-  return folders.map((folder) =>
+  return mapFolders(folders, (folder) =>
     folder.id === folderId
       ? {
           ...folder,
-          files: [...folder.files, file],
+          files: [...folder.files.filter((candidate) => candidate.id !== file.id), file],
+          itemOrder: [
+            ...(folder.itemOrder ?? []),
+            {
+              type: 'file',
+              id: file.id,
+            } satisfies WorkspaceFolderOrderEntry,
+          ],
         }
-      : {
-          ...folder,
-          children: addFileToFolderById(folder.children, folderId, file),
-        },
+      : folder,
   );
+}
+
+export function addSeparatorToFolderById(
+  folders: WorkspaceFolder[],
+  folderId: string,
+  separator: WorkspaceSeparator,
+): WorkspaceFolder[] {
+  return mapFolders(folders, (folder) =>
+    folder.id === folderId
+      ? {
+          ...folder,
+          separators: [
+            ...(folder.separators ?? []).filter((candidate) => candidate.id !== separator.id),
+            separator,
+          ],
+          itemOrder: [
+            ...(folder.itemOrder ?? []),
+            {
+              type: 'separator',
+              id: separator.id,
+            } satisfies WorkspaceFolderOrderEntry,
+          ],
+        }
+      : folder,
+  );
+}
+
+export function deleteSeparatorById(
+  folders: WorkspaceFolder[],
+  separatorId: string,
+): WorkspaceFolder[] {
+  return removeSeparatorByIdInternal(folders, separatorId);
+}
+
+export function moveSeparatorById(
+  folders: WorkspaceFolder[],
+  separatorId: string,
+  targetFolderId: string,
+  targetIndex: number,
+): WorkspaceFolder[] {
+  const existingMatch = findSeparatorById(folders, separatorId);
+
+  if (!existingMatch) {
+    return folders;
+  }
+
+  const sourceFolder = findFolderById(folders, existingMatch.folderId);
+  const sourceIndex = sourceFolder
+    ? (sourceFolder.itemOrder ?? []).findIndex(
+        (entry) => entry.type === 'separator' && entry.id === separatorId,
+      )
+    : -1;
+
+  const foldersWithoutSeparator = removeSeparatorByIdInternal(folders, separatorId);
+  const separator = existingMatch.separator;
+
+  if (!findFolderById(foldersWithoutSeparator, targetFolderId)) {
+    return folders;
+  }
+
+  const resolvedTargetIndex =
+    existingMatch.folderId === targetFolderId &&
+    sourceIndex >= 0 &&
+    targetIndex > sourceIndex
+      ? targetIndex - 1
+      : targetIndex;
+
+  return insertSeparatorIntoFolder(
+    foldersWithoutSeparator,
+    targetFolderId,
+    separator,
+    resolvedTargetIndex,
+  );
+}
+
+export function getOrderedWorkspaceFolderItems(
+  folder: WorkspaceFolder,
+): OrderedWorkspaceFolderItem[] {
+  const normalizedFolder = normalizeFolderOrdering(folder);
+  const childrenById = new Map(normalizedFolder.children.map((child) => [child.id, child]));
+  const filesById = new Map(normalizedFolder.files.map((file) => [file.id, file]));
+  const separatorsById = new Map(
+    (normalizedFolder.separators ?? []).map((separator) => [separator.id, separator]),
+  );
+
+  return (normalizedFolder.itemOrder ?? []).reduce<OrderedWorkspaceFolderItem[]>((items, entry) => {
+    if (entry.type === 'folder') {
+      const childFolder = childrenById.get(entry.id);
+
+      if (childFolder) {
+        items.push({
+          type: 'folder',
+          folder: childFolder,
+        });
+      }
+
+      return items;
+    }
+
+    if (entry.type === 'file') {
+      const file = filesById.get(entry.id);
+
+      if (file) {
+        items.push({
+          type: 'file',
+          file,
+        });
+      }
+
+      return items;
+    }
+
+    const separator = separatorsById.get(entry.id);
+
+    if (separator) {
+      items.push({
+        type: 'separator',
+        separator,
+      });
+    }
+
+    return items;
+  }, []);
 }
 
 export function filterWorkspaceFolders(
@@ -358,11 +563,13 @@ export function filterWorkspaceFolders(
     }
 
     return [
-      {
+      normalizeFolderOrdering({
         ...folder,
-        files: folderMatches ? folder.files : matchingFiles,
         children: folderMatches ? folder.children : matchingChildren,
-      },
+        files: folderMatches ? folder.files : matchingFiles,
+        separators: folderMatches ? folder.separators ?? [] : [],
+        itemOrder: folderMatches ? folder.itemOrder : undefined,
+      }),
     ];
   });
 }

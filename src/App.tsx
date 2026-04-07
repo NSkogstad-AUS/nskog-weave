@@ -12,18 +12,79 @@ import {
   findFilePathById,
   findFolderById,
   findFolderPathById,
+  type WorkspaceFolderOrderEntry,
+  type WorkspaceSeparator,
   type WorkspaceFile,
   type WorkspaceFolder,
 } from '@/data/sidebarNavigation';
 import { FileWorkspace } from '@/features/file-page/FileWorkspace';
+import {
+  FOLDER_CANVAS_UPDATED_EVENT,
+  readStoredFolderCanvasNodes,
+  updateStoredFolderCanvasNodes,
+  type FolderCanvasStore,
+} from '@/features/file-page/useFolderCanvasState';
 import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import { useFilePages } from './hooks/useFilePages';
-import type { FilePageState } from '@/types/filePage';
+import type { FilePageNode, FilePageState } from '@/types/filePage';
 
 const WORKSPACE_FOLDERS_STORAGE_KEY = 'weave:workspace-folders:v1';
 const GENERATED_WORKSPACE_FOLDER_PREFIX = 'worker-output-folder:';
 const GENERATED_WORKSPACE_FILE_PREFIX = 'worker-output-file:';
+const ROOT_WORKSPACE_FOLDER_ID = 'workspace-root';
+
+type GeneratedWorkspaceOwnerType = 'file' | 'folder';
+
+function createEmptyWorkspaceRootFolder(): WorkspaceFolder {
+  return {
+    id: ROOT_WORKSPACE_FOLDER_ID,
+    label: 'Workspace',
+    files: [],
+    children: [],
+  };
+}
+
+function buildGeneratedWorkspaceEntityId(
+  prefix: string,
+  ownerType: GeneratedWorkspaceOwnerType,
+  ownerId: string,
+  entityId: string,
+) {
+  return `${prefix}${ownerType}:${encodeURIComponent(ownerId)}:${encodeURIComponent(entityId)}`;
+}
+
+function parseGeneratedWorkspaceEntityId(value: string, prefix: string) {
+  if (!value.startsWith(prefix)) {
+    return null;
+  }
+
+  const parts = value.slice(prefix.length).split(':');
+
+  if (parts.length < 3) {
+    return parts.length >= 2
+      ? {
+          ownerType: 'file' as const,
+          ownerId: decodeURIComponent(parts[0]),
+          entityId: decodeURIComponent(parts.slice(1).join(':')),
+        }
+      : null;
+  }
+
+  return {
+    ownerType: parts[0] === 'folder' ? 'folder' as const : 'file' as const,
+    ownerId: decodeURIComponent(parts[1]),
+    entityId: decodeURIComponent(parts.slice(2).join(':')),
+  };
+}
+
+function parseGeneratedWorkspaceFolderId(folderId: string) {
+  return parseGeneratedWorkspaceEntityId(folderId, GENERATED_WORKSPACE_FOLDER_PREFIX);
+}
+
+function parseGeneratedWorkspaceFileId(fileId: string) {
+  return parseGeneratedWorkspaceEntityId(fileId, GENERATED_WORKSPACE_FILE_PREFIX);
+}
 
 function upsertGeneratedFolderChildren(
   folders: WorkspaceFolder[],
@@ -49,13 +110,19 @@ function upsertGeneratedFolderChildren(
 }
 
 function buildGeneratedWorkspaceFolder(
-  fileId: string,
+  ownerType: GeneratedWorkspaceOwnerType,
+  ownerId: string,
   node: FilePageState['nodes'][number],
 ): WorkspaceFolder {
   const files: WorkspaceFile[] = (node.contentItems ?? [])
     .filter((item) => item.kind === 'file')
     .map((item) => ({
-      id: `worker-output-file:${fileId}:${item.id}`,
+      id: buildGeneratedWorkspaceEntityId(
+        GENERATED_WORKSPACE_FILE_PREFIX,
+        ownerType,
+        ownerId,
+        item.id,
+      ),
       label: item.label,
       description:
         (item.description ?? node.description) || 'Generated output from a connected worker.',
@@ -67,23 +134,116 @@ function buildGeneratedWorkspaceFolder(
   const children = (node.contentItems ?? [])
     .filter((item) => item.kind === 'folder')
     .map((item) => ({
-      id: `worker-output-folder:${fileId}:${item.id}`,
+      id: buildGeneratedWorkspaceEntityId(
+        GENERATED_WORKSPACE_FOLDER_PREFIX,
+        ownerType,
+        ownerId,
+        item.id,
+      ),
       label: item.label,
       files: [],
       children: [],
     }));
 
   return {
-    id: `worker-output-folder:${fileId}:${node.id}`,
+    id: buildGeneratedWorkspaceEntityId(
+      GENERATED_WORKSPACE_FOLDER_PREFIX,
+      ownerType,
+      ownerId,
+      node.id,
+    ),
     label: node.label,
     files,
     children,
   };
 }
 
+function collectGeneratedWorkspaceFolders(nodes: FilePageNode[]) {
+  return nodes.filter(
+    (node) =>
+      node.kind === 'folder' &&
+      node.generatedByWorkerId &&
+      (node.contentItems?.length ?? 0) > 0,
+  );
+}
+
+function removeGeneratedContentItemFromNodes(
+  nodes: FilePageNode[],
+  contentItemId: string,
+): FilePageNode[] {
+  const targetFolder = nodes.find(
+    (node) =>
+      node.kind === 'folder' &&
+      node.generatedByWorkerId &&
+      (node.contentItems ?? []).some((item) => item.id === contentItemId),
+  ) ?? null;
+  const workerId = targetFolder?.generatedByWorkerId ?? null;
+
+  return nodes.reduce<FilePageNode[]>((nextNodes, node) => {
+    if (targetFolder && node.id === targetFolder.id) {
+      const nextContentItems = (node.contentItems ?? []).filter((item) => item.id !== contentItemId);
+
+      if (nextContentItems.length > 0) {
+        nextNodes.push({
+          ...node,
+          contentItems: nextContentItems,
+        });
+      }
+
+      return nextNodes;
+    }
+
+    if (workerId && node.id === workerId && (!targetFolder || (targetFolder.contentItems ?? []).length <= 1)) {
+      nextNodes.push({
+        ...node,
+        workerStatus: 'idle',
+        workerProgress: 0,
+        workerOutputFolderId: null,
+        workerInputSignature: null,
+        workerLastError: null,
+      });
+      return nextNodes;
+    }
+
+    nextNodes.push(node);
+    return nextNodes;
+  }, []);
+}
+
+function removeGeneratedFolderFromNodes(
+  nodes: FilePageNode[],
+  folderNodeId: string,
+): FilePageNode[] {
+  const deletedFolder = nodes.find((node) => node.id === folderNodeId) ?? null;
+  const workerId =
+    deletedFolder?.kind === 'folder' ? deletedFolder.generatedByWorkerId ?? null : null;
+
+  return nodes.reduce<FilePageNode[]>((nextNodes, node) => {
+    if (node.id === folderNodeId) {
+      return nextNodes;
+    }
+
+    if (workerId && node.id === workerId) {
+      nextNodes.push({
+        ...node,
+        workerStatus: 'idle',
+        workerProgress: 0,
+        workerOutputFolderId: null,
+        workerInputSignature: null,
+        workerLastError: null,
+      });
+      return nextNodes;
+    }
+
+    nextNodes.push(node);
+    return nextNodes;
+  }, []);
+}
+
 function mergeWorkerOutputsIntoFolders(
   folders: WorkspaceFolder[],
   pages: Record<string, FilePageState>,
+  folderCanvasPages: FolderCanvasStore,
 ): WorkspaceFolder[] {
   let nextFolders = folders;
 
@@ -94,20 +254,31 @@ function mergeWorkerOutputsIntoFolders(
       return;
     }
 
-    const generatedFolders = page.nodes
-      .filter(
-        (node) =>
-          node.kind === 'folder' &&
-          node.generatedByWorkerId &&
-          (node.contentItems?.length ?? 0) > 0,
-      )
-      .map((node) => buildGeneratedWorkspaceFolder(fileId, node));
+    const generatedFolders = collectGeneratedWorkspaceFolders(page.nodes)
+      .map((node) => buildGeneratedWorkspaceFolder('file', fileId, node));
 
     if (generatedFolders.length === 0) {
       return;
     }
 
     nextFolders = upsertGeneratedFolderChildren(nextFolders, fileMatch.folderId, generatedFolders);
+  });
+
+  Object.entries(folderCanvasPages).forEach(([folderId, nodes]) => {
+    const parentFolder = findFolderById(folders, folderId);
+
+    if (!parentFolder) {
+      return;
+    }
+
+    const generatedFolders = collectGeneratedWorkspaceFolders(nodes)
+      .map((node) => buildGeneratedWorkspaceFolder('folder', folderId, node));
+
+    if (generatedFolders.length === 0) {
+      return;
+    }
+
+    nextFolders = upsertGeneratedFolderChildren(nextFolders, parentFolder.id, generatedFolders);
   });
 
   return nextFolders;
@@ -119,6 +290,18 @@ function stripGeneratedWorkspaceEntries(folders: WorkspaceFolder[]): WorkspaceFo
     .map((folder) => ({
       ...folder,
       files: folder.files.filter((file) => !file.id.startsWith(GENERATED_WORKSPACE_FILE_PREFIX)),
+      separators: (folder.separators ?? []).map((separator) => ({ ...separator })),
+      itemOrder: (folder.itemOrder ?? []).filter((entry) => {
+        if (entry.type === 'folder') {
+          return !entry.id.startsWith(GENERATED_WORKSPACE_FOLDER_PREFIX);
+        }
+
+        if (entry.type === 'file') {
+          return !entry.id.startsWith(GENERATED_WORKSPACE_FILE_PREFIX);
+        }
+
+        return true;
+      }),
       children: stripGeneratedWorkspaceEntries(folder.children),
     }));
 }
@@ -171,17 +354,62 @@ function normalizeWorkspaceFolder(value: unknown): WorkspaceFolder | null {
     return null;
   }
 
+  const rawFolder = value as WorkspaceFolder & {
+    separators?: unknown;
+    itemOrder?: unknown;
+  };
+  const separators = Array.isArray(rawFolder.separators)
+    ? rawFolder.separators.flatMap((separator) => {
+        if (
+          typeof separator !== 'object' ||
+          separator === null ||
+          typeof (separator as WorkspaceSeparator).id !== 'string'
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            id: (separator as WorkspaceSeparator).id,
+          },
+        ];
+      })
+    : [];
+  const itemOrder = Array.isArray(rawFolder.itemOrder)
+    ? rawFolder.itemOrder.flatMap((entry) => {
+        if (
+          typeof entry !== 'object' ||
+          entry === null ||
+          ((entry as WorkspaceFolderOrderEntry).type !== 'folder' &&
+            (entry as WorkspaceFolderOrderEntry).type !== 'file' &&
+            (entry as WorkspaceFolderOrderEntry).type !== 'separator') ||
+          typeof (entry as WorkspaceFolderOrderEntry).id !== 'string'
+        ) {
+          return [];
+        }
+
+        return [
+          {
+            type: (entry as WorkspaceFolderOrderEntry).type,
+            id: (entry as WorkspaceFolderOrderEntry).id,
+          },
+        ];
+      })
+    : undefined;
+
   return {
-    id: (value as WorkspaceFolder).id,
-    label: (value as WorkspaceFolder).label,
-    children: (value as WorkspaceFolder).children.flatMap((child) => {
+    id: rawFolder.id,
+    label: rawFolder.label,
+    children: rawFolder.children.flatMap((child) => {
       const nextChild = normalizeWorkspaceFolder(child);
       return nextChild ? [nextChild] : [];
     }),
-    files: (value as WorkspaceFolder).files.flatMap((file) => {
+    files: rawFolder.files.flatMap((file) => {
       const nextFile = normalizeWorkspaceFile(file);
       return nextFile ? [nextFile] : [];
     }),
+    separators,
+    itemOrder,
   };
 }
 
@@ -222,8 +450,11 @@ function hasFileDrag(types: readonly string[]) {
 
 function App() {
   const [folders, setFolders] = useState<WorkspaceFolder[]>(hydrateWorkspaceFolders);
+  const [folderCanvasPages, setFolderCanvasPages] = useState<FolderCanvasStore>(
+    readStoredFolderCanvasNodes,
+  );
   const [openFileId, setOpenFileId] = useState<string | null>(null);
-  const [openFolderId, setOpenFolderId] = useState<string | null>('general-knowledge');
+  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const [folderView, setFolderView] = useState<'canvas' | 'explorer'>('canvas');
   const [isFileDropActive, setIsFileDropActive] = useState(false);
   const [hoveredSidebarItem, setHoveredSidebarItem] = useState<
@@ -247,23 +478,41 @@ function App() {
     resizeNode,
     addNode,
     updateNode,
+    updatePageByFileId,
     deleteNode,
     selectedNodeIds,
     setSelectedNodeIds,
     setView,
   } = useFilePages(activeFileSeed);
+  useEffect(() => {
+    const syncFolderCanvasPages = () => {
+      setFolderCanvasPages(readStoredFolderCanvasNodes());
+    };
+
+    window.addEventListener(FOLDER_CANVAS_UPDATED_EVENT, syncFolderCanvasPages);
+    window.addEventListener('storage', syncFolderCanvasPages);
+
+    return () => {
+      window.removeEventListener(FOLDER_CANVAS_UPDATED_EVENT, syncFolderCanvasPages);
+      window.removeEventListener('storage', syncFolderCanvasPages);
+    };
+  }, []);
   const displayFolders = useMemo(
-    () => mergeWorkerOutputsIntoFolders(folders, pages),
-    [folders, pages],
+    () => mergeWorkerOutputsIntoFolders(folders, pages, folderCanvasPages),
+    [folderCanvasPages, folders, pages],
   );
   const activeFileMatch = useMemo(
     () => (openFileId ? findFilePathById(displayFolders, openFileId) : null),
     [displayFolders, openFileId],
   );
   const activeFile = activeFileMatch?.file ?? activeFileSeed;
+  const activeBaseFolder = useMemo(
+    () => (openFolderId ? findFolderById(folders, openFolderId) : null),
+    [folders, openFolderId],
+  );
   const activeFolder = useMemo(
-    () => (openFolderId ? findFolderById(displayFolders, openFolderId) : null),
-    [displayFolders, openFolderId],
+    () => activeBaseFolder ?? (openFolderId ? findFolderById(displayFolders, openFolderId) : null),
+    [activeBaseFolder, displayFolders, openFolderId],
   );
   const activeFolderPath = useMemo(
     () => (openFolderId ? findFolderPathById(displayFolders, openFolderId) : null),
@@ -302,14 +551,56 @@ function App() {
 
   const handleFileDelete = useCallback(
     (fileId: string) => {
+      const generatedFileMatch = parseGeneratedWorkspaceFileId(fileId);
+
+      if (generatedFileMatch) {
+        if (generatedFileMatch.ownerType === 'file') {
+          updatePageByFileId(generatedFileMatch.ownerId, (page) => ({
+            ...page,
+            nodes: removeGeneratedContentItemFromNodes(page.nodes, generatedFileMatch.entityId),
+          }));
+        } else {
+          setFolderCanvasPages(
+            updateStoredFolderCanvasNodes(generatedFileMatch.ownerId, (nodes) =>
+              removeGeneratedContentItemFromNodes(nodes, generatedFileMatch.entityId),
+            ),
+          );
+        }
+        setOpenFileId((current) => (current === fileId ? null : current));
+        return;
+      }
+
       removeFilePage(fileId);
       setOpenFileId((current) => (current === fileId ? null : current));
     },
-    [removeFilePage],
+    [removeFilePage, updatePageByFileId],
   );
 
+  const handleFolderDelete = useCallback((folderId: string) => {
+    const generatedFolderMatch = parseGeneratedWorkspaceFolderId(folderId);
+
+    if (!generatedFolderMatch) {
+      setOpenFolderId((current) => (current === folderId ? null : current));
+      return;
+    }
+
+    if (generatedFolderMatch.ownerType === 'file') {
+      updatePageByFileId(generatedFolderMatch.ownerId, (page) => ({
+        ...page,
+        nodes: removeGeneratedFolderFromNodes(page.nodes, generatedFolderMatch.entityId),
+      }));
+    } else {
+      setFolderCanvasPages(
+        updateStoredFolderCanvasNodes(generatedFolderMatch.ownerId, (nodes) =>
+          removeGeneratedFolderFromNodes(nodes, generatedFolderMatch.entityId),
+        ),
+      );
+    }
+    setOpenFolderId((current) => (current === folderId ? null : current));
+  }, [updatePageByFileId]);
+
   const handleUploadFiles = useCallback(async (files: File[]) => {
-    if (!uploadTargetFolder || files.length === 0) {
+    if (files.length === 0) {
       return;
     }
 
@@ -317,12 +608,23 @@ function App() {
       files.map((file, index) => buildUploadedWorkspaceFile(file, index)),
     );
 
-    setFolders((current) =>
-      uploadedFiles.reduce(
-        (nextFolders, file) => addFileToFolderById(nextFolders, uploadTargetFolder.id, file),
-        current,
-      ),
-    );
+    setFolders((current) => {
+      const targetFolderId =
+        uploadTargetFolder?.id ??
+        current[0]?.id ??
+        ROOT_WORKSPACE_FOLDER_ID;
+      const baseFolders =
+        current.length > 0 ? current : [createEmptyWorkspaceRootFolder()];
+
+      return uploadedFiles.reduce(
+        (nextFolders, file) => addFileToFolderById(nextFolders, targetFolderId, file),
+        baseFolders,
+      );
+    });
+
+    if (!uploadTargetFolder) {
+      setOpenFolderId((current) => current ?? ROOT_WORKSPACE_FOLDER_ID);
+    }
   }, [uploadTargetFolder]);
 
   const handleAppDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
@@ -407,7 +709,7 @@ function App() {
       onDrop={handleAppDrop}
     >
       <SidebarProvider
-        defaultOpen
+        defaultOpen={false}
         style={
           {
             '--sidebar-width': '24rem',
@@ -432,6 +734,7 @@ function App() {
             setOpenFileId(null);
           }}
           onFileDelete={handleFileDelete}
+          onFolderDelete={handleFolderDelete}
         />
         <SidebarInset className="min-h-screen bg-transparent md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
           <div className="flex h-full min-h-screen flex-col">

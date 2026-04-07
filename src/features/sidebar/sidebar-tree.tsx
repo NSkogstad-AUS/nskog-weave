@@ -1,10 +1,12 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
   FilePlus2Icon,
   FileTextIcon,
   FolderIcon,
   FolderOpenIcon,
+  GripVerticalIcon,
+  MinusIcon,
   PencilIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -29,8 +31,10 @@ import {
 import {
   folderHasContents,
   getFolderDescendantCounts,
+  getOrderedWorkspaceFolderItems,
   type WorkspaceFile,
   type WorkspaceFolder,
+  type WorkspaceSeparator,
 } from '@/data/sidebarNavigation';
 import { cn } from '@/lib/utils';
 
@@ -43,6 +47,16 @@ export type EditingItem =
   | { type: 'folder'; id: string; value: string }
   | { type: 'file'; id: string; value: string }
   | null;
+
+type DraggedSeparator = {
+  separatorId: string;
+  parentFolderId: string;
+};
+
+type SeparatorDropTarget = {
+  folderId: string;
+  index: number;
+};
 
 const SIDEBAR_HIGHLIGHT_CLASS =
   'bg-sidebar-accent/30 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
@@ -59,6 +73,10 @@ function queueAfterMenuClose(callback: () => void) {
 
 function getRowPaddingLeft(level: number) {
   return level === 0 ? 10 : 14;
+}
+
+function getDropTargetKey(dropTarget: SeparatorDropTarget | null) {
+  return dropTarget ? `${dropTarget.folderId}:${dropTarget.index}` : '';
 }
 
 function TreeElbow({ level }: { level: number }) {
@@ -111,6 +129,51 @@ function EditingRow({
       }}
       className="h-8 w-full rounded-md border border-input bg-background px-2.5 text-sm text-foreground outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
     />
+  );
+}
+
+function SeparatorDropZone({
+  active,
+  hasDraggedSeparator,
+  level,
+  onDrop,
+  onHover,
+}: {
+  active: boolean;
+  hasDraggedSeparator: boolean;
+  level: number;
+  onDrop: () => void;
+  onHover: () => void;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      onDragEnter={(event) => {
+        event.preventDefault();
+        onHover();
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        onHover();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+      className={cn(
+        'relative transition-[height,opacity] duration-150 ease-out',
+        hasDraggedSeparator ? 'h-3 opacity-100' : 'h-0 opacity-0',
+      )}
+      style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
+    >
+      <span
+        className={cn(
+          'absolute inset-x-2 top-1/2 h-px -translate-y-1/2 rounded-full bg-sidebar-border/70 transition-all duration-150',
+          active && 'h-1 bg-sidebar-accent/65',
+        )}
+      />
+    </div>
   );
 }
 
@@ -209,39 +272,121 @@ function FileRow({
   );
 }
 
+function SeparatorRow({
+  draggingSeparator,
+  level,
+  onDelete,
+  onDragEnd,
+  onDragStart,
+  parentFolderId,
+  separator,
+}: {
+  draggingSeparator: DraggedSeparator | null;
+  level: number;
+  onDelete: () => void;
+  onDragEnd: () => void;
+  onDragStart: (separator: DraggedSeparator) => void;
+  parentFolderId: string;
+  separator: WorkspaceSeparator;
+}) {
+  const isBeingDragged = draggingSeparator?.separatorId === separator.id;
+
+  return (
+    <SidebarMenuItem className="relative w-full py-1.5">
+      <TreeElbow level={level} />
+      <ContextMenu>
+        <ContextMenuTrigger asChild>
+          <div
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = 'move';
+              event.dataTransfer.setData('text/plain', separator.id);
+              onDragStart({
+                separatorId: separator.id,
+                parentFolderId,
+              });
+            }}
+            onDragEnd={onDragEnd}
+            className={cn(
+              'group flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-sidebar-foreground/70 transition',
+              isBeingDragged && 'opacity-40',
+            )}
+            style={{ paddingLeft: `${getRowPaddingLeft(level) + 16}px` }}
+          >
+            <GripVerticalIcon className="size-3.5 shrink-0 opacity-45" />
+            <span className="h-px flex-1 rounded-full bg-sidebar-border/80" />
+          </div>
+        </ContextMenuTrigger>
+        <ContextMenuContent
+          side="right"
+          className="ml-2 w-48"
+          onCloseAutoFocus={(event) => event.preventDefault()}
+        >
+          <ContextMenuLabel>Separator</ContextMenuLabel>
+          <ContextMenuSeparator />
+          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+            <Trash2Icon />
+            Delete
+          </ContextMenuItem>
+          </ContextMenuContent>
+        </ContextMenu>
+    </SidebarMenuItem>
+  );
+}
+
 function FolderRow({
+  activeDropTarget,
   activeItem,
+  draggingSeparator,
   editingItem,
   expandedFolderIds,
   folder,
+  hasDraggedSeparator,
   highlightedItem,
   level,
+  rootIndex,
   onBeginRename,
   onCancelRename,
   onChangeRename,
   onCommitRename,
   onCreateFile,
+  onCreateSeparator,
   onDeleteFile,
   onDeleteFolder,
+  onDeleteSeparator,
+  onDragEndSeparator,
+  onDragStartSeparator,
+  onDropSeparator,
+  onHoverDropTarget,
   onRequestDeleteFolder,
   onSelectFile,
   onSelectFolder,
   onToggleExpanded,
   searchActive,
 }: {
+  activeDropTarget: SeparatorDropTarget | null;
   activeItem: ActiveItem;
+  draggingSeparator: DraggedSeparator | null;
   editingItem: EditingItem;
   expandedFolderIds: Set<string>;
   folder: WorkspaceFolder;
+  hasDraggedSeparator: boolean;
   highlightedItem: ActiveItem;
   level: number;
+  rootIndex?: number;
   onBeginRename: (item: EditingItem) => void;
   onCancelRename: () => void;
   onChangeRename: (value: string) => void;
   onCommitRename: () => void;
   onCreateFile: (folderId: string) => void;
+  onCreateSeparator: (folderId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  onDeleteSeparator: (separatorId: string) => void;
+  onDragEndSeparator: () => void;
+  onDragStartSeparator: (separator: DraggedSeparator) => void;
+  onDropSeparator: (target: SeparatorDropTarget) => void;
+  onHoverDropTarget: (target: SeparatorDropTarget) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
   onSelectFile: (fileId: string) => void;
   onSelectFolder: (folderId: string) => void;
@@ -249,15 +394,22 @@ function FolderRow({
   searchActive: boolean;
 }) {
   const isExpanded = searchActive || expandedFolderIds.has(folder.id);
-  const hasChildren = folder.children.length > 0 || folder.files.length > 0;
+  const orderedItems = getOrderedWorkspaceFolderItems(folder);
+  const hasChildren = orderedItems.length > 0;
   const isEditing = editingItem?.type === 'folder' && editingItem.id === folder.id;
   const isActive = activeItem?.type === 'folder' && activeItem.id === folder.id;
   const isHighlighted = highlightedItem?.type === 'folder' && highlightedItem.id === folder.id;
   const descendantCounts = getFolderDescendantCounts(folder);
   const totalDescendants = descendantCounts.folders + descendantCounts.files;
+  const rowDropTarget = {
+    folderId: folder.id,
+    index: orderedItems.length,
+  } satisfies SeparatorDropTarget;
+  const activeDropTargetKey = getDropTargetKey(activeDropTarget);
+  const rowDropTargetKey = getDropTargetKey(rowDropTarget);
 
   return (
-    <SidebarMenuItem className="relative w-full">
+    <SidebarMenuItem className={cn('relative w-full', level === 0 && rootIndex && rootIndex > 0 && 'mt-4')}>
       <TreeElbow level={level} />
       {isEditing ? (
         <div className="px-2 py-1">
@@ -283,9 +435,35 @@ function FolderRow({
                   })
                 }
                 onContextMenu={() => onSelectFolder(folder.id)}
+                onDragEnter={(event) => {
+                  if (!draggingSeparator) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  onHoverDropTarget(rowDropTarget);
+                }}
+                onDragOver={(event) => {
+                  if (!draggingSeparator) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  event.dataTransfer.dropEffect = 'move';
+                  onHoverDropTarget(rowDropTarget);
+                }}
+                onDrop={(event) => {
+                  if (!draggingSeparator) {
+                    return;
+                  }
+
+                  event.preventDefault();
+                  onDropSeparator(rowDropTarget);
+                }}
                 className={cn(
                   'w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45',
                   isHighlighted && !isActive && SIDEBAR_HIGHLIGHT_CLASS,
+                  activeDropTargetKey === rowDropTargetKey && 'shadow-[inset_0_-2px_0_0_rgba(125,211,252,0.8)]',
                 )}
                 style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
                 tooltip={folder.label}
@@ -346,6 +524,15 @@ function FolderRow({
             <ContextMenuItem
               onSelect={() => {
                 onSelectFolder(folder.id);
+                onCreateSeparator(folder.id);
+              }}
+            >
+              <MinusIcon />
+              Add separator
+            </ContextMenuItem>
+            <ContextMenuItem
+              onSelect={() => {
+                onSelectFolder(folder.id);
                 queueAfterMenuClose(() =>
                   onBeginRename({
                     type: 'folder',
@@ -398,56 +585,91 @@ function FolderRow({
               className="pointer-events-none absolute bottom-8 left-[17px] top-0 w-px bg-sidebar-border/80"
             />
             <SidebarMenuSub className={cn('mr-0 border-l-0 px-0 pl-2.5 pr-0', !isExpanded && 'pointer-events-none')}>
-              {folder.children.map((childFolder) => (
-                <FolderRow
-                  key={childFolder.id}
-                  activeItem={activeItem}
-                  editingItem={editingItem}
-                  expandedFolderIds={expandedFolderIds}
-                  folder={childFolder}
-                  highlightedItem={highlightedItem}
-                  level={level + 1}
-                  onBeginRename={onBeginRename}
-                  onCancelRename={onCancelRename}
-                  onChangeRename={onChangeRename}
-                  onCommitRename={onCommitRename}
-                  onCreateFile={onCreateFile}
-                  onDeleteFile={onDeleteFile}
-                  onDeleteFolder={onDeleteFolder}
-                  onRequestDeleteFolder={onRequestDeleteFolder}
-                  onSelectFile={onSelectFile}
-                  onSelectFolder={onSelectFolder}
-                  onToggleExpanded={onToggleExpanded}
-                  searchActive={searchActive}
-                />
-              ))}
+              <SeparatorDropZone
+                active={activeDropTargetKey === getDropTargetKey({ folderId: folder.id, index: 0 })}
+                hasDraggedSeparator={hasDraggedSeparator}
+                level={level + 1}
+                onHover={() => onHoverDropTarget({ folderId: folder.id, index: 0 })}
+                onDrop={() => onDropSeparator({ folderId: folder.id, index: 0 })}
+              />
 
-              {folder.files.map((file) => (
-                <FileRow
-                  key={file.id}
-                  editValue={
-                    editingItem?.type === 'file' && editingItem.id === file.id
-                      ? editingItem.value
-                      : file.label
-                  }
-                  file={file}
-                  isActive={activeItem?.type === 'file' && activeItem.id === file.id}
-                  isEditing={editingItem?.type === 'file' && editingItem.id === file.id}
-                  isHighlighted={highlightedItem?.type === 'file' && highlightedItem.id === file.id}
-                  level={level + 1}
-                  onBeginRename={() =>
-                    onBeginRename({
-                      type: 'file',
-                      id: file.id,
-                      value: file.label,
-                    })
-                  }
-                  onCancelRename={onCancelRename}
-                  onChangeRename={onChangeRename}
-                  onCommitRename={onCommitRename}
-                  onDelete={() => onDeleteFile(file.id)}
-                  onSelect={() => onSelectFile(file.id)}
-                />
+              {orderedItems.map((item, index) => (
+                <div key={`${item.type}:${item.type === 'folder' ? item.folder.id : item.type === 'file' ? item.file.id : item.separator.id}`}>
+                  {item.type === 'folder' ? (
+                    <FolderRow
+                      activeDropTarget={activeDropTarget}
+                      activeItem={activeItem}
+                      draggingSeparator={draggingSeparator}
+                      editingItem={editingItem}
+                      expandedFolderIds={expandedFolderIds}
+                      folder={item.folder}
+                      hasDraggedSeparator={hasDraggedSeparator}
+                      highlightedItem={highlightedItem}
+                      level={level + 1}
+                      onBeginRename={onBeginRename}
+                      onCancelRename={onCancelRename}
+                      onChangeRename={onChangeRename}
+                      onCommitRename={onCommitRename}
+                      onCreateFile={onCreateFile}
+                      onCreateSeparator={onCreateSeparator}
+                      onDeleteFile={onDeleteFile}
+                      onDeleteFolder={onDeleteFolder}
+                      onDeleteSeparator={onDeleteSeparator}
+                      onDragEndSeparator={onDragEndSeparator}
+                      onDragStartSeparator={onDragStartSeparator}
+                      onDropSeparator={onDropSeparator}
+                      onHoverDropTarget={onHoverDropTarget}
+                      onRequestDeleteFolder={onRequestDeleteFolder}
+                      onSelectFile={onSelectFile}
+                      onSelectFolder={onSelectFolder}
+                      onToggleExpanded={onToggleExpanded}
+                      searchActive={searchActive}
+                    />
+                  ) : item.type === 'file' ? (
+                    <FileRow
+                      editValue={
+                        editingItem?.type === 'file' && editingItem.id === item.file.id
+                          ? editingItem.value
+                          : item.file.label
+                      }
+                      file={item.file}
+                      isActive={activeItem?.type === 'file' && activeItem.id === item.file.id}
+                      isEditing={editingItem?.type === 'file' && editingItem.id === item.file.id}
+                      isHighlighted={highlightedItem?.type === 'file' && highlightedItem.id === item.file.id}
+                      level={level + 1}
+                      onBeginRename={() =>
+                        onBeginRename({
+                          type: 'file',
+                          id: item.file.id,
+                          value: item.file.label,
+                        })
+                      }
+                      onCancelRename={onCancelRename}
+                      onChangeRename={onChangeRename}
+                      onCommitRename={onCommitRename}
+                      onDelete={() => onDeleteFile(item.file.id)}
+                      onSelect={() => onSelectFile(item.file.id)}
+                    />
+                  ) : (
+                    <SeparatorRow
+                      draggingSeparator={draggingSeparator}
+                      level={level + 1}
+                      onDelete={() => onDeleteSeparator(item.separator.id)}
+                      onDragEnd={onDragEndSeparator}
+                      onDragStart={onDragStartSeparator}
+                      parentFolderId={folder.id}
+                      separator={item.separator}
+                    />
+                  )}
+
+                  <SeparatorDropZone
+                    active={activeDropTargetKey === getDropTargetKey({ folderId: folder.id, index: index + 1 })}
+                    hasDraggedSeparator={hasDraggedSeparator}
+                    level={level + 1}
+                    onHover={() => onHoverDropTarget({ folderId: folder.id, index: index + 1 })}
+                    onDrop={() => onDropSeparator({ folderId: folder.id, index: index + 1 })}
+                  />
+                </div>
               ))}
             </SidebarMenuSub>
           </div>
@@ -468,8 +690,11 @@ interface SidebarTreeProps {
   onChangeRename: (value: string) => void;
   onCommitRename: () => void;
   onCreateFile: (folderId: string) => void;
+  onCreateSeparator: (folderId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderId: string) => void;
+  onDeleteSeparator: (separatorId: string) => void;
+  onMoveSeparator: (separatorId: string, targetFolderId: string, targetIndex: number) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
   onSelectFile: (fileId: string) => void;
   onSelectFolder: (folderId: string) => void;
@@ -488,32 +713,62 @@ export function SidebarTree({
   onChangeRename,
   onCommitRename,
   onCreateFile,
+  onCreateSeparator,
   onDeleteFile,
   onDeleteFolder,
+  onDeleteSeparator,
+  onMoveSeparator,
   onRequestDeleteFolder,
   onSelectFile,
   onSelectFolder,
   onToggleExpanded,
   searchActive,
 }: SidebarTreeProps) {
+  const [draggingSeparator, setDraggingSeparator] = useState<DraggedSeparator | null>(null);
+  const [activeDropTarget, setActiveDropTarget] = useState<SeparatorDropTarget | null>(null);
+
   return (
     <SidebarMenu>
-      {folders.map((folder) => (
+      {folders.map((folder, index) => (
         <FolderRow
           key={folder.id}
+          activeDropTarget={activeDropTarget}
           activeItem={activeItem}
+          draggingSeparator={draggingSeparator}
           editingItem={editingItem}
           expandedFolderIds={expandedFolderIds}
           folder={folder}
+          hasDraggedSeparator={draggingSeparator !== null}
           highlightedItem={highlightedItem}
           level={0}
+          rootIndex={index}
           onBeginRename={onBeginRename}
           onCancelRename={onCancelRename}
           onChangeRename={onChangeRename}
           onCommitRename={onCommitRename}
           onCreateFile={onCreateFile}
+          onCreateSeparator={onCreateSeparator}
           onDeleteFile={onDeleteFile}
           onDeleteFolder={onDeleteFolder}
+          onDeleteSeparator={onDeleteSeparator}
+          onDragEndSeparator={() => {
+            setDraggingSeparator(null);
+            setActiveDropTarget(null);
+          }}
+          onDragStartSeparator={(separator) => {
+            setDraggingSeparator(separator);
+            setActiveDropTarget(null);
+          }}
+          onDropSeparator={(target) => {
+            if (!draggingSeparator) {
+              return;
+            }
+
+            onMoveSeparator(draggingSeparator.separatorId, target.folderId, target.index);
+            setDraggingSeparator(null);
+            setActiveDropTarget(null);
+          }}
+          onHoverDropTarget={setActiveDropTarget}
           onRequestDeleteFolder={onRequestDeleteFolder}
           onSelectFile={onSelectFile}
           onSelectFolder={onSelectFolder}

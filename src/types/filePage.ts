@@ -17,6 +17,10 @@ export const FILE_PAGE_CONTENT_ITEM_KINDS = ['folder', 'file'] as const;
 export type FilePageContentItemKind = (typeof FILE_PAGE_CONTENT_ITEM_KINDS)[number];
 export const FILE_PAGE_WORKER_MODES = ['ai-ready', 'sort-data'] as const;
 export type FilePageWorkerMode = (typeof FILE_PAGE_WORKER_MODES)[number];
+export const FILE_PAGE_WORKER_FOCUSES = ['general', 'coding', 'describing', 'research'] as const;
+export type FilePageWorkerFocus = (typeof FILE_PAGE_WORKER_FOCUSES)[number];
+export const FILE_PAGE_WORKER_OUTPUT_MODES = ['per-file', 'collated'] as const;
+export type FilePageWorkerOutputMode = (typeof FILE_PAGE_WORKER_OUTPUT_MODES)[number];
 export const FILE_PAGE_WORKER_STATUSES = ['idle', 'processing', 'complete', 'error'] as const;
 export type FilePageWorkerStatus = (typeof FILE_PAGE_WORKER_STATUSES)[number];
 
@@ -33,6 +37,10 @@ export interface FilePageContentItem {
   textContent?: string | null;
   mimeType?: string | null;
   sizeBytes?: number | null;
+  sourceItemId?: string | null;
+  sourceSignature?: string | null;
+  outputVersion?: number | null;
+  generatedAt?: string | null;
 }
 
 export interface FilePageNode {
@@ -48,6 +56,8 @@ export interface FilePageNode {
   position: Point;
   size: FilePageNodeSize;
   workerMode?: FilePageWorkerMode | null;
+  workerFocus?: FilePageWorkerFocus | null;
+  workerOutputMode?: FilePageWorkerOutputMode | null;
   workerStatus?: FilePageWorkerStatus | null;
   workerProgress?: number | null;
   workerOutputFolderId?: string | null;
@@ -67,6 +77,8 @@ export type FilePageNodeUpdates = Partial<
     | 'contentItems'
     | 'generatedByWorkerId'
     | 'workerMode'
+    | 'workerFocus'
+    | 'workerOutputMode'
     | 'workerStatus'
     | 'workerProgress'
     | 'workerOutputFolderId'
