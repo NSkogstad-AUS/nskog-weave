@@ -196,6 +196,18 @@ function getWorkerOutputJsonSchema() {
   } as const;
 }
 
+function getWorkerOutputJsonExample() {
+  return {
+    files: [
+      {
+        label: 'Source Pack 1',
+        description: 'Short description of the extracted source pack.',
+        contentText: '# Summary\n\nConcise markdown artifact here.',
+      },
+    ],
+  } as const;
+}
+
 function buildWorkerMessages(requestBody: WorkerRunRequest) {
   return [
     {
@@ -212,6 +224,9 @@ function buildWorkerMessages(requestBody: WorkerRunRequest) {
           'For each input, create a concise markdown artifact.',
           'Use sections when useful: Summary, Key Facts, Entities, Open Questions, Follow-ups.',
           'Keep each output focused and practical.',
+          'Always return an object with a top-level "files" array.',
+          'Each file must include: "label", "description", and "contentText".',
+          `Example shape: ${JSON.stringify(getWorkerOutputJsonExample())}`,
         ],
         inputs: requestBody.inputs,
       }),
@@ -219,9 +234,54 @@ function buildWorkerMessages(requestBody: WorkerRunRequest) {
   ] as const;
 }
 
-async function runOpenRouterWorker(
+function extractJsonPayload(value: string) {
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue) {
+    return '';
+  }
+
+  const fencedMatch = trimmedValue.match(/```(?:json)?\s*([\s\S]*?)\s*```/i);
+
+  if (fencedMatch?.[1]) {
+    return fencedMatch[1].trim();
+  }
+
+  const firstObjectIndex = trimmedValue.indexOf('{');
+  const lastObjectIndex = trimmedValue.lastIndexOf('}');
+
+  if (firstObjectIndex >= 0 && lastObjectIndex > firstObjectIndex) {
+    return trimmedValue.slice(firstObjectIndex, lastObjectIndex + 1).trim();
+  }
+
+  return trimmedValue;
+}
+
+function readProviderErrorMessage(payload: unknown, fallbackMessage: string) {
+  const directMessage =
+    typeof (payload as { error?: { message?: unknown } })?.error?.message === 'string'
+      ? (payload as { error: { message: string } }).error.message.trim()
+      : '';
+
+  if (directMessage) {
+    return directMessage;
+  }
+
+  const metadataMessage =
+    typeof (payload as { metadata?: { raw?: string } })?.metadata?.raw === 'string'
+      ? (payload as { metadata: { raw: string } }).metadata.raw.trim()
+      : '';
+
+  if (metadataMessage) {
+    return metadataMessage;
+  }
+
+  return fallbackMessage;
+}
+
+async function sendOpenRouterRequest(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
-  requestBody: WorkerRunRequest,
+  body: Record<string, unknown>,
 ) {
   const upstreamResponse = await fetch('https://openrouter.ai/api/v1/chat/completions', {
     method: 'POST',
@@ -229,37 +289,74 @@ async function runOpenRouterWorker(
       Authorization: `Bearer ${providerConfig.apiKey}`,
       'Content-Type': 'application/json',
       'HTTP-Referer': 'http://localhost:5173',
-      'X-Title': 'nskog-weave',
+      'X-OpenRouter-Title': 'nskog-weave',
     },
-    body: JSON.stringify({
-      model: providerConfig.model,
-      messages: buildWorkerMessages(requestBody),
-      response_format: {
-        type: 'json_schema',
-        json_schema: {
-          name: 'worker_output_bundle',
-          strict: true,
-          schema: getWorkerOutputJsonSchema(),
-        },
-      },
-      provider: {
-        require_parameters: true,
-      },
-      temperature: 0.2,
-      stream: false,
-    }),
+    body: JSON.stringify(body),
   });
   const upstreamPayload = await upstreamResponse.json().catch(() => null);
 
-  if (!upstreamResponse.ok) {
+  return {
+    upstreamResponse,
+    upstreamPayload,
+  };
+}
+
+async function runOpenRouterWorker(
+  providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
+  requestBody: WorkerRunRequest,
+) {
+  const baseRequestBody = {
+    model: providerConfig.model,
+    messages: buildWorkerMessages(requestBody),
+    temperature: 0.2,
+    stream: false,
+  } satisfies Record<string, unknown>;
+
+  const strictAttempt = await sendOpenRouterRequest(providerConfig, {
+    ...baseRequestBody,
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'worker_output_bundle',
+        strict: true,
+        schema: getWorkerOutputJsonSchema(),
+      },
+    },
+    provider: {
+      require_parameters: true,
+    },
+  });
+
+  if (strictAttempt.upstreamResponse.ok) {
+    return extractOpenRouterResponseText(strictAttempt.upstreamPayload);
+  }
+
+  const fallbackAttempt = await sendOpenRouterRequest(providerConfig, {
+    ...baseRequestBody,
+    response_format: {
+      type: 'json_object',
+    },
+    plugins: [{ id: 'response-healing' }],
+  });
+
+  if (!fallbackAttempt.upstreamResponse.ok) {
+    const strictErrorMessage = readProviderErrorMessage(
+      strictAttempt.upstreamPayload,
+      'The OpenRouter API request failed.',
+    );
+    const fallbackErrorMessage = readProviderErrorMessage(
+      fallbackAttempt.upstreamPayload,
+      'The OpenRouter API request failed.',
+    );
+
     throw new Error(
-      typeof (upstreamPayload as { error?: { message?: unknown } })?.error?.message === 'string'
-        ? (upstreamPayload as { error: { message: string } }).error.message
-        : 'The OpenRouter API request failed.',
+      strictErrorMessage === fallbackErrorMessage
+        ? fallbackErrorMessage
+        : `${fallbackErrorMessage} (fallback after structured-output failure: ${strictErrorMessage})`,
     );
   }
 
-  return extractOpenRouterResponseText(upstreamPayload);
+  return extractOpenRouterResponseText(fallbackAttempt.upstreamPayload);
 }
 
 async function runOpenAiWorker(
@@ -307,7 +404,7 @@ async function runOpenAiWorker(
 }
 
 function parseWorkerOutputFiles(responseText: string): WorkerOutputFile[] {
-  const parsedPayload = JSON.parse(responseText) as {
+  const parsedPayload = JSON.parse(extractJsonPayload(responseText)) as {
     files?: Array<{ label?: unknown; description?: unknown; contentText?: unknown }>;
   };
 
