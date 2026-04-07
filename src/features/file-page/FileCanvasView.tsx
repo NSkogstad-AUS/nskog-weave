@@ -1495,6 +1495,31 @@ export function FileCanvasView({
     return nextTargetId;
   }, [getNodeById]);
 
+  const beginMarqueeSelection = useCallback((localPoint: Point, additive: boolean) => {
+    const initialSelection = additive
+      ? draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current
+      : [];
+    const nextMarqueeState = {
+      origin: localPoint,
+      current: localPoint,
+      additive,
+      initialSelection,
+    } satisfies MarqueeState;
+
+    panStateRef.current = null;
+    resizeStateRef.current = null;
+    dragStateRef.current = null;
+    workerConnectionDragStateRef.current = null;
+    setPanState(null);
+    setResizeState(null);
+    setDragState(null);
+    setWorkerConnectionDragState(null);
+    marqueeStateRef.current = nextMarqueeState;
+    setMarqueeState(nextMarqueeState);
+    draftSelectedNodeIdsRef.current = initialSelection;
+    setDraftSelectedNodeIds(initialSelection);
+  }, []);
+
   const handleNodePointerDown = useCallback((
     event: ReactPointerEvent<HTMLButtonElement>,
     node: FilePageNode,
@@ -1509,6 +1534,11 @@ export function FileCanvasView({
     const localPoint = getLocalPoint(event.clientX, event.clientY);
 
     if (!localPoint) {
+      return;
+    }
+
+    if (event.shiftKey) {
+      beginMarqueeSelection(localPoint, true);
       return;
     }
 
@@ -1537,7 +1567,7 @@ export function FileCanvasView({
     };
     dragStateRef.current = nextDragState;
     setDragState(nextDragState);
-  }, [getLocalPoint, getNodeById]);
+  }, [beginMarqueeSelection, getLocalPoint, getNodeById]);
 
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
     if ((event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
@@ -3458,23 +3488,12 @@ export function FileCanvasView({
 
             if (event.shiftKey) {
               const localPoint = getLocalPoint(event.clientX, event.clientY);
-              const initialSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIds;
 
               if (!localPoint) {
                 return;
               }
 
-              const nextMarqueeState = {
-                origin: localPoint,
-                current: localPoint,
-                additive: true,
-                initialSelection,
-              } satisfies MarqueeState;
-
-              marqueeStateRef.current = nextMarqueeState;
-              setMarqueeState(nextMarqueeState);
-              draftSelectedNodeIdsRef.current = initialSelection;
-              setDraftSelectedNodeIds(initialSelection);
+              beginMarqueeSelection(localPoint, true);
               return;
             }
 
