@@ -1,4 +1,5 @@
 import {
+  BotIcon,
   FileTextIcon,
   FolderIcon,
   ShapesIcon,
@@ -32,6 +33,10 @@ const NODE_META = {
   group: {
     icon: ShapesIcon,
     label: 'Group',
+  },
+  worker: {
+    icon: BotIcon,
+    label: 'Worker',
   },
 } satisfies Record<
   FilePageNode['kind'],

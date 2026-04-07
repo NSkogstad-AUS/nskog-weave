@@ -1,4 +1,5 @@
 import {
+  BotIcon,
   FileTextIcon,
   FolderIcon,
   LightbulbIcon,
@@ -27,6 +28,11 @@ export const NODE_META = {
     icon: ShapesIcon,
     eyebrow: 'Group',
     className: GROUP_CHROME.frameClassName,
+  },
+  worker: {
+    icon: BotIcon,
+    eyebrow: 'Worker',
+    className: 'border-slate-200/85 bg-white/98',
   },
   element: {
     icon: SparklesIcon,

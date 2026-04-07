@@ -7,7 +7,8 @@ const KIND_RANK: Record<FilePageNode['kind'], number> = {
   folder: 0,
   file: 1,
   group: 2,
-  element: 3,
+  worker: 3,
+  element: 4,
 };
 
 const ELEMENT_LABELS: Record<WorkspaceFile['kind'], string> = {
@@ -64,20 +65,31 @@ function createNode(
         ? 'Freeform canvas object.'
         : kind === 'group'
           ? 'Shared region for clustering related canvas items.'
+          : kind === 'worker'
+            ? 'Automates transformations across connected canvas files.'
           : '',
     kind,
     icon:
       kind === 'folder' || kind === 'group'
         ? 'shapes'
+        : kind === 'worker'
+          ? 'target'
         : kind === 'file'
           ? 'message-square'
           : 'sparkles',
     groupId: null,
     parentNodeId: null,
+    contentItems: [],
+    generatedByWorkerId: null,
     position: { x, y },
     size: {
       widthUnits: 1,
       heightUnits: 1,
     },
+    workerMode: kind === 'worker' ? 'ai-ready' : null,
+    workerStatus: kind === 'worker' ? 'idle' : null,
+    workerProgress: kind === 'worker' ? 0 : null,
+    workerOutputFolderId: null,
+    workerInputSignature: null,
   };
 }

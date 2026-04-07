@@ -2,7 +2,9 @@ import { memo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   ExpandIcon,
+  LoaderCircleIcon,
   PencilLineIcon,
+  SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
 
@@ -28,7 +30,7 @@ import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
 import { cn } from '@/lib/utils';
-import type { FilePageElementIcon, FilePageNode } from '@/types/filePage';
+import type { FilePageContentItem, FilePageElementIcon, FilePageNode } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 interface FileCanvasNodeProps {
@@ -36,12 +38,13 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
-  folderContents?: Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>;
+  folderContents?: FilePageContentItem[];
   folderExpandState?: 'hidden' | 'expand' | 'collapse';
   isContextMenuOpen: boolean;
   isDragging: boolean;
   isEditing: boolean;
   isResizing?: boolean;
+  isWorkerConnectionTarget?: boolean;
   resizeAxis?: GroupResizeAxis;
   isSelected: boolean;
   node: FilePageNode;
@@ -70,6 +73,10 @@ interface FileCanvasNodeProps {
   onSelect: (nodeId: string) => void;
   onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
+  onWorkerInputHandlePointerDown?: (
+    event: ReactPointerEvent<HTMLSpanElement>,
+    node: FilePageNode,
+  ) => void;
   canResize: (nodeId: string, size: FilePageNode['size']) => boolean;
 }
 
@@ -84,6 +91,7 @@ function FileCanvasNodeComponent({
   isDragging,
   isEditing,
   isResizing = false,
+  isWorkerConnectionTarget = false,
   resizeAxis,
   isSelected,
   node,
@@ -108,6 +116,7 @@ function FileCanvasNodeComponent({
   onSelect,
   onStartRename,
   onStopRename,
+  onWorkerInputHandlePointerDown,
   canResize,
 }: FileCanvasNodeProps) {
   const meta = NODE_META[node.kind];
@@ -121,19 +130,14 @@ function FileCanvasNodeComponent({
     : null;
   const isGroupNode = node.kind === 'group';
   const isFolderNode = node.kind === 'folder';
+  const isWorkerNode = node.kind === 'worker';
   const isFilesystemNode = node.kind === 'folder' || node.kind === 'file';
-  const canEdgeResize = node.kind === 'file' || node.kind === 'folder';
+  const canEdgeResize = node.kind === 'file' || node.kind === 'folder' || node.kind === 'worker';
   const isCompactNode = displaySize.widthUnits === 1;
   const canShowFolderSection =
     isFolderNode && displaySize.widthUnits >= 3 && folderContents.length > 0;
   const showFolderContents = canShowFolderSection && displaySize.heightUnits >= 2;
-  const visibleFolderContentCount = Math.max(0, displaySize.heightUnits * 2 - 1);
-  const visibleFolderContents = showFolderContents
-    ? folderContents.slice(0, visibleFolderContentCount)
-    : [];
-  const hiddenFolderContentCount = showFolderContents
-    ? Math.max(0, folderContents.length - visibleFolderContents.length)
-    : 0;
+  const visibleFolderContents = showFolderContents ? folderContents : [];
   const folderItemCountLabel = `${folderContents.length} item${folderContents.length === 1 ? '' : 's'}`;
   const folderFileCount = folderContents.filter((childNode) => childNode.kind === 'file').length;
   const folderSubfolderCount = folderContents.filter((childNode) => childNode.kind === 'folder').length;
@@ -159,6 +163,19 @@ function FileCanvasNodeComponent({
       : node.kind === 'element'
         ? (elementMeta?.label ?? null)
         : null;
+  const workerInputCount = folderContents.length;
+  const workerStatus = node.workerStatus ?? 'idle';
+  const workerProgress = node.workerProgress ?? 0;
+  const workerStatusMessage =
+    workerStatus === 'processing'
+      ? workerProgress < 34
+        ? 'Loading information...'
+        : workerProgress < 72
+          ? 'Processing now...'
+          : 'Preparing AI-ready files...'
+      : workerStatus === 'complete'
+        ? 'AI-ready output ready.'
+        : 'Connect files or folders on the left to generate AI-ready outputs.';
   const elementIconToneClassName =
     elementIcon === 'lightbulb'
       ? 'border-amber-200/80 bg-amber-50/85 text-amber-600'
@@ -197,6 +214,8 @@ function FileCanvasNodeComponent({
         isDragging && !isGroupNode && 'shadow-none',
         !isDragging &&
           'transition-[transform,box-shadow,border-color,opacity,width,height] duration-150',
+        isWorkerConnectionTarget &&
+          'border-slate-300/95 shadow-[0_0_0_4px_rgba(148,163,184,0.1),0_18px_40px_-30px_rgba(15,23,42,0.28)]',
         snapPreviewPosition && isDragging && 'opacity-94',
       )}
       style={{
@@ -205,6 +224,17 @@ function FileCanvasNodeComponent({
         transform: `translate3d(${displayBounds.left}px, ${displayBounds.top}px, 0)`,
       }}
     >
+      {isWorkerNode && onWorkerInputHandlePointerDown ? (
+        <span
+          role="presentation"
+          onPointerDown={(event) => onWorkerInputHandlePointerDown(event, node)}
+          className="absolute -left-4 top-1/2 z-40 flex h-8 w-8 -translate-y-1/2 items-center justify-center cursor-crosshair"
+        >
+          <span className="flex size-4 items-center justify-center rounded-full border border-slate-300/90 bg-white shadow-[0_10px_22px_-16px_rgba(15,23,42,0.4)]">
+            <span className="size-1.5 rounded-full bg-slate-400" />
+          </span>
+        </span>
+      ) : null}
       {canEdgeResize && onResizeHandlePointerDown ? (
         <>
           <span
@@ -263,9 +293,11 @@ function FileCanvasNodeComponent({
             <span
               className={cn(
                 'flex size-12 items-center justify-center',
-                !isFilesystemNode &&
+                node.kind === 'element' &&
                   'rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
-                !isFilesystemNode && elementIconToneClassName,
+                node.kind === 'element' && elementIconToneClassName,
+                isWorkerNode &&
+                  'rounded-[18px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.12)]',
               )}
             >
               <Icon
@@ -283,8 +315,10 @@ function FileCanvasNodeComponent({
                     'mt-0.5 flex shrink-0 items-center justify-center',
                     isFilesystemNode
                       ? 'size-5 text-slate-500'
+                      : isWorkerNode
+                        ? 'size-10 rounded-[20px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)]'
                       : 'size-9 rounded-2xl border shadow-[0_10px_24px_-22px_rgba(15,23,42,0.14)]',
-                    !isFilesystemNode && elementIconToneClassName,
+                    node.kind === 'element' && elementIconToneClassName,
                   )}
                 >
                   <Icon
@@ -326,10 +360,48 @@ function FileCanvasNodeComponent({
                 </div>
               </div>
 
+              {isWorkerNode ? (
+                <div className="space-y-3 border-t border-slate-200/75 pt-4">
+                  <div className="flex items-center justify-between text-[11px] font-medium text-slate-500">
+                    <span className="flex items-center gap-2">
+                      {workerStatus === 'processing' ? (
+                        <LoaderCircleIcon className="size-3.5 animate-spin text-slate-500" />
+                      ) : workerStatus === 'complete' ? (
+                        <SparklesIcon className="size-3.5 text-slate-500" />
+                      ) : (
+                        <span className="size-2 rounded-full bg-slate-300" />
+                      )}
+                      <span>{workerStatusMessage}</span>
+                    </span>
+                    <span className="text-slate-400">AI Ready</span>
+                  </div>
+                  <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
+                    <div
+                      className={cn(
+                        'h-full rounded-full transition-[width,background-color] duration-300',
+                        workerStatus === 'complete' ? 'bg-slate-900/70' : 'bg-slate-500/55',
+                      )}
+                      style={{
+                        width: `${workerStatus === 'processing'
+                          ? Math.max(8, Math.min(100, workerProgress))
+                          : workerStatus === 'complete'
+                            ? 100
+                            : 8}%`,
+                      }}
+                    />
+                  </div>
+                  <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                    <span>{workerInputCount} input{workerInputCount === 1 ? '' : 's'}</span>
+                    <span>&#8226;</span>
+                    <span>Output appears on the right</span>
+                  </div>
+                </div>
+              ) : null}
+
               {canShowFolderSection && showFolderContents ? (
-                <div className="border-t border-slate-200/75 pt-4">
+                <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/75 pt-4">
                   <div className="mb-2 text-[11px] font-medium text-slate-400">Contents</div>
-                  <div className="space-y-0.5">
+                  <div className="min-h-0 overflow-y-auto pr-1">
                     {visibleFolderContents.map((childNode) => {
                       const ChildIcon = NODE_META[childNode.kind].icon;
 
@@ -356,11 +428,6 @@ function FileCanvasNodeComponent({
                         </div>
                       );
                     })}
-                    {hiddenFolderContentCount > 0 ? (
-                      <div className="px-2.5 pt-2 text-[11px] text-slate-400">
-                        +{hiddenFolderContentCount} more
-                      </div>
-                    ) : null}
                   </div>
                 </div>
               ) : null}

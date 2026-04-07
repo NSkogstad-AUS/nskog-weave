@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useMemo, useState } from 'react';
 import {
   HomeIcon,
   LayoutGridIcon,
@@ -74,6 +74,7 @@ function queueAfterMenuClose(callback: () => void) {
 }
 
 interface WorkspaceSidebarProps {
+  folders?: WorkspaceFolder[];
   highlightedItem?: ActiveItem;
   onFileDelete?: (fileId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
@@ -82,13 +83,17 @@ interface WorkspaceSidebarProps {
 }
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
+  folders: controlledFolders,
   highlightedItem = null,
   onFileDelete,
   onFoldersChange,
   onOpenFile,
   onOpenFolder,
 }: WorkspaceSidebarProps) {
-  const [folders, setFolders] = useState<WorkspaceFolder[]>(createWorkspaceFolders);
+  const [uncontrolledFolders, setUncontrolledFolders] = useState<WorkspaceFolder[]>(
+    controlledFolders ?? createWorkspaceFolders(),
+  );
+  const folders = controlledFolders ?? uncontrolledFolders;
   const [searchQuery, setSearchQuery] = useState('');
   const [activeItem, setActiveItem] = useState<ActiveItem>({
     type: 'folder',
@@ -106,14 +111,24 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     [folders, searchQuery],
   );
 
-  useEffect(() => {
-    onFoldersChange?.(folders);
-  }, [folders, onFoldersChange]);
+  function updateFolders(recipe: (current: WorkspaceFolder[]) => WorkspaceFolder[]) {
+    const nextFolders = recipe(folders);
+
+    if (!controlledFolders) {
+      setUncontrolledFolders(nextFolders);
+    }
+
+    onFoldersChange?.(nextFolders);
+  }
 
   function resetSidebar() {
     const nextFolders = createWorkspaceFolders();
 
-    setFolders(nextFolders);
+    if (!controlledFolders) {
+      setUncontrolledFolders(nextFolders);
+    }
+
+    onFoldersChange?.(nextFolders);
     setSearchQuery('');
     setActiveItem({ type: 'folder', id: 'general-knowledge' });
     setEditingItem(null);
@@ -133,7 +148,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
       return;
     }
 
-    setFolders((current) =>
+    updateFolders((current) =>
       editingItem.type === 'folder'
         ? renameFolderById(current, editingItem.id, nextLabel)
         : renameFileById(current, editingItem.id, nextLabel),
@@ -142,7 +157,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   }
 
   function deleteFolder(folderId: string) {
-    setFolders((current) => deleteFolderById(current, folderId));
+    updateFolders((current) => deleteFolderById(current, folderId));
     setExpandedFolderIds((current) => {
       const next = new Set(current);
       next.delete(folderId);
@@ -157,7 +172,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   }
 
   function deleteFile(fileId: string) {
-    setFolders((current) => deleteFileById(current, fileId));
+    updateFolders((current) => deleteFileById(current, fileId));
     setEditingItem(null);
     onFileDelete?.(fileId);
 
@@ -175,7 +190,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
       kind: 'brief',
     };
 
-    setFolders((current) => addFileToFolderById(current, folderId, nextFile));
+    updateFolders((current) => addFileToFolderById(current, folderId, nextFile));
     setExpandedFolderIds((current) => new Set(current).add(folderId));
     setActiveItem({ type: 'file', id: fileId });
     onOpenFile?.(fileId);

@@ -25,7 +25,11 @@ import {
   resolveSnapPositions,
 } from './canvas/utils';
 import {
+  FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
+  FILE_PAGE_WORKER_MODES,
+  FILE_PAGE_WORKER_STATUSES,
+  type FilePageContentItem,
   type FilePageNode,
   type FilePageNodeKind,
   type FilePageNodeSize,
@@ -34,7 +38,6 @@ import {
 import type { Point } from '@/types/geometry';
 
 type FolderExpandState = 'hidden' | 'expand' | 'collapse';
-type FolderContentEntry = Pick<FilePageNode, 'id' | 'kind' | 'label'>;
 type FolderCanvasStore = Record<string, FilePageNode[]>;
 
 const FOLDER_NODE_PREFIX = 'folder:';
@@ -63,6 +66,42 @@ function normalizeIcon(value: unknown): FilePageNode['icon'] {
     value === 'target'
     ? value
     : 'sparkles';
+}
+
+function normalizeWorkerMode(value: unknown): FilePageNode['workerMode'] {
+  return FILE_PAGE_WORKER_MODES.includes(value as NonNullable<FilePageNode['workerMode']>)
+    ? (value as NonNullable<FilePageNode['workerMode']>)
+    : null;
+}
+
+function normalizeWorkerStatus(value: unknown): FilePageNode['workerStatus'] {
+  return FILE_PAGE_WORKER_STATUSES.includes(value as NonNullable<FilePageNode['workerStatus']>)
+    ? (value as NonNullable<FilePageNode['workerStatus']>)
+    : null;
+}
+
+function normalizeContentItems(value: unknown): FilePageContentItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      typeof item?.id !== 'string' ||
+      typeof item?.label !== 'string' ||
+      !FILE_PAGE_CONTENT_ITEM_KINDS.includes(item?.kind as FilePageContentItem['kind'])
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: item.id,
+        label: item.label,
+        kind: item.kind,
+      },
+    ];
+  });
 }
 
 function hydrateFolderCanvasNodes(): FolderCanvasStore {
@@ -96,6 +135,11 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
             typeof node?.parentNodeId === 'string' && node.parentNodeId.trim().length > 0
               ? node.parentNodeId
               : null;
+          const generatedByWorkerId =
+            typeof node?.generatedByWorkerId === 'string' &&
+            node.generatedByWorkerId.trim().length > 0
+              ? node.generatedByWorkerId
+              : null;
 
           if (
             typeof node?.id !== 'string' ||
@@ -114,6 +158,8 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
               description: typeof node.description === 'string' ? node.description : '',
               groupId,
               parentNodeId,
+              contentItems: normalizeContentItems(node?.contentItems),
+              generatedByWorkerId,
               kind,
               icon: normalizeIcon(node.icon),
               position: {
@@ -124,6 +170,21 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
                 widthUnits: normalizeUnit(node?.size?.widthUnits),
                 heightUnits: normalizeUnit(node?.size?.heightUnits),
               },
+              workerMode: normalizeWorkerMode(node?.workerMode),
+              workerStatus: normalizeWorkerStatus(node?.workerStatus),
+              workerProgress: Number.isFinite(node?.workerProgress)
+                ? Math.max(0, Math.min(100, Math.round(Number(node.workerProgress))))
+                : null,
+              workerOutputFolderId:
+                typeof node?.workerOutputFolderId === 'string' &&
+                node.workerOutputFolderId.trim().length > 0
+                  ? node.workerOutputFolderId
+                  : null,
+              workerInputSignature:
+                typeof node?.workerInputSignature === 'string' &&
+                node.workerInputSignature.trim().length > 0
+                  ? node.workerInputSignature
+                  : null,
             },
           ];
         });
@@ -567,7 +628,7 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     return missingChildExists ? 'expand' : 'hidden';
   }, [activeFolder, activeNodes]);
 
-  const getFolderContents = useCallback((node: FilePageNode): FolderContentEntry[] => {
+  const getFolderContents = useCallback((node: FilePageNode): FilePageContentItem[] => {
     if (!activeFolder || node.kind !== 'folder') {
       return [];
     }

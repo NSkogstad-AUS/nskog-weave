@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { PlusIcon, ShapesIcon } from 'lucide-react';
+import { BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
 
 import {
   ContextMenu,
@@ -38,6 +38,7 @@ import {
   snapToSlotY,
 } from './canvas/utils';
 import type {
+  FilePageContentItem,
   FilePageElementIcon,
   FilePageNode,
   FilePageNodeSize,
@@ -56,7 +57,7 @@ interface FileCanvasViewProps {
   onHoverNodeChange: (node: FilePageNode | null) => void;
   onSelectNodes: (nodeIds: string[]) => void;
   getFolderExpandState?: (node: FilePageNode) => 'hidden' | 'expand' | 'collapse';
-  getFolderContents?: (node: FilePageNode) => Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>;
+  getFolderContents?: (node: FilePageNode) => FilePageContentItem[];
   onExpandFolder?: (node: FilePageNode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
 }
@@ -99,11 +100,54 @@ type ResizeState = {
   minimumSize: FilePageNode['size'];
 };
 
+type WorkerConnectionDragState = {
+  workerId: string;
+  current: Point;
+  targetNodeId: string | null;
+};
+
 const OUTER_WIDGET_SNAP_THRESHOLD = 4;
 const GROUP_SNAP_TOLERANCE = Math.round(Math.min(SLOT_STEP_X, SLOT_STEP_Y) * 0.25);
+const WORKER_CONNECTION_THRESHOLD_X = SLOT_STEP_X * 1.25;
+const WORKER_CONNECTION_THRESHOLD_Y = SLOT_STEP_Y * 1.25;
+
+function sortCanvasContentItems(items: FilePageContentItem[]) {
+  return [...items].sort((left, right) =>
+    left.kind === right.kind
+      ? left.label.localeCompare(right.label)
+      : left.kind === 'folder'
+        ? -1
+        : 1,
+  );
+}
+
+function getWorkerOutputContentItemLabel(label: string) {
+  return `${label} AI Ready`;
+}
+
+function getPointBounds(point: Point) {
+  return {
+    left: point.x,
+    top: point.y,
+    right: point.x,
+    bottom: point.y,
+  };
+}
 
 function arePointsEqual(left?: Point, right?: Point) {
   return left?.x === right?.x && left?.y === right?.y;
+}
+
+function pointIsWithinBounds(
+  point: Point,
+  bounds: ReturnType<typeof getNodeBoundsWithSize>,
+) {
+  return (
+    point.x >= bounds.left &&
+    point.x <= bounds.right &&
+    point.y >= bounds.top &&
+    point.y <= bounds.bottom
+  );
 }
 
 function getConnectorPath(
@@ -172,12 +216,14 @@ export function FileCanvasView({
   const marqueeStateRef = useRef<MarqueeState | null>(null);
   const panStateRef = useRef<PanState | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
+  const workerConnectionDragStateRef = useRef<WorkerConnectionDragState | null>(null);
   const rawDragPositionsRef = useRef<Record<string, Point>>({});
   const draftPositionsRef = useRef<Record<string, Point>>({});
   const snapPreviewPositionsRef = useRef<Record<string, Point>>({});
   const activeSnapPreviewIdsRef = useRef<Record<string, boolean>>({});
   const draftSelectedNodeIdsRef = useRef<string[] | null>(null);
   const contextMenuPointRef = useRef<Point | null>(null);
+  const workerProcessTimersRef = useRef<Record<string, number>>({});
   const nodesRef = useRef(nodes);
   const nodeMapRef = useRef(new Map(nodes.map((node) => [node.id, node])));
   const viewportRef = useRef<Point>({ x: 0, y: 0 });
@@ -197,6 +243,8 @@ export function FileCanvasView({
   const [marqueeState, setMarqueeState] = useState<MarqueeState | null>(null);
   const [panState, setPanState] = useState<PanState | null>(null);
   const [resizeState, setResizeState] = useState<ResizeState | null>(null);
+  const [workerConnectionDragState, setWorkerConnectionDragState] =
+    useState<WorkerConnectionDragState | null>(null);
   const [viewport, setViewport] = useState<Point>({ x: 0, y: 0 });
   const [draftPositions, setDraftPositions] = useState<Record<string, Point>>({});
   const [snapPreviewPositions, setSnapPreviewPositions] = useState<Record<string, Point>>({});
@@ -229,13 +277,10 @@ export function FileCanvasView({
     [renderedNodes],
   );
   const folderContentsById = useMemo(
-    () =>
-      renderedNodes.reduce<Record<string, Array<Pick<FilePageNode, 'id' | 'kind' | 'label'>>>>(
+    () => {
+      const entries = renderedNodes.reduce<Record<string, FilePageContentItem[]>>(
         (accumulator, node) => {
-          if (
-            !node.parentNodeId ||
-            (node.kind !== 'folder' && node.kind !== 'file')
-          ) {
+          if (!node.parentNodeId || (node.kind !== 'folder' && node.kind !== 'file')) {
             return accumulator;
           }
 
@@ -245,18 +290,63 @@ export function FileCanvasView({
             kind: node.kind,
             label: node.label,
           });
-          accumulator[node.parentNodeId] = existingEntries.sort((left, right) =>
-            left.kind === right.kind
-              ? left.label.localeCompare(right.label)
-              : left.kind === 'folder'
-                ? -1
-                : 1,
-          );
-
+          accumulator[node.parentNodeId] = existingEntries;
           return accumulator;
         },
         {},
-      ),
+      );
+
+      renderedNodes.forEach((node) => {
+        if (!node.contentItems || node.contentItems.length === 0) {
+          return;
+        }
+
+        const existingEntries = entries[node.id] ?? [];
+        const dedupedById = new Map(existingEntries.map((item) => [item.id, item]));
+
+        node.contentItems.forEach((item) => {
+          if (!dedupedById.has(item.id)) {
+            dedupedById.set(item.id, item);
+          }
+        });
+
+        entries[node.id] = sortCanvasContentItems([...dedupedById.values()]);
+      });
+
+      Object.keys(entries).forEach((nodeId) => {
+        entries[nodeId] = sortCanvasContentItems(entries[nodeId]);
+      });
+
+      return entries;
+    },
+    [renderedNodes],
+  );
+  const workerInputContentsById = useMemo(
+    () =>
+      renderedNodes.reduce<Record<string, FilePageContentItem[]>>((accumulator, node) => {
+        if (
+          !node.parentNodeId ||
+          (node.kind !== 'folder' && node.kind !== 'file') ||
+          node.generatedByWorkerId === node.parentNodeId
+        ) {
+          return accumulator;
+        }
+
+        const parentNode = renderedNodes.find((candidate) => candidate.id === node.parentNodeId);
+
+        if (!parentNode || parentNode.kind !== 'worker') {
+          return accumulator;
+        }
+
+        const existingEntries = accumulator[node.parentNodeId] ?? [];
+        existingEntries.push({
+          id: node.id,
+          kind: node.kind,
+          label: node.label,
+        });
+        accumulator[node.parentNodeId] = sortCanvasContentItems(existingEntries);
+        return accumulator;
+      }, {}),
     [renderedNodes],
   );
   const connectorPaths = useMemo(() => {
@@ -440,6 +530,10 @@ export function FileCanvasView({
   }, [resizeState]);
 
   useEffect(() => {
+    workerConnectionDragStateRef.current = workerConnectionDragState;
+  }, [workerConnectionDragState]);
+
+  useEffect(() => {
     draftPositionsRef.current = draftPositions;
   }, [draftPositions]);
 
@@ -505,6 +599,10 @@ export function FileCanvasView({
   useEffect(() => {
     return () => {
       onHoverNodeChange(null);
+      Object.values(workerProcessTimersRef.current).forEach((timerId) => {
+        window.clearInterval(timerId);
+      });
+      workerProcessTimersRef.current = {};
       if (releaseTimerRef.current !== null) {
         window.clearTimeout(releaseTimerRef.current);
       }
@@ -520,8 +618,15 @@ export function FileCanvasView({
       const liveMarqueeState = marqueeStateRef.current;
       const livePanState = panStateRef.current;
       const liveResizeState = resizeStateRef.current;
+      const liveWorkerConnectionDragState = workerConnectionDragStateRef.current;
 
-      if (!liveDragState && !liveMarqueeState && !livePanState && !liveResizeState) {
+      if (
+        !liveDragState &&
+        !liveMarqueeState &&
+        !livePanState &&
+        !liveResizeState &&
+        !liveWorkerConnectionDragState
+      ) {
         return;
       }
 
@@ -644,6 +749,18 @@ export function FileCanvasView({
       const localPoint = getLocalPoint(event.clientX, event.clientY);
 
       if (!localPoint) {
+        return;
+      }
+
+      if (liveWorkerConnectionDragState) {
+        const nextWorkerConnectionState = {
+          workerId: liveWorkerConnectionDragState.workerId,
+          current: localPoint,
+          targetNodeId: getWorkerInputDropTarget(liveWorkerConnectionDragState.workerId, localPoint),
+        };
+
+        workerConnectionDragStateRef.current = nextWorkerConnectionState;
+        setWorkerConnectionDragState(nextWorkerConnectionState);
         return;
       }
 
@@ -1038,6 +1155,17 @@ export function FileCanvasView({
       const liveMarqueeState = marqueeStateRef.current;
       const liveSnapPreviewPositions = snapPreviewPositionsRef.current;
       const liveResizeState = resizeStateRef.current;
+      const liveWorkerConnectionDragState = workerConnectionDragStateRef.current;
+
+      if (liveWorkerConnectionDragState?.targetNodeId) {
+        const targetNode = getNodeById(liveWorkerConnectionDragState.targetNodeId);
+
+        if (targetNode && (targetNode.parentNodeId ?? null) !== liveWorkerConnectionDragState.workerId) {
+          onUpdateNodeRef.current(targetNode.id, {
+            parentNodeId: liveWorkerConnectionDragState.workerId,
+          });
+        }
+      }
 
       if (liveDragState && Object.keys(liveSnapPreviewPositions).length > 0) {
         const finalSnapPositions = { ...liveSnapPreviewPositions };
@@ -1122,6 +1250,21 @@ export function FileCanvasView({
             });
           }
         });
+
+        const workerConnectionAssignments = getDraggedWorkerConnectionAssignments(
+          liveDragState.nodeIds,
+          constrainedFinalPositions,
+        );
+
+        workerConnectionAssignments.forEach((nextParentId, nodeId) => {
+          const node = getNodeById(nodeId);
+
+          if (node && (node.parentNodeId ?? null) !== nextParentId) {
+            onUpdateNodeRef.current(node.id, {
+              parentNodeId: nextParentId,
+            });
+          }
+        });
       }
 
       if (liveResizeState) {
@@ -1151,8 +1294,10 @@ export function FileCanvasView({
 
       panStateRef.current = null;
       resizeStateRef.current = null;
+      workerConnectionDragStateRef.current = null;
       setPanState(null);
       setResizeState(null);
+      setWorkerConnectionDragState(null);
       dragStateRef.current = null;
       marqueeStateRef.current = null;
       draftSelectedNodeIdsRef.current = null;
@@ -1275,6 +1420,81 @@ export function FileCanvasView({
     };
   }, []);
 
+  const getWorkerInputHandlePoint = useCallback((workerId: string) => {
+    const workerNode = getNodeById(workerId);
+
+    if (!workerNode || workerNode.kind !== 'worker') {
+      return null;
+    }
+
+    const workerBounds = getNodeBoundsWithSize(
+      draftPositionsRef.current[workerId] ?? workerNode.position,
+      draftSizesRef.current[workerId] ?? workerNode.size,
+      workerNode.kind,
+    );
+
+    return {
+      x: workerBounds.left - 8,
+      y: (workerBounds.top + workerBounds.bottom) / 2,
+    };
+  }, [getNodeById]);
+
+  const getWorkerInputDropTarget = useCallback((workerId: string, point: Point) => {
+    const workerNode = getNodeById(workerId);
+
+    if (!workerNode || workerNode.kind !== 'worker') {
+      return null;
+    }
+
+    const workerBounds = getNodeBoundsWithSize(
+      draftPositionsRef.current[workerId] ?? workerNode.position,
+      draftSizesRef.current[workerId] ?? workerNode.size,
+      workerNode.kind,
+    );
+    const workerCenterX = (workerBounds.left + workerBounds.right) / 2;
+    let nextTargetId: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    nodesRef.current.forEach((candidate) => {
+      if (
+        candidate.id === workerId ||
+        (candidate.kind !== 'file' && candidate.kind !== 'folder') ||
+        candidate.generatedByWorkerId
+      ) {
+        return;
+      }
+
+      const candidateBounds = getNodeBoundsWithSize(
+        draftPositionsRef.current[candidate.id] ?? candidate.position,
+        draftSizesRef.current[candidate.id] ?? candidate.size,
+        candidate.kind,
+      );
+
+      if (!pointIsWithinBounds(point, candidateBounds)) {
+        return;
+      }
+
+      const candidateCenterX = (candidateBounds.left + candidateBounds.right) / 2;
+
+      if (candidateCenterX > workerCenterX + SLOT_STEP_X * 0.15) {
+        return;
+      }
+
+      const candidateCenter = {
+        x: (candidateBounds.left + candidateBounds.right) / 2,
+        y: (candidateBounds.top + candidateBounds.bottom) / 2,
+      };
+      const distance = Math.hypot(candidateCenter.x - point.x, candidateCenter.y - point.y);
+
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        nextTargetId = candidate.id;
+      }
+    });
+
+    return nextTargetId;
+  }, [getNodeById]);
+
   const handleNodePointerDown = useCallback((
     event: ReactPointerEvent<HTMLButtonElement>,
     node: FilePageNode,
@@ -1339,6 +1559,11 @@ export function FileCanvasView({
           widthUnits: GROUP_MIN_GRID_UNITS,
           heightUnits: GROUP_MIN_GRID_UNITS,
         }
+      : node.kind === 'worker'
+        ? {
+            widthUnits: 2,
+            heightUnits: 2,
+          }
       : {
           widthUnits: 1,
           heightUnits: 1,
@@ -2195,6 +2420,452 @@ export function FileCanvasView({
     return null;
   }, [getNearbyGroupGridOrigin, getNodeById]);
 
+  const getWorkerInputNodes = useCallback((workerId: string) =>
+    nodesRef.current.filter(
+      (node) =>
+        node.parentNodeId === workerId &&
+        (node.kind === 'file' || node.kind === 'folder') &&
+        node.generatedByWorkerId !== workerId,
+    ), []);
+
+  const collectFolderSourceFiles = useCallback((
+    folderId: string,
+    visited = new Set<string>(),
+  ): FilePageContentItem[] => {
+    if (visited.has(folderId)) {
+      return [];
+    }
+
+    const folderNode = getNodeById(folderId);
+
+    if (!folderNode || folderNode.kind !== 'folder') {
+      return [];
+    }
+
+    const nextVisited = new Set(visited);
+    nextVisited.add(folderId);
+    const directChildFiles = nodesRef.current.flatMap((node) => {
+      if (node.parentNodeId !== folderId) {
+        return [];
+      }
+
+      if (node.kind === 'file') {
+        return [
+          {
+            id: node.id,
+            kind: 'file' as const,
+            label: node.label,
+          },
+        ];
+      }
+
+      if (node.kind === 'folder') {
+        return collectFolderSourceFiles(node.id, nextVisited);
+      }
+
+      return [];
+    });
+    const generatedFiles = (folderNode.contentItems ?? []).filter((item) => item.kind === 'file');
+    const dedupedById = new Map<string, FilePageContentItem>();
+
+    [...directChildFiles, ...generatedFiles].forEach((item) => {
+      dedupedById.set(item.id, item);
+    });
+
+    return sortCanvasContentItems([...dedupedById.values()]);
+  }, [getNodeById]);
+
+  const buildWorkerOutputItems = useCallback((workerId: string) => {
+    const sourceFiles = getWorkerInputNodes(workerId).flatMap((node) =>
+      node.kind === 'file'
+        ? [
+            {
+              id: node.id,
+              kind: 'file' as const,
+              label: node.label,
+            },
+          ]
+        : collectFolderSourceFiles(node.id),
+    );
+    const dedupedByKey = new Map<string, FilePageContentItem>();
+
+    sourceFiles.forEach((item) => {
+      const key = item.label.trim().toLowerCase();
+
+      if (dedupedByKey.has(key)) {
+        return;
+      }
+
+      dedupedByKey.set(key, {
+        id: `${workerId}:${key}`,
+        kind: 'file',
+        label: getWorkerOutputContentItemLabel(item.label),
+      });
+    });
+
+    return sortCanvasContentItems([...dedupedByKey.values()]);
+  }, [collectFolderSourceFiles, getWorkerInputNodes]);
+
+  const buildWorkerInputSignature = useCallback((workerId: string) => {
+    const inputs = getWorkerInputNodes(workerId);
+    const files = buildWorkerOutputItems(workerId);
+
+    return JSON.stringify({
+      inputs: inputs
+        .map((node) => `${node.id}:${node.label}:${node.kind}`)
+        .sort((left, right) => left.localeCompare(right)),
+      files: files
+        .map((item) => item.label)
+        .sort((left, right) => left.localeCompare(right)),
+    });
+  }, [buildWorkerOutputItems, getWorkerInputNodes]);
+
+  const clearWorkerProcessTimer = useCallback((workerId: string) => {
+    const timerId = workerProcessTimersRef.current[workerId];
+
+    if (typeof timerId === 'number') {
+      window.clearInterval(timerId);
+      delete workerProcessTimersRef.current[workerId];
+    }
+  }, []);
+
+  const removeWorkerOutputFolder = useCallback((worker: FilePageNode) => {
+    const outputFolderId =
+      worker.workerOutputFolderId ??
+      nodesRef.current.find(
+        (node) => node.kind === 'folder' && node.generatedByWorkerId === worker.id,
+      )?.id;
+
+    if (outputFolderId) {
+      onDeleteNodeRef.current(outputFolderId);
+    }
+  }, []);
+
+  const completeWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+    clearWorkerProcessTimer(workerId);
+    const worker = getNodeById(workerId);
+
+    if (!worker || worker.kind !== 'worker') {
+      return;
+    }
+
+    const outputItems = buildWorkerOutputItems(workerId);
+    const existingOutputFolder =
+      (worker.workerOutputFolderId ? getNodeById(worker.workerOutputFolderId) : null) ??
+      nodesRef.current.find(
+        (node) => node.kind === 'folder' && node.generatedByWorkerId === workerId,
+      ) ??
+      null;
+
+    if (outputItems.length === 0) {
+      if (existingOutputFolder) {
+        onDeleteNodeRef.current(existingOutputFolder.id);
+      }
+
+      onUpdateNodeRef.current(workerId, {
+        workerStatus: 'complete',
+        workerProgress: 100,
+        workerInputSignature: inputSignature,
+        workerOutputFolderId: null,
+      });
+      return;
+    }
+
+    if (!existingOutputFolder) {
+      const workerPosition = draftPositionsRef.current[workerId] ?? worker.position;
+      const workerSize = draftSizesRef.current[workerId] ?? worker.size;
+      const workerDimensions = getNodeDimensionsForKind(workerSize, worker.kind);
+      const nextFolderId = `worker-output-${workerId}`;
+      const nextFolderSize = {
+        widthUnits: 3,
+        heightUnits: 2,
+      } satisfies FilePageNode['size'];
+      const desiredPosition = {
+        x: workerPosition.x + workerDimensions.width + SLOT_STEP_X,
+        y: workerPosition.y,
+      };
+      const parentGroupBounds = worker.groupId ? getGroupBounds(worker.groupId) : null;
+      const constrainedDesiredPosition = parentGroupBounds
+        ? clampNodePositionToBounds(desiredPosition, nextFolderSize, parentGroupBounds)
+        : {
+            x: clampToCanvas(desiredPosition.x),
+            y: clampToCanvas(desiredPosition.y),
+          };
+      const resolvedPosition =
+        resolveSnapPositions(
+          {
+            [nextFolderId]: constrainedDesiredPosition,
+          },
+          [nextFolderId],
+          nodesRef.current,
+          {
+            [nextFolderId]: constrainedDesiredPosition,
+          },
+          {
+            [nextFolderId]: nextFolderSize,
+          },
+          undefined,
+          {
+            getNodeKind: (nodeId) => (nodeId === nextFolderId ? 'folder' : getNodeById(nodeId)?.kind),
+            constrainPosition: (position) =>
+              parentGroupBounds
+                ? clampNodePositionToBounds(position, nextFolderSize, parentGroupBounds)
+                : {
+                    x: clampToCanvas(position.x),
+                    y: clampToCanvas(position.y),
+                  },
+          },
+        )[nextFolderId] ?? constrainedDesiredPosition;
+
+      onAddNodeRef.current({
+        id: nextFolderId,
+        label: 'AI Ready Files',
+        description: 'Generated output from the connected worker.',
+        kind: 'folder',
+        icon: 'shapes',
+        groupId: worker.groupId ?? null,
+        parentNodeId: worker.id,
+        contentItems: outputItems,
+        generatedByWorkerId: worker.id,
+        position: resolvedPosition,
+        size: nextFolderSize,
+        workerMode: null,
+        workerStatus: null,
+        workerProgress: null,
+        workerOutputFolderId: null,
+        workerInputSignature: null,
+      });
+      onUpdateNodeRef.current(workerId, {
+        workerStatus: 'complete',
+        workerProgress: 100,
+        workerInputSignature: inputSignature,
+        workerOutputFolderId: nextFolderId,
+      });
+      return;
+    }
+
+    onUpdateNodeRef.current(existingOutputFolder.id, {
+      label: 'AI Ready Files',
+      description: 'Generated output from the connected worker.',
+      groupId: worker.groupId ?? null,
+      parentNodeId: worker.id,
+      contentItems: outputItems,
+      generatedByWorkerId: worker.id,
+    });
+    onUpdateNodeRef.current(workerId, {
+      workerStatus: 'complete',
+      workerProgress: 100,
+      workerInputSignature: inputSignature,
+      workerOutputFolderId: existingOutputFolder.id,
+    });
+  }, [buildWorkerOutputItems, clearWorkerProcessTimer, getGroupBounds, getNodeById, removeWorkerOutputFolder]);
+
+  const startWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+    clearWorkerProcessTimer(workerId);
+    onUpdateNodeRef.current(workerId, {
+      workerStatus: 'processing',
+      workerProgress: 8,
+    });
+
+    let progress = 8;
+    const timerId = window.setInterval(() => {
+      progress = Math.min(100, progress + 14);
+
+      if (progress >= 100) {
+        completeWorkerProcessing(workerId, inputSignature);
+        return;
+      }
+
+      onUpdateNodeRef.current(workerId, {
+        workerStatus: 'processing',
+        workerProgress: progress,
+      });
+    }, 220);
+
+    workerProcessTimersRef.current[workerId] = timerId;
+  }, [clearWorkerProcessTimer, completeWorkerProcessing]);
+
+  const getWorkerInputConnectionTarget = useCallback((
+    nodeId: string,
+    positions: Record<string, Point>,
+    dragNodeIds: string[],
+  ) => {
+    const node = getNodeById(nodeId);
+
+    if (
+      !node ||
+      (node.kind !== 'file' && node.kind !== 'folder') ||
+      node.generatedByWorkerId
+    ) {
+      return null;
+    }
+
+    const nodePosition = positions[nodeId] ?? node.position;
+    const nodeBounds = getNodeBoundsWithSize(
+      nodePosition,
+      draftSizesRef.current[nodeId] ?? node.size,
+      node.kind,
+    );
+    const nodeCenter = {
+      x: (nodeBounds.left + nodeBounds.right) / 2,
+      y: (nodeBounds.top + nodeBounds.bottom) / 2,
+    };
+    let closestWorkerId: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+
+    nodesRef.current.forEach((candidate) => {
+      if (
+        candidate.kind !== 'worker' ||
+        candidate.id === nodeId ||
+        dragNodeIds.includes(candidate.id)
+      ) {
+        return;
+      }
+
+      const candidatePosition = positions[candidate.id] ?? candidate.position;
+      const candidateBounds = getNodeBoundsWithSize(
+        candidatePosition,
+        draftSizesRef.current[candidate.id] ?? candidate.size,
+        candidate.kind,
+      );
+      const candidateCenterX = (candidateBounds.left + candidateBounds.right) / 2;
+
+      if (nodeCenter.x > candidateCenterX + SLOT_STEP_X * 0.2) {
+        return;
+      }
+
+      const inputZone = {
+        left: candidateBounds.left - WORKER_CONNECTION_THRESHOLD_X,
+        right: candidateBounds.left + SLOT_STEP_X * 0.35,
+        top: candidateBounds.top - WORKER_CONNECTION_THRESHOLD_Y,
+        bottom: candidateBounds.bottom + WORKER_CONNECTION_THRESHOLD_Y,
+      };
+      const distanceX = Math.max(
+        0,
+        inputZone.left - nodeBounds.right,
+        nodeBounds.left - inputZone.right,
+      );
+      const distanceY = Math.max(
+        0,
+        inputZone.top - nodeBounds.bottom,
+        nodeBounds.top - inputZone.bottom,
+      );
+      const distance = Math.hypot(distanceX, distanceY);
+
+      if (distance < closestDistance) {
+        closestWorkerId = candidate.id;
+        closestDistance = distance;
+      }
+    });
+
+    return closestDistance <= SLOT_STEP_X ? closestWorkerId : null;
+  }, [getNodeById]);
+
+  const getDraggedWorkerConnectionAssignments = useCallback((
+    nodeIds: string[],
+    positions: Record<string, Point>,
+  ) => {
+    const assignments = new Map<string, string | null>();
+
+    nodeIds.forEach((nodeId) => {
+      const node = getNodeById(nodeId);
+
+      if (
+        !node ||
+        (node.kind !== 'file' && node.kind !== 'folder') ||
+        node.generatedByWorkerId
+      ) {
+        return;
+      }
+
+      const nextWorkerId = getWorkerInputConnectionTarget(nodeId, positions, nodeIds);
+      const currentParent = node.parentNodeId ? getNodeById(node.parentNodeId) : null;
+
+      if (currentParent?.kind === 'worker' && nodeIds.includes(currentParent.id)) {
+        return;
+      }
+
+      if (nextWorkerId || currentParent?.kind === 'worker') {
+        assignments.set(nodeId, nextWorkerId);
+      }
+    });
+
+    return assignments;
+  }, [getNodeById, getWorkerInputConnectionTarget]);
+
+  useEffect(() => {
+    const activeWorkerIds = new Set(
+      nodes.filter((node) => node.kind === 'worker').map((node) => node.id),
+    );
+
+    Object.keys(workerProcessTimersRef.current).forEach((workerId) => {
+      if (!activeWorkerIds.has(workerId)) {
+        clearWorkerProcessTimer(workerId);
+      }
+    });
+
+    nodes.forEach((node) => {
+      if (node.kind !== 'worker') {
+        return;
+      }
+
+      const inputNodes = getWorkerInputNodes(node.id);
+      const inputSignature = buildWorkerInputSignature(node.id);
+      const outputFolderExists = node.workerOutputFolderId
+        ? Boolean(getNodeById(node.workerOutputFolderId))
+        : Boolean(
+            nodesRef.current.find(
+              (candidate) => candidate.kind === 'folder' && candidate.generatedByWorkerId === node.id,
+            ),
+          );
+
+      if (inputNodes.length === 0) {
+        clearWorkerProcessTimer(node.id);
+
+        if (outputFolderExists) {
+          removeWorkerOutputFolder(node);
+        }
+
+        if (
+          node.workerStatus !== 'idle' ||
+          (node.workerProgress ?? 0) !== 0 ||
+          node.workerOutputFolderId ||
+          node.workerInputSignature
+        ) {
+          onUpdateNodeRef.current(node.id, {
+            workerStatus: 'idle',
+            workerProgress: 0,
+            workerOutputFolderId: null,
+            workerInputSignature: null,
+          });
+        }
+        return;
+      }
+
+      if (node.workerStatus === 'processing') {
+        return;
+      }
+
+      if (
+        node.workerStatus === 'complete' &&
+        node.workerInputSignature === inputSignature &&
+        outputFolderExists
+      ) {
+        return;
+      }
+
+      startWorkerProcessing(node.id, inputSignature);
+    });
+  }, [
+    buildWorkerInputSignature,
+    clearWorkerProcessTimer,
+    getNodeById,
+    getWorkerInputNodes,
+    nodes,
+    removeWorkerOutputFolder,
+    startWorkerProcessing,
+  ]);
+
   function resolveInsertionPosition(node: Pick<FilePageNode, 'kind' | 'size'>) {
     const localPoint = contextMenuPointRef.current ?? {
       x: CANVAS_PADDING,
@@ -2242,6 +2913,27 @@ export function FileCanvasView({
         widthUnits: 3,
         heightUnits: 2,
       },
+    });
+  }
+
+  function handleAddWorker() {
+    addNodeAtContext({
+      id: `worker-${Date.now()}`,
+      label: 'AI Worker',
+      description: 'Transforms connected files and folders into AI-ready source packs.',
+      kind: 'worker',
+      icon: 'target',
+      size: {
+        widthUnits: 3,
+        heightUnits: 2,
+      },
+      contentItems: [],
+      generatedByWorkerId: null,
+      workerMode: 'ai-ready',
+      workerStatus: 'idle',
+      workerProgress: 0,
+      workerOutputFolderId: null,
+      workerInputSignature: null,
     });
   }
 
@@ -2466,6 +3158,78 @@ export function FileCanvasView({
     setDraftSelectedNodeIds([nodeId]);
   }, []);
 
+  const beginWorkerInputConnection = useCallback((
+    event: ReactPointerEvent<HTMLSpanElement>,
+    node: FilePageNode,
+  ) => {
+    if (event.button !== 0 || node.kind !== 'worker') {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    const localPoint = getLocalPoint(event.clientX, event.clientY);
+    const handlePoint = getWorkerInputHandlePoint(node.id);
+
+    if (!localPoint || !handlePoint) {
+      return;
+    }
+
+    const nextWorkerConnectionState = {
+      workerId: node.id,
+      current: localPoint,
+      targetNodeId: getWorkerInputDropTarget(node.id, localPoint),
+    };
+
+    setContextMenuNodeId(null);
+    selectSingleNode(node.id);
+    workerConnectionDragStateRef.current = nextWorkerConnectionState;
+    setWorkerConnectionDragState(nextWorkerConnectionState);
+  }, [getLocalPoint, getWorkerInputDropTarget, getWorkerInputHandlePoint, selectSingleNode]);
+
+  const activeWorkerConnectionPreview = useMemo(() => {
+    if (!workerConnectionDragState) {
+      return null;
+    }
+
+    const handlePoint = getWorkerInputHandlePoint(workerConnectionDragState.workerId);
+
+    if (!handlePoint) {
+      return null;
+    }
+
+    let endPoint = workerConnectionDragState.current;
+
+    if (workerConnectionDragState.targetNodeId) {
+      const targetNode = getNodeById(workerConnectionDragState.targetNodeId);
+
+      if (targetNode) {
+        const targetBounds = getNodeBoundsWithSize(
+          draftPositions[targetNode.id] ?? targetNode.position,
+          draftSizes[targetNode.id] ?? targetNode.size,
+          targetNode.kind,
+        );
+
+        endPoint = {
+          x: targetBounds.right,
+          y: (targetBounds.top + targetBounds.bottom) / 2,
+        };
+      }
+    }
+
+    return {
+      path: getConnectorPath(getPointBounds(handlePoint), getPointBounds(endPoint)),
+      targetNodeId: workerConnectionDragState.targetNodeId,
+    };
+  }, [
+    draftPositions,
+    draftSizes,
+    getNodeById,
+    getWorkerInputHandlePoint,
+    workerConnectionDragState,
+  ]);
+
   const setNodeHover = useCallback((node: FilePageNode, hovered: boolean) => {
     if (!hovered && contextMenuNodeIdRef.current === node.id) {
       return;
@@ -2492,6 +3256,25 @@ export function FileCanvasView({
   }, [selectSingleNode]);
 
   const deleteCanvasNode = useCallback((node: FilePageNode) => {
+    if (node.kind === 'worker') {
+      clearWorkerProcessTimer(node.id);
+      const connectedNodes = nodesRef.current.filter((candidate) => candidate.parentNodeId === node.id);
+
+      connectedNodes.forEach((candidate) => {
+        if (candidate.generatedByWorkerId === node.id) {
+          onDeleteNodeRef.current(candidate.id);
+          return;
+        }
+
+        onUpdateNodeRef.current(candidate.id, {
+          parentNodeId: null,
+        });
+      });
+
+      onDeleteNodeRef.current(node.id);
+      return;
+    }
+
     if (node.kind !== 'group') {
       onDeleteNodeRef.current(node.id);
       return;
@@ -2542,7 +3325,7 @@ export function FileCanvasView({
     }
 
     onDeleteNodeRef.current(node.id);
-  }, []);
+  }, [clearWorkerProcessTimer]);
 
   const beginNodeResize = useCallback((
     event: ReactPointerEvent<HTMLSpanElement>,
@@ -2593,7 +3376,13 @@ export function FileCanvasView({
       previewPosition &&
       !arePointsEqual(previewPosition, displayPosition);
     const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
-    const folderContents = getFolderContents?.(node) ?? folderContentsById[node.id] ?? [];
+    const folderContents =
+      node.kind === 'worker'
+        ? workerInputContentsById[node.id] ?? []
+        : getFolderContents?.(node) ??
+          folderContentsById[node.id] ??
+          node.contentItems ??
+          [];
 
     return (
       <FileCanvasNode
@@ -2608,6 +3397,7 @@ export function FileCanvasView({
         isDragging={dragNodeIdSet.has(node.id)}
         isEditing={editingNodeId === node.id}
         isResizing={resizeState?.nodeId === node.id}
+        isWorkerConnectionTarget={workerConnectionDragState?.targetNodeId === node.id}
         resizeAxis={resizeState?.nodeId === node.id ? resizeState.axis : undefined}
         isSelected={selectedIdSet.has(node.id)}
         node={node}
@@ -2626,13 +3416,20 @@ export function FileCanvasView({
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
         onResizeHandlePointerDown={node.kind !== 'element' ? beginNodeResize : undefined}
-        onSelectFolderContentNode={selectSingleNode}
+        onSelectFolderContentNode={(nodeId) => {
+          if (getNodeById(nodeId)) {
+            selectSingleNode(nodeId);
+          }
+        }}
         onSelect={selectSingleNode}
         onCollapseFolder={onCollapseFolder}
         onExpandFolder={onExpandFolder}
         folderExpandState={folderExpandState}
         onStartRename={startNodeRename}
         onStopRename={stopNodeRename}
+        onWorkerInputHandlePointerDown={
+          node.kind === 'worker' ? beginWorkerInputConnection : undefined
+        }
       />
     );
   }
@@ -2653,43 +3450,43 @@ export function FileCanvasView({
               return;
             }
 
-            if (!(event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
-              if (event.shiftKey) {
-                const localPoint = getLocalPoint(event.clientX, event.clientY);
+            if ((event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
+              return;
+            }
 
-                if (!localPoint) {
-                  onSelectNodes([]);
-                  return;
-                }
+            event.preventDefault();
 
-                setMarqueeState({
-                  origin: localPoint,
-                  current: localPoint,
-                  additive: true,
-                  initialSelection: selectedNodeIds,
-                });
-                marqueeStateRef.current = {
-                  origin: localPoint,
-                  current: localPoint,
-                  additive: true,
-                  initialSelection: selectedNodeIds,
-                };
-                onSelectNodes([]);
-                draftSelectedNodeIdsRef.current = [];
-                setDraftSelectedNodeIds([]);
+            if (event.shiftKey) {
+              const localPoint = getLocalPoint(event.clientX, event.clientY);
+              const initialSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIds;
+
+              if (!localPoint) {
                 return;
               }
 
-        onSelectNodes([]);
-              draftSelectedNodeIdsRef.current = [];
-              setDraftSelectedNodeIds([]);
-        const nextPanState = {
-                origin: { x: event.clientX, y: event.clientY },
-                baseViewport: viewport,
-              };
-              panStateRef.current = nextPanState;
-              setPanState(nextPanState);
+              const nextMarqueeState = {
+                origin: localPoint,
+                current: localPoint,
+                additive: true,
+                initialSelection,
+              } satisfies MarqueeState;
+
+              marqueeStateRef.current = nextMarqueeState;
+              setMarqueeState(nextMarqueeState);
+              draftSelectedNodeIdsRef.current = initialSelection;
+              setDraftSelectedNodeIds(initialSelection);
+              return;
             }
+
+            onSelectNodes([]);
+            draftSelectedNodeIdsRef.current = [];
+            setDraftSelectedNodeIds([]);
+            const nextPanState = {
+              origin: { x: event.clientX, y: event.clientY },
+              baseViewport: viewport,
+            };
+            panStateRef.current = nextPanState;
+            setPanState(nextPanState);
           }}
           className={cn(
             'relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-[#fffdf7]/92 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none',
@@ -2810,6 +3607,29 @@ export function FileCanvasView({
               </svg>
             ) : null}
             {contentNodes.map((node) => renderCanvasNode(node))}
+            {activeWorkerConnectionPreview ? (
+              <svg
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-0 overflow-visible"
+              >
+                <g>
+                  <path
+                    d={activeWorkerConnectionPreview.path}
+                    fill="none"
+                    stroke="rgba(148, 163, 184, 0.18)"
+                    strokeWidth={5}
+                    strokeLinecap="round"
+                  />
+                  <path
+                    d={activeWorkerConnectionPreview.path}
+                    fill="none"
+                    stroke="rgba(71, 85, 105, 0.78)"
+                    strokeWidth={1.8}
+                    strokeLinecap="round"
+                  />
+                </g>
+              </svg>
+            ) : null}
 
             {marqueeState ? (
               <div
@@ -2831,6 +3651,10 @@ export function FileCanvasView({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="ml-2 w-52">
+        <ContextMenuItem onSelect={handleAddWorker}>
+          <BotIcon className="size-4" />
+          Add AI worker
+        </ContextMenuItem>
         <ContextMenuItem onSelect={handleAddGroup}>
           <ShapesIcon className="size-4" />
           Add group

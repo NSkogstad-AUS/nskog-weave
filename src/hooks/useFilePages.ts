@@ -6,8 +6,12 @@ import {
   FILE_PAGES_STORAGE_KEY,
 } from '@/lib/filePages';
 import {
+  FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
+  FILE_PAGE_WORKER_MODES,
+  FILE_PAGE_WORKER_STATUSES,
   type FilePageElementIcon,
+  type FilePageContentItem,
   type FilePageNode,
   type FilePageNodeKind,
   type FilePageNodeSize,
@@ -44,6 +48,42 @@ function normalizeIcon(value: unknown): FilePageElementIcon {
     : 'sparkles';
 }
 
+function normalizeWorkerMode(value: unknown): FilePageNode['workerMode'] {
+  return FILE_PAGE_WORKER_MODES.includes(value as NonNullable<FilePageNode['workerMode']>)
+    ? (value as NonNullable<FilePageNode['workerMode']>)
+    : null;
+}
+
+function normalizeWorkerStatus(value: unknown): FilePageNode['workerStatus'] {
+  return FILE_PAGE_WORKER_STATUSES.includes(value as NonNullable<FilePageNode['workerStatus']>)
+    ? (value as NonNullable<FilePageNode['workerStatus']>)
+    : null;
+}
+
+function normalizeContentItems(value: unknown): FilePageContentItem[] {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+
+  return value.flatMap((item) => {
+    if (
+      typeof item?.id !== 'string' ||
+      typeof item?.label !== 'string' ||
+      !FILE_PAGE_CONTENT_ITEM_KINDS.includes(item?.kind as FilePageContentItem['kind'])
+    ) {
+      return [];
+    }
+
+    return [
+      {
+        id: item.id,
+        label: item.label,
+        kind: item.kind,
+      },
+    ];
+  });
+}
+
 function hydrateFilePages(): FilePagesStore {
   if (typeof window === 'undefined') {
     return {};
@@ -66,6 +106,7 @@ function hydrateFilePages(): FilePagesStore {
 
         const nodes = page.nodes.flatMap((node) => {
           const kind = normalizeNodeKind(node?.kind);
+          const position = node?.position;
           const groupId =
             typeof node?.groupId === 'string' && node.groupId.trim().length > 0
               ? node.groupId
@@ -74,13 +115,18 @@ function hydrateFilePages(): FilePagesStore {
             typeof node?.parentNodeId === 'string' && node.parentNodeId.trim().length > 0
               ? node.parentNodeId
               : null;
+          const generatedByWorkerId =
+            typeof node?.generatedByWorkerId === 'string' &&
+            node.generatedByWorkerId.trim().length > 0
+              ? node.generatedByWorkerId
+              : null;
 
           if (
             typeof node?.id !== 'string' ||
             typeof node?.label !== 'string' ||
             !kind ||
-            !Number.isFinite(node?.position?.x) ||
-            !Number.isFinite(node?.position?.y)
+            !Number.isFinite(position?.x) ||
+            !Number.isFinite(position?.y)
           ) {
             return [];
           }
@@ -92,16 +138,33 @@ function hydrateFilePages(): FilePagesStore {
               description: typeof node.description === 'string' ? node.description : '',
               groupId,
               parentNodeId,
+              contentItems: normalizeContentItems(node?.contentItems),
+              generatedByWorkerId,
               kind,
               icon: normalizeIcon(node.icon),
               position: {
-                x: node.position.x,
-                y: node.position.y,
+                x: position.x,
+                y: position.y,
               },
               size: {
                 widthUnits: normalizeUnit(node?.size?.widthUnits),
                 heightUnits: normalizeUnit(node?.size?.heightUnits),
               },
+              workerMode: normalizeWorkerMode(node?.workerMode),
+              workerStatus: normalizeWorkerStatus(node?.workerStatus),
+              workerProgress: Number.isFinite(node?.workerProgress)
+                ? Math.max(0, Math.min(100, Math.round(Number(node.workerProgress))))
+                : null,
+              workerOutputFolderId:
+                typeof node?.workerOutputFolderId === 'string' &&
+                node.workerOutputFolderId.trim().length > 0
+                  ? node.workerOutputFolderId
+                  : null,
+              workerInputSignature:
+                typeof node?.workerInputSignature === 'string' &&
+                node.workerInputSignature.trim().length > 0
+                  ? node.workerInputSignature
+                  : null,
             },
           ];
         });
@@ -257,6 +320,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
 
   return {
     activePage,
+    pages,
     selectedNodeIds,
     setSelectedNodeIds,
     setView,
