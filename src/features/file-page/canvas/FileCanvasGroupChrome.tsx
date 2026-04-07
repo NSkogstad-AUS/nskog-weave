@@ -21,7 +21,7 @@ interface FileCanvasGroupChromeProps {
   onResizeHandlePointerDown?: (
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
-    axis: 'x' | 'y' | 'both' | 'top-left',
+    axis: GroupResizeAxis,
   ) => void;
   onStopRename: () => void;
 }
@@ -138,19 +138,19 @@ export function FileCanvasGroupChrome({
           </span>
           <span
             role="presentation"
-            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'x')}
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'right')}
             className="absolute inset-y-0 right-0 z-20 w-5 cursor-ew-resize"
             style={{ bottom: GROUP_CHROME.layout.edgeResizeHitAreaInset }}
           />
           <span
             role="presentation"
-            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'y')}
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'bottom')}
             className="absolute bottom-0 left-0 z-20 h-5 cursor-ns-resize"
             style={{ right: GROUP_CHROME.layout.edgeResizeHitAreaInset }}
           />
           <span
             role="presentation"
-            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'both')}
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'bottom-right')}
             className={cn(
               'absolute z-30 flex size-7 cursor-nwse-resize items-center justify-center rounded-lg border transition-colors',
               handleClassName,

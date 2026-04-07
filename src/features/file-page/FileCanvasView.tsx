@@ -22,6 +22,7 @@ import {
   SLOT_STEP_Y,
 } from './canvas/constants';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
+import type { GroupResizeAxis } from './canvas/groupChrome';
 import {
   boundsOverlap,
   clampNodePositionToBounds,
@@ -91,7 +92,7 @@ type SharedOuterSnapTarget = {
 
 type ResizeState = {
   nodeId: string;
-  axis: 'x' | 'y' | 'both' | 'top-left';
+  axis: GroupResizeAxis;
   origin: Point;
   basePosition: Point;
   baseSize: FilePageNode['size'];
@@ -99,6 +100,7 @@ type ResizeState = {
 };
 
 const OUTER_WIDGET_SNAP_THRESHOLD = 4;
+const GROUP_SNAP_TOLERANCE = Math.round(Math.min(SLOT_STEP_X, SLOT_STEP_Y) * 0.25);
 
 function arePointsEqual(left?: Point, right?: Point) {
   return left?.x === right?.x && left?.y === right?.y;
@@ -538,27 +540,52 @@ export function FileCanvasView({
         const widthChromeInset = 0;
         const heightChromeInset = 0;
         const currentSize = draftSizesRef.current[resizingNode.id] ?? resizingNode.size;
-        const isTopLeftResize = liveResizeState.axis === 'top-left';
+        const resizesWidth =
+          liveResizeState.axis === 'left' ||
+          liveResizeState.axis === 'right' ||
+          liveResizeState.axis === 'top-left' ||
+          liveResizeState.axis === 'bottom-right';
+        const resizesHeight =
+          liveResizeState.axis === 'top' ||
+          liveResizeState.axis === 'bottom' ||
+          liveResizeState.axis === 'top-left' ||
+          liveResizeState.axis === 'bottom-right';
+        const resizeFromLeft =
+          liveResizeState.axis === 'left' || liveResizeState.axis === 'top-left';
+        const resizeFromTop =
+          liveResizeState.axis === 'top' || liveResizeState.axis === 'top-left';
+        const getResizePosition = (size: FilePageNode['size']) => {
+          const nextDimensions = getNodeDimensionsForKind(size, resizingNode.kind);
+
+          return {
+            x:
+              liveResizeState.basePosition.x +
+              (resizeFromLeft ? baseDimensions.width - nextDimensions.width : 0),
+            y:
+              liveResizeState.basePosition.y +
+              (resizeFromTop ? baseDimensions.height - nextDimensions.height : 0),
+          };
+        };
         const candidateSize = {
           widthUnits:
-            liveResizeState.axis === 'y'
+            !resizesWidth
               ? currentSize.widthUnits
               : getUnitsForDimension(
                   baseDimensions.width -
                     widthChromeInset +
-                    (isTopLeftResize
+                    (resizeFromLeft
                       ? liveResizeState.origin.x - localPoint.x
                       : localPoint.x - liveResizeState.origin.x),
                   SLOT_STEP_X,
                   liveResizeState.minimumSize.widthUnits,
                 ),
           heightUnits:
-            liveResizeState.axis === 'x'
+            !resizesHeight
               ? currentSize.heightUnits
               : getUnitsForDimension(
                   baseDimensions.height -
                     heightChromeInset +
-                    (isTopLeftResize
+                    (resizeFromTop
                       ? liveResizeState.origin.y - localPoint.y
                       : localPoint.y - liveResizeState.origin.y),
                   SLOT_STEP_Y,
@@ -567,27 +594,21 @@ export function FileCanvasView({
         };
         const fallbackSizes = [
           candidateSize,
-          {
-            widthUnits: candidateSize.widthUnits,
-            heightUnits: currentSize.heightUnits,
-          },
-          {
-            widthUnits: currentSize.widthUnits,
-            heightUnits: candidateSize.heightUnits,
-          },
+          ...(resizesWidth && resizesHeight
+            ? [
+                {
+                  widthUnits: candidateSize.widthUnits,
+                  heightUnits: currentSize.heightUnits,
+                },
+                {
+                  widthUnits: currentSize.widthUnits,
+                  heightUnits: candidateSize.heightUnits,
+                },
+              ]
+            : []),
         ];
         const nextSize = fallbackSizes.find((size) => {
-          const nextPosition =
-            isTopLeftResize
-              ? {
-                  x:
-                    liveResizeState.basePosition.x +
-                    (baseDimensions.width - getNodeDimensionsForKind(size, resizingNode.kind).width),
-                  y:
-                    liveResizeState.basePosition.y +
-                    (baseDimensions.height - getNodeDimensionsForKind(size, resizingNode.kind).height),
-                }
-              : liveResizeState.basePosition;
+          const nextPosition = getResizePosition(size);
 
           return (
             areSizesEqual(size, currentSize) ||
@@ -599,17 +620,7 @@ export function FileCanvasView({
           return;
         }
 
-        const nextPosition =
-          isTopLeftResize
-            ? {
-                x:
-                  liveResizeState.basePosition.x +
-                  (baseDimensions.width - getNodeDimensionsForKind(nextSize, resizingNode.kind).width),
-                y:
-                  liveResizeState.basePosition.y +
-                  (baseDimensions.height - getNodeDimensionsForKind(nextSize, resizingNode.kind).height),
-              }
-            : liveResizeState.basePosition;
+        const nextPosition = getResizePosition(nextSize);
 
         setDraftSizes((current) => ({
           ...current,
@@ -1782,16 +1793,23 @@ export function FileCanvasView({
           return false;
         }
 
+        const expandedGroupBounds = {
+          left: groupBounds.left - GROUP_SNAP_TOLERANCE,
+          top: groupBounds.top - GROUP_SNAP_TOLERANCE,
+          right: groupBounds.right + GROUP_SNAP_TOLERANCE,
+          bottom: groupBounds.bottom + GROUP_SNAP_TOLERANCE,
+        };
+
         const fullyContained =
           nodeBounds.left >= groupBounds.left &&
           nodeBounds.top >= groupBounds.top &&
           nodeBounds.right <= groupBounds.right &&
           nodeBounds.bottom <= groupBounds.bottom;
         const centerInside =
-          nodeCenter.x >= groupBounds.left &&
-          nodeCenter.x <= groupBounds.right &&
-          nodeCenter.y >= groupBounds.top &&
-          nodeCenter.y <= groupBounds.bottom;
+          nodeCenter.x >= expandedGroupBounds.left &&
+          nodeCenter.x <= expandedGroupBounds.right &&
+          nodeCenter.y >= expandedGroupBounds.top &&
+          nodeCenter.y <= expandedGroupBounds.bottom;
 
         return fullyContained || centerInside;
       })
@@ -2529,7 +2547,7 @@ export function FileCanvasView({
   const beginNodeResize = useCallback((
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
-    axis: 'x' | 'y' | 'both' | 'top-left',
+    axis: GroupResizeAxis,
   ) => {
     if (event.button !== 0) {
       return;
@@ -2607,7 +2625,8 @@ export function FileCanvasView({
         onPointerDown={handleNodePointerDown}
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
-        onResizeHandlePointerDown={node.kind === 'group' ? beginNodeResize : undefined}
+        onResizeHandlePointerDown={node.kind !== 'element' ? beginNodeResize : undefined}
+        onSelectFolderContentNode={selectSingleNode}
         onSelect={selectSingleNode}
         onCollapseFolder={onCollapseFolder}
         onExpandFolder={onExpandFolder}

@@ -13,7 +13,13 @@ type GroupChromeState = {
   resizeAxis?: GroupResizeAxis;
 };
 
-export type GroupResizeAxis = 'x' | 'y' | 'both' | 'top-left';
+export type GroupResizeAxis =
+  | 'left'
+  | 'right'
+  | 'top'
+  | 'bottom'
+  | 'top-left'
+  | 'bottom-right';
 export type GroupGuideEdge = 'top' | 'right' | 'bottom' | 'left';
 
 export const GROUP_CHROME = {
@@ -77,15 +83,23 @@ function isActiveGuideEdge(edge: GroupGuideEdge, resizeAxis?: GroupResizeAxis) {
     return edge === 'top' || edge === 'left';
   }
 
-  if (resizeAxis === 'both') {
+  if (resizeAxis === 'bottom-right') {
     return edge === 'right' || edge === 'bottom';
   }
 
-  if (resizeAxis === 'x') {
+  if (resizeAxis === 'left') {
+    return edge === 'left';
+  }
+
+  if (resizeAxis === 'right') {
     return edge === 'right';
   }
 
-  if (resizeAxis === 'y') {
+  if (resizeAxis === 'top') {
+    return edge === 'top';
+  }
+
+  if (resizeAxis === 'bottom') {
     return edge === 'bottom';
   }
 

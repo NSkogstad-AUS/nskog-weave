@@ -64,8 +64,9 @@ interface FileCanvasNodeProps {
   onResizeHandlePointerDown?: (
     event: ReactPointerEvent<HTMLSpanElement>,
     node: FilePageNode,
-    axis: 'x' | 'y' | 'both' | 'top-left',
+    axis: GroupResizeAxis,
   ) => void;
+  onSelectFolderContentNode?: (nodeId: string) => void;
   onSelect: (nodeId: string) => void;
   onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
@@ -103,6 +104,7 @@ function FileCanvasNodeComponent({
   onPreviewIcon,
   onPreviewResize,
   onResizeHandlePointerDown,
+  onSelectFolderContentNode,
   onSelect,
   onStartRename,
   onStopRename,
@@ -119,8 +121,12 @@ function FileCanvasNodeComponent({
     : null;
   const isGroupNode = node.kind === 'group';
   const isFolderNode = node.kind === 'folder';
+  const isFilesystemNode = node.kind === 'folder' || node.kind === 'file';
+  const canEdgeResize = node.kind === 'file' || node.kind === 'folder';
   const isCompactNode = displaySize.widthUnits === 1;
-  const showFolderContents = isFolderNode && displaySize.widthUnits >= 3 && folderContents.length > 0;
+  const canShowFolderSection =
+    isFolderNode && displaySize.widthUnits >= 3 && folderContents.length > 0;
+  const showFolderContents = canShowFolderSection && displaySize.heightUnits >= 2;
   const visibleFolderContentCount = Math.max(0, displaySize.heightUnits * 2 - 1);
   const visibleFolderContents = showFolderContents
     ? folderContents.slice(0, visibleFolderContentCount)
@@ -128,12 +134,29 @@ function FileCanvasNodeComponent({
   const hiddenFolderContentCount = showFolderContents
     ? Math.max(0, folderContents.length - visibleFolderContents.length)
     : 0;
+  const folderFileCount = folderContents.filter((childNode) => childNode.kind === 'file').length;
+  const folderSubfolderCount = folderContents.filter((childNode) => childNode.kind === 'folder').length;
+  const folderSummaryLabel = (() => {
+    if (folderFileCount > 0 && folderSubfolderCount > 0) {
+      return `+${folderContents.length} items`;
+    }
+
+    if (folderFileCount > 0) {
+      return `+${folderFileCount} files`;
+    }
+
+    if (folderSubfolderCount > 0) {
+      return `+${folderSubfolderCount} folders`;
+    }
+
+    return `+${folderContents.length} items`;
+  })();
   const showCompactElementTooltip = node.kind === 'element' && isCompactNode;
   const showNodeLabel = displaySize.widthUnits >= 2;
   const showNodeDescription =
     displaySize.widthUnits >= 3 &&
     node.description.trim().length > 0 &&
-    !showFolderContents;
+    !canShowFolderSection;
   const nodeClassName = isGroupNode ? getGroupFrameStateClassName({ isSelected, isResizing }) : '';
 
   const buttonNode = (
@@ -171,6 +194,40 @@ function FileCanvasNodeComponent({
         transform: `translate3d(${displayBounds.left}px, ${displayBounds.top}px, 0)`,
       }}
     >
+      {canEdgeResize && onResizeHandlePointerDown ? (
+        <>
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'top-left')}
+            className="absolute left-0 top-0 z-30 size-5 cursor-nwse-resize"
+          />
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'left')}
+            className="absolute inset-y-3 left-0 z-20 w-4 cursor-ew-resize"
+          />
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'right')}
+            className="absolute inset-y-3 right-0 z-20 w-4 cursor-ew-resize"
+          />
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'top')}
+            className="absolute inset-x-3 top-0 z-20 h-4 cursor-ns-resize"
+          />
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'bottom')}
+            className="absolute inset-x-3 bottom-0 z-20 h-4 cursor-ns-resize"
+          />
+          <span
+            role="presentation"
+            onPointerDown={(event) => onResizeHandlePointerDown(event, node, 'bottom-right')}
+            className="absolute bottom-0 right-0 z-30 size-5 cursor-nwse-resize"
+          />
+        </>
+      ) : null}
       {isGroupNode ? (
         <FileCanvasGroupChrome
           editingLabel={editingLabel}
@@ -193,25 +250,27 @@ function FileCanvasNodeComponent({
         >
           <div
             className={cn(
-              'flex items-center gap-2.5',
+              'flex items-start gap-2.5',
               isCompactNode && 'h-full w-full items-center justify-center gap-0',
             )}
           >
             <span
               className={cn(
                 'flex size-8 shrink-0 items-center justify-center rounded-xl border border-slate-200/80 bg-white/75',
+                isFilesystemNode && 'size-5 self-start rounded-none border-transparent bg-transparent',
                 isCompactNode && 'size-12 rounded-none border-transparent bg-transparent shadow-none',
               )}
             >
               <Icon
                 className={cn(
                   'size-4 text-slate-600',
+                  isFilesystemNode && 'size-5 text-slate-500',
                   isCompactNode && 'size-7 text-slate-500',
                 )}
               />
             </span>
             {!isCompactNode ? (
-              <div className="min-w-0">
+              <div className="min-w-0 self-start">
                 {isEditing ? (
                   <input
                     autoFocus
@@ -236,38 +295,58 @@ function FileCanvasNodeComponent({
                   <div className="mt-1 line-clamp-2 text-xs leading-5 text-slate-500">
                     {node.description}
                   </div>
-                ) : showFolderContents ? (
-                  <div className="mt-2 space-y-1.5">
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                ) : canShowFolderSection ? (
+                  <div className={cn('space-y-2', showFolderContents ? 'mt-4' : 'mt-3')}>
+                    <div className="pl-0.5 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
                       Contents
                     </div>
-                    <div className="space-y-1">
-                      {visibleFolderContents.map((childNode) => {
-                        const ChildIcon = NODE_META[childNode.kind].icon;
+                    {showFolderContents ? (
+                      <div className="overflow-hidden rounded-xl border border-slate-200/75 bg-slate-50/60">
+                        {visibleFolderContents.map((childNode) => {
+                          const ChildIcon = NODE_META[childNode.kind].icon;
 
-                        return (
-                          <div
-                            key={childNode.id}
-                            className="flex items-center gap-2 rounded-lg border border-slate-200/70 bg-white/65 px-2.5 py-1.5 text-left"
-                          >
-                            <span className="flex size-5 shrink-0 items-center justify-center rounded-md border border-slate-200/70 bg-white/85">
-                              <ChildIcon className="size-3 text-slate-500" />
-                            </span>
-                            <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
-                              {childNode.label}
-                            </span>
-                            <span className="text-[9px] font-semibold uppercase tracking-[0.22em] text-slate-400">
-                              {NODE_META[childNode.kind].eyebrow}
-                            </span>
+                          return (
+                            <div
+                              key={childNode.id}
+                              onPointerDown={(event) => {
+                                event.preventDefault();
+                                event.stopPropagation();
+                                onSelectFolderContentNode?.(childNode.id);
+                              }}
+                              className={cn(
+                                'flex cursor-pointer items-center gap-2.5 px-3 py-2.5 text-left transition-colors hover:bg-white/85',
+                                hiddenFolderContentCount > 0 ||
+                                  childNode.id !== visibleFolderContents.at(-1)?.id
+                                  ? 'border-b border-slate-200/70'
+                                  : '',
+                              )}
+                            >
+                              <span className="flex size-4 shrink-0 items-center justify-center">
+                                <ChildIcon className="size-3.5 text-slate-400" />
+                              </span>
+                              <span className="min-w-0 flex-1 truncate text-xs font-medium text-slate-600">
+                                {childNode.label}
+                              </span>
+                              <span className="rounded-md bg-white/80 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.2em] text-slate-400">
+                                {NODE_META[childNode.kind].eyebrow}
+                              </span>
+                            </div>
+                          );
+                        })}
+                        {hiddenFolderContentCount > 0 ? (
+                          <div className="bg-white/45 px-3 py-2 text-[10px] font-medium text-slate-400">
+                            +{hiddenFolderContentCount} more
                           </div>
-                        );
-                      })}
-                      {hiddenFolderContentCount > 0 ? (
-                        <div className="px-1 text-[10px] font-medium text-slate-400">
-                          +{hiddenFolderContentCount} more
-                        </div>
-                      ) : null}
-                    </div>
+                        ) : null}
+                      </div>
+                    ) : (
+                      <div className="rounded-lg border border-slate-200/70 bg-slate-50/55 px-3 py-2.5 text-xs font-medium text-slate-500">
+                        {folderSummaryLabel}
+                        <span className="ml-2 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                          in this folder
+                        </span>
+                      </div>
+                    )}
                   </div>
                 ) : (
                   <div className="mt-1 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">

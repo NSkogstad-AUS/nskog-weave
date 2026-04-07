@@ -24,14 +24,117 @@ import {
   getUnitsForDimension,
   resolveSnapPositions,
 } from './canvas/utils';
-import type { FilePageNode, FilePageNodeSize, FilePageNodeUpdates } from '@/types/filePage';
+import {
+  FILE_PAGE_NODE_KINDS,
+  type FilePageNode,
+  type FilePageNodeKind,
+  type FilePageNodeSize,
+  type FilePageNodeUpdates,
+} from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
 type FolderExpandState = 'hidden' | 'expand' | 'collapse';
 type FolderContentEntry = Pick<FilePageNode, 'id' | 'kind' | 'label'>;
+type FolderCanvasStore = Record<string, FilePageNode[]>;
 
 const FOLDER_NODE_PREFIX = 'folder:';
 const FILE_NODE_PREFIX = 'file:';
+const FOLDER_CANVAS_STORAGE_KEY = 'weave:folder-canvas:v1';
+const MAX_STORED_GRID_UNITS = 12;
+
+function normalizeUnit(value: unknown, minimum = 1) {
+  if (!Number.isFinite(value)) {
+    return minimum;
+  }
+
+  return Math.max(minimum, Math.min(MAX_STORED_GRID_UNITS, Math.round(Number(value))));
+}
+
+function normalizeNodeKind(value: unknown): FilePageNodeKind | null {
+  return FILE_PAGE_NODE_KINDS.includes(value as FilePageNodeKind)
+    ? (value as FilePageNodeKind)
+    : null;
+}
+
+function normalizeIcon(value: unknown): FilePageNode['icon'] {
+  return value === 'lightbulb' ||
+    value === 'shapes' ||
+    value === 'message-square' ||
+    value === 'target'
+    ? value
+    : 'sparkles';
+}
+
+function hydrateFolderCanvasNodes(): FolderCanvasStore {
+  if (typeof window === 'undefined') {
+    return {};
+  }
+
+  try {
+    const raw = window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY);
+
+    if (!raw) {
+      return {};
+    }
+
+    const parsed = JSON.parse(raw) as Record<string, Partial<FilePageNode>[]>;
+
+    return Object.fromEntries(
+      Object.entries(parsed).flatMap(([folderId, nodes]) => {
+        if (!Array.isArray(nodes)) {
+          return [];
+        }
+
+        const normalizedNodes = nodes.flatMap((node) => {
+          const kind = normalizeNodeKind(node?.kind);
+          const position = node?.position;
+          const groupId =
+            typeof node?.groupId === 'string' && node.groupId.trim().length > 0
+              ? node.groupId
+              : null;
+          const parentNodeId =
+            typeof node?.parentNodeId === 'string' && node.parentNodeId.trim().length > 0
+              ? node.parentNodeId
+              : null;
+
+          if (
+            typeof node?.id !== 'string' ||
+            typeof node?.label !== 'string' ||
+            !kind ||
+            !Number.isFinite(position?.x) ||
+            !Number.isFinite(position?.y)
+          ) {
+            return [];
+          }
+
+          return [
+            {
+              id: node.id,
+              label: node.label,
+              description: typeof node.description === 'string' ? node.description : '',
+              groupId,
+              parentNodeId,
+              kind,
+              icon: normalizeIcon(node.icon),
+              position: {
+                x: position!.x,
+                y: position!.y,
+              },
+              size: {
+                widthUnits: normalizeUnit(node?.size?.widthUnits),
+                heightUnits: normalizeUnit(node?.size?.heightUnits),
+              },
+            },
+          ];
+        });
+
+        return normalizedNodes.length > 0 ? [[folderId, normalizedNodes]] : [];
+      }),
+    );
+  } catch {
+    return {};
+  }
+}
 
 function buildDefaultPosition(index: number) {
   return {
@@ -242,8 +345,13 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     return [...childFolderNodes, ...fileNodes];
   }, [activeFolder]);
 
-  const [folderCanvasNodes, setFolderCanvasNodes] = useState<Record<string, FilePageNode[]>>({});
+  const [folderCanvasNodes, setFolderCanvasNodes] =
+    useState<FolderCanvasStore>(hydrateFolderCanvasNodes);
   const [folderSelectedNodeIds, setFolderSelectedNodeIds] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    window.localStorage.setItem(FOLDER_CANVAS_STORAGE_KEY, JSON.stringify(folderCanvasNodes));
+  }, [folderCanvasNodes]);
 
   useEffect(() => {
     if (!activeFolder) {
