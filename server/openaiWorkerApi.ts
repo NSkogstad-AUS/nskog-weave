@@ -61,7 +61,7 @@ const WORKER_RUN_SETTINGS: Record<
     maxInputCharactersPerFile: 10_000,
     maxTotalInputCharacters: 12_000,
     maxCollatedInputCharacters: 9_000,
-    providerTimeoutMs: 20_000,
+    providerTimeoutMs: 14_000,
     openRouterMaxTokens: 900,
     openAiMaxOutputTokens: 900,
   },
@@ -69,7 +69,7 @@ const WORKER_RUN_SETTINGS: Record<
     maxInputCharactersPerFile: 18_000,
     maxTotalInputCharacters: 22_000,
     maxCollatedInputCharacters: 16_000,
-    providerTimeoutMs: 35_000,
+    providerTimeoutMs: 22_000,
     openRouterMaxTokens: 1_600,
     openAiMaxOutputTokens: 1_600,
   },
@@ -77,11 +77,98 @@ const WORKER_RUN_SETTINGS: Record<
     maxInputCharactersPerFile: 28_000,
     maxTotalInputCharacters: 34_000,
     maxCollatedInputCharacters: 24_000,
-    providerTimeoutMs: 55_000,
+    providerTimeoutMs: 34_000,
     openRouterMaxTokens: 2_400,
     openAiMaxOutputTokens: 2_400,
   },
 };
+
+const OPENROUTER_PROVIDER_PREFERENCES: Record<
+  WorkerRunMode,
+  {
+    sort: 'latency' | 'throughput';
+    preferredMaxLatencySeconds: number;
+    preferredMinThroughputTokensPerSecond: number;
+  }
+> = {
+  fast: {
+    sort: 'latency',
+    preferredMaxLatencySeconds: 6,
+    preferredMinThroughputTokensPerSecond: 35,
+  },
+  balanced: {
+    sort: 'throughput',
+    preferredMaxLatencySeconds: 10,
+    preferredMinThroughputTokensPerSecond: 45,
+  },
+  thorough: {
+    sort: 'throughput',
+    preferredMaxLatencySeconds: 14,
+    preferredMinThroughputTokensPerSecond: 55,
+  },
+};
+
+function getOpenRouterModelForRunMode(runMode: WorkerRunMode) {
+  const modeOverride =
+    runMode === 'fast'
+      ? process.env.OPENROUTER_MODEL_FAST?.trim()
+      : runMode === 'thorough'
+        ? process.env.OPENROUTER_MODEL_THOROUGH?.trim()
+        : process.env.OPENROUTER_MODEL_BALANCED?.trim();
+
+  return modeOverride || process.env.OPENROUTER_MODEL?.trim() || 'qwen/qwen3-32b';
+}
+
+function getOpenAiModelForRunMode(runMode: WorkerRunMode) {
+  const modeOverride =
+    runMode === 'fast'
+      ? process.env.OPENAI_MODEL_FAST?.trim()
+      : runMode === 'thorough'
+        ? process.env.OPENAI_MODEL_THOROUGH?.trim()
+        : process.env.OPENAI_MODEL_BALANCED?.trim();
+
+  return modeOverride || process.env.OPENAI_MODEL?.trim() || 'gpt-5.4-mini';
+}
+
+function getOpenRouterOutputTokenBudget(requestBody: WorkerRunRequest) {
+  const runSettings = WORKER_RUN_SETTINGS[requestBody.runMode];
+
+  if (requestBody.outputMode === 'collated') {
+    return runSettings.openRouterMaxTokens;
+  }
+
+  const perInputBudget =
+    requestBody.runMode === 'fast'
+      ? 220
+      : requestBody.runMode === 'thorough'
+        ? 420
+        : 320;
+
+  return Math.min(
+    runSettings.openRouterMaxTokens,
+    Math.max(perInputBudget, perInputBudget * requestBody.inputs.length),
+  );
+}
+
+function getOpenAiOutputTokenBudget(requestBody: WorkerRunRequest) {
+  const runSettings = WORKER_RUN_SETTINGS[requestBody.runMode];
+
+  if (requestBody.outputMode === 'collated') {
+    return runSettings.openAiMaxOutputTokens;
+  }
+
+  const perInputBudget =
+    requestBody.runMode === 'fast'
+      ? 220
+      : requestBody.runMode === 'thorough'
+        ? 420
+        : 320;
+
+  return Math.min(
+    runSettings.openAiMaxOutputTokens,
+    Math.max(perInputBudget, perInputBudget * requestBody.inputs.length),
+  );
+}
 
 function distributeInputCharacterBudget(
   inputs: WorkerRunInput[],
@@ -565,14 +652,14 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
   };
 }
 
-function getWorkerProviderConfig(): WorkerProviderConfig | null {
+function getWorkerProviderConfig(runMode: WorkerRunMode): WorkerProviderConfig | null {
   const openRouterApiKey = process.env.OPENROUTER_API_KEY?.trim();
 
   if (openRouterApiKey) {
     return {
       provider: 'openrouter',
       apiKey: openRouterApiKey,
-      model: process.env.OPENROUTER_MODEL?.trim() || 'qwen/qwen3-32b',
+      model: getOpenRouterModelForRunMode(runMode),
     };
   }
 
@@ -582,19 +669,26 @@ function getWorkerProviderConfig(): WorkerProviderConfig | null {
     return {
       provider: 'openai',
       apiKey: openAiApiKey,
-      model: process.env.OPENAI_MODEL?.trim() || 'gpt-5.4-mini',
+      model: getOpenAiModelForRunMode(runMode),
     };
   }
 
   return null;
 }
 
-function getWorkerOutputJsonSchema(outputMode: WorkerRunRequest['outputMode']) {
+function getWorkerOutputJsonSchema(requestBody: WorkerRunRequest) {
+  const expectedSourceItemIds =
+    requestBody.outputMode === 'collated'
+      ? [COLLATED_WORKER_SOURCE_ITEM_ID]
+      : requestBody.inputs.map((input) => input.sourceItemId);
   const fileSchema = {
     type: 'object',
     additionalProperties: false,
     properties: {
-      sourceItemId: { type: 'string' },
+      sourceItemId: {
+        type: 'string',
+        enum: expectedSourceItemIds,
+      },
       label: { type: 'string' },
       description: { type: 'string' },
       contentText: { type: 'string' },
@@ -609,8 +703,8 @@ function getWorkerOutputJsonSchema(outputMode: WorkerRunRequest['outputMode']) {
       files: {
         type: 'array',
         items: fileSchema,
-        minItems: 1,
-        ...(outputMode === 'collated' ? { maxItems: 1 } : null),
+        minItems: expectedSourceItemIds.length,
+        maxItems: expectedSourceItemIds.length,
       },
     },
     required: ['files'],
@@ -687,14 +781,25 @@ function getWorkerRunModeInstructions(runMode: WorkerRunRequest['runMode']) {
 
 function buildWorkerMessages(requestBody: WorkerRunRequest) {
   const collatedMode = requestBody.outputMode === 'collated';
+  const taskLine = collatedMode
+    ? 'Combine all inputs into one concise markdown source pack for downstream AI use.'
+    : `Create ${requestBody.inputs.length} concise markdown source packs, one for each input.`;
+  const mappingLine = collatedMode
+    ? `Return one file using sourceItemId "${COLLATED_WORKER_SOURCE_ITEM_ID}".`
+    : 'Use each input sourceItemId in the matching output file.';
 
   return [
     {
       role: 'system',
-      content:
-        collatedMode
-          ? 'You are an AI worker that converts multiple source files into one concise markdown file optimized for downstream AI use. Produce one combined output file that preserves critical facts while removing fluff.'
-          : 'You are an AI worker that converts source files into concise markdown files optimized for downstream AI use. Produce one output file per input file. Each output should preserve critical facts while removing fluff.',
+      content: [
+        'You convert source files into concise markdown packs optimized for downstream AI use.',
+        taskLine,
+        mappingLine,
+        'Preserve critical facts and remove fluff.',
+        'Prefer compact, useful sections instead of long prose.',
+        ...getWorkerRunModeInstructions(requestBody.runMode),
+        ...getWorkerFocusInstructions(requestBody.focus),
+      ].join('\n'),
     },
     {
       role: 'user',
@@ -706,21 +811,11 @@ function buildWorkerMessages(requestBody: WorkerRunRequest) {
         instructions: [
           'Return JSON only.',
           collatedMode
-            ? 'Create one concise markdown artifact that combines all inputs.'
-            : 'For each input, create a concise markdown artifact.',
-          collatedMode
-            ? `Return exactly one output object with sourceItemId "${COLLATED_WORKER_SOURCE_ITEM_ID}".`
-            : 'Return exactly one output object for each input object.',
-          collatedMode
-            ? `Set "sourceItemId" to "${COLLATED_WORKER_SOURCE_ITEM_ID}" for the single combined output.`
-            : 'Copy the input "sourceItemId" into the matching output "sourceItemId" exactly.',
-          'Use sections when useful: Summary, Key Facts, Entities, Open Questions, Follow-ups.',
-          'Keep each output focused and practical.',
-          'Always return an object with a top-level "files" array.',
-          'Each file must include: "sourceItemId", "label", "description", and "contentText".',
+            ? 'Cover every input in the combined output.'
+            : 'Do not merge multiple inputs into one output and do not omit any input.',
+          'Keep labels and descriptions short and practical.',
+          'Use headings only when they add signal.',
           `Example shape: ${JSON.stringify(getWorkerOutputJsonExample(requestBody.outputMode))}`,
-          ...getWorkerRunModeInstructions(requestBody.runMode),
-          ...getWorkerFocusInstructions(requestBody.focus),
         ],
         inputs: requestBody.inputs,
       }),
@@ -857,39 +952,113 @@ async function sendOpenRouterRequest(
   };
 }
 
+function getOpenRouterProviderOptions(runMode: WorkerRunMode) {
+  const providerPreferences = OPENROUTER_PROVIDER_PREFERENCES[runMode];
+
+  return {
+    sort: providerPreferences.sort,
+    allow_fallbacks: true,
+    require_parameters: true,
+    preferred_max_latency: {
+      p90: providerPreferences.preferredMaxLatencySeconds,
+    },
+    preferred_min_throughput: {
+      p50: providerPreferences.preferredMinThroughputTokensPerSecond,
+    },
+  } as const;
+}
+
+function shouldRetryOpenRouterWithBasicPayload(payload: unknown, rawText: string) {
+  const errorMessage = readProviderErrorMessage(payload, rawText).toLowerCase();
+
+  return [
+    'response_format',
+    'json_schema',
+    'reasoning',
+    'require_parameters',
+    'unsupported',
+    'not supported',
+    'invalid provider route',
+    'plugin',
+  ].some((token) => errorMessage.includes(token));
+}
+
 async function runOpenRouterWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
   requestBody: WorkerRunRequest,
 ) {
   const runSettings = WORKER_RUN_SETTINGS[requestBody.runMode];
-  const requestBodyPayload = {
+  const baseRequestBodyPayload = {
     model: providerConfig.model,
     messages: buildWorkerMessages(requestBody),
-    max_tokens: runSettings.openRouterMaxTokens,
-    temperature: 0.2,
+    max_tokens: getOpenRouterOutputTokenBudget(requestBody),
+    temperature: 0,
+    top_p: 1,
     stream: false,
   } satisfies Record<string, unknown>;
+  const requestBodyPayload = {
+    ...baseRequestBodyPayload,
+    reasoning: {
+      effort: 'none',
+      exclude: true,
+    },
+    provider: getOpenRouterProviderOptions(requestBody.runMode),
+    response_format: {
+      type: 'json_schema',
+      json_schema: {
+        name: 'worker_output_bundle',
+        strict: true,
+        schema: getWorkerOutputJsonSchema(requestBody),
+      },
+    },
+    plugins: [
+      {
+        id: 'response-healing',
+      },
+    ],
+  } satisfies Record<string, unknown>;
+  const basicRequestBodyPayload = {
+    ...baseRequestBodyPayload,
+    provider: {
+      ...getOpenRouterProviderOptions(requestBody.runMode),
+      require_parameters: false,
+    },
+  } satisfies Record<string, unknown>;
   let emptyBodyAttempts = 0;
-  let lastResponse:
-    | Awaited<ReturnType<typeof sendOpenRouterRequest>>
-    | null = null;
 
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    lastResponse = await sendOpenRouterRequest(providerConfig, runSettings, requestBodyPayload);
+  const sendWithGuardedRetry = async (body: Record<string, unknown>) => {
+    let responseResult: Awaited<ReturnType<typeof sendOpenRouterRequest>> | null = null;
+    emptyBodyAttempts = 0;
 
-    if (
-      lastResponse.upstreamResponse.ok &&
-      lastResponse.rawText.trim().length === 0
-    ) {
-      emptyBodyAttempts += 1;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      responseResult = await sendOpenRouterRequest(providerConfig, runSettings, body);
 
-      if (attempt === 0) {
-        await delay(OPENROUTER_EMPTY_BODY_RETRY_DELAY_MS);
-        continue;
+      if (
+        responseResult.upstreamResponse.ok &&
+        responseResult.rawText.trim().length === 0
+      ) {
+        emptyBodyAttempts += 1;
+
+        if (attempt === 0) {
+          await delay(OPENROUTER_EMPTY_BODY_RETRY_DELAY_MS);
+          continue;
+        }
       }
+
+      break;
     }
 
-    break;
+    return responseResult;
+  };
+
+  let lastResponse = await sendWithGuardedRetry(requestBodyPayload);
+
+  if (
+    lastResponse &&
+    !lastResponse.upstreamResponse.ok &&
+    shouldRetryOpenRouterWithBasicPayload(lastResponse.upstreamPayload, lastResponse.rawText)
+  ) {
+    lastResponse = await sendWithGuardedRetry(basicRequestBodyPayload);
   }
 
   if (!lastResponse) {
@@ -1011,13 +1180,13 @@ async function runOpenAiWorker(
             },
           ],
         })),
-        max_output_tokens: runSettings.openAiMaxOutputTokens,
+        max_output_tokens: getOpenAiOutputTokenBudget(requestBody),
         text: {
           format: {
             type: 'json_schema',
             name: 'worker_output_bundle',
             strict: true,
-            schema: getWorkerOutputJsonSchema(requestBody.outputMode),
+            schema: getWorkerOutputJsonSchema(requestBody),
           },
         },
       }),
@@ -1154,15 +1323,6 @@ async function handleWorkerRun(request: IncomingMessage, response: ServerRespons
     return;
   }
 
-  const providerConfig = getWorkerProviderConfig();
-
-  if (!providerConfig) {
-    sendJson(response, 500, {
-      error: 'OPENROUTER_API_KEY or OPENAI_API_KEY is missing. Add one to your local environment before running the AI worker.',
-    });
-    return;
-  }
-
   let parsedRequestBody: unknown;
 
   try {
@@ -1193,6 +1353,15 @@ async function handleWorkerRun(request: IncomingMessage, response: ServerRespons
   if (requestBody.inputs.length === 0) {
     sendJson(response, 400, {
       error: 'At least one text-bearing input file is required.',
+    });
+    return;
+  }
+
+  const providerConfig = getWorkerProviderConfig(requestBody.runMode);
+
+  if (!providerConfig) {
+    sendJson(response, 500, {
+      error: 'OPENROUTER_API_KEY or OPENAI_API_KEY is missing. Add one to your local environment before running the AI worker.',
     });
     return;
   }

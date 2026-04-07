@@ -216,8 +216,66 @@ function buildAiOutputFileLabel(
   return `${workerSegment}_${sourceSegment}_v${version}_${datePart}_${timePart}.md`;
 }
 
+const AI_WORKER_REQUEST_BATCH_SETTINGS: Record<
+  FilePageWorkerRunMode,
+  {
+    maxFilesPerRequest: number;
+    targetTotalCharacters: number;
+    clientTimeoutMultiplier: number;
+  }
+> = {
+  fast: {
+    maxFilesPerRequest: 4,
+    targetTotalCharacters: 9_000,
+    clientTimeoutMultiplier: 1.15,
+  },
+  balanced: {
+    maxFilesPerRequest: 6,
+    targetTotalCharacters: 18_000,
+    clientTimeoutMultiplier: 1.3,
+  },
+  thorough: {
+    maxFilesPerRequest: 8,
+    targetTotalCharacters: 28_000,
+    clientTimeoutMultiplier: 1.45,
+  },
+};
+
 function getAiWorkerRequestConcurrency(_runMode: FilePageWorkerRunMode) {
   return 2;
+}
+
+function buildAiWorkerRequestBatches<T extends { textContent?: string | null }>(
+  items: T[],
+  runMode: FilePageWorkerRunMode,
+) {
+  const { maxFilesPerRequest, targetTotalCharacters } = AI_WORKER_REQUEST_BATCH_SETTINGS[runMode];
+  const batches: T[][] = [];
+  let currentBatch: T[] = [];
+  let currentBatchCharacters = 0;
+
+  items.forEach((item) => {
+    const itemCharacters = (item.textContent ?? '').trim().length;
+    const wouldExceedFileLimit = currentBatch.length >= maxFilesPerRequest;
+    const wouldExceedCharacterTarget =
+      currentBatch.length > 0 &&
+      currentBatchCharacters + itemCharacters > targetTotalCharacters;
+
+    if ((wouldExceedFileLimit || wouldExceedCharacterTarget) && currentBatch.length > 0) {
+      batches.push(currentBatch);
+      currentBatch = [];
+      currentBatchCharacters = 0;
+    }
+
+    currentBatch.push(item);
+    currentBatchCharacters += itemCharacters;
+  });
+
+  if (currentBatch.length > 0) {
+    batches.push(currentBatch);
+  }
+
+  return batches;
 }
 
 function createFallbackFileItem(node: FilePageNode): FilePageContentItem {
@@ -3181,12 +3239,23 @@ export function FileCanvasView({
       return;
     }
 
-    const requestConcurrency = getAiWorkerRequestConcurrency(workerRunMode);
+    const batchSettings = AI_WORKER_REQUEST_BATCH_SETTINGS[workerRunMode];
+    const pendingBatches = buildAiWorkerRequestBatches(
+      processablePendingSourceFiles,
+      workerRunMode,
+    );
+    const requestConcurrency = Math.min(
+      getAiWorkerRequestConcurrency(workerRunMode),
+      pendingBatches.length,
+    );
     const requestWaveCount = Math.max(
       1,
-      Math.ceil(processablePendingSourceFiles.length / requestConcurrency),
+      Math.ceil(pendingBatches.length / requestConcurrency),
     );
-    const clientTimeoutMs = baseClientTimeoutMs * requestWaveCount;
+    const clientTimeoutMs = Math.max(
+      baseClientTimeoutMs,
+      Math.ceil(baseClientTimeoutMs * requestWaveCount * batchSettings.clientTimeoutMultiplier),
+    );
     const clientTimeoutLabel = formatTimeoutLabel(clientTimeoutMs);
 
     startWorkerProgressLoop(workerId);
@@ -3201,7 +3270,6 @@ export function FileCanvasView({
     }, clientTimeoutMs);
 
     try {
-      const pendingBatches = processablePendingSourceFiles.map((item) => [item]);
       const generatedOutputItems: FilePageContentItem[] = [];
       let nextBatchIndex = 0;
 
@@ -3323,10 +3391,7 @@ export function FileCanvasView({
       };
 
       await Promise.all(
-        Array.from(
-          { length: Math.min(requestConcurrency, pendingBatches.length) },
-          () => runBatchWorker(),
-        ),
+        Array.from({ length: requestConcurrency }, () => runBatchWorker()),
       );
 
       if (generatedOutputItems.length === 0) {
