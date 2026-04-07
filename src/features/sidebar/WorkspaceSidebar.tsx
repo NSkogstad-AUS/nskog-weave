@@ -1,9 +1,10 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useMemo, useRef, useState } from 'react';
 import {
   HomeIcon,
   LayoutGridIcon,
   RefreshCcwIcon,
   SearchIcon,
+  UploadIcon,
 } from 'lucide-react';
 
 import {
@@ -78,6 +79,7 @@ interface WorkspaceSidebarProps {
   highlightedItem?: ActiveItem;
   onFileDelete?: (fileId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
+  onImportFiles?: (files: File[]) => void;
   onOpenFile?: (fileId: string) => void;
   onOpenFolder?: (folderId: string) => void;
 }
@@ -87,6 +89,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   highlightedItem = null,
   onFileDelete,
   onFoldersChange,
+  onImportFiles,
   onOpenFile,
   onOpenFolder,
 }: WorkspaceSidebarProps) {
@@ -102,6 +105,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
   const [pendingFolderDelete, setPendingFolderDelete] =
     useState<PendingFolderDelete>(null);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(getAllFolderIds(createWorkspaceFolders())),
   );
@@ -259,8 +263,34 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
 
           <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
             <SidebarHeader className="gap-3 border-b border-sidebar-border/80 px-4 py-4">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
-                Workspace
+              <div className="flex items-center justify-between gap-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.28em] text-muted-foreground">
+                  Workspace
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="rounded-xl border-sidebar-border/80 bg-white/90"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <UploadIcon className="size-3.5" />
+                  Import files
+                </Button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  className="hidden"
+                  onChange={(event) => {
+                    const nextFiles = Array.from(event.target.files ?? []);
+
+                    if (nextFiles.length > 0) {
+                      onImportFiles?.(nextFiles);
+                    }
+
+                    event.target.value = '';
+                  }}
+                />
               </div>
               <div className="relative">
                 <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />

@@ -15,9 +15,9 @@ export const FILE_PAGE_ELEMENT_ICONS = [
 export type FilePageElementIcon = (typeof FILE_PAGE_ELEMENT_ICONS)[number];
 export const FILE_PAGE_CONTENT_ITEM_KINDS = ['folder', 'file'] as const;
 export type FilePageContentItemKind = (typeof FILE_PAGE_CONTENT_ITEM_KINDS)[number];
-export const FILE_PAGE_WORKER_MODES = ['ai-ready'] as const;
+export const FILE_PAGE_WORKER_MODES = ['ai-ready', 'sort-data'] as const;
 export type FilePageWorkerMode = (typeof FILE_PAGE_WORKER_MODES)[number];
-export const FILE_PAGE_WORKER_STATUSES = ['idle', 'processing', 'complete'] as const;
+export const FILE_PAGE_WORKER_STATUSES = ['idle', 'processing', 'complete', 'error'] as const;
 export type FilePageWorkerStatus = (typeof FILE_PAGE_WORKER_STATUSES)[number];
 
 export interface FilePageNodeSize {
@@ -29,6 +29,10 @@ export interface FilePageContentItem {
   id: string;
   kind: FilePageContentItemKind;
   label: string;
+  description?: string | null;
+  textContent?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
 }
 
 export interface FilePageNode {
@@ -48,6 +52,7 @@ export interface FilePageNode {
   workerProgress?: number | null;
   workerOutputFolderId?: string | null;
   workerInputSignature?: string | null;
+  workerLastError?: string | null;
 }
 
 export type FilePageNodeUpdates = Partial<
@@ -66,6 +71,7 @@ export type FilePageNodeUpdates = Partial<
     | 'workerProgress'
     | 'workerOutputFolderId'
     | 'workerInputSignature'
+    | 'workerLastError'
   >
 >;
 

@@ -79,6 +79,19 @@ function normalizeContentItems(value: unknown): FilePageContentItem[] {
         id: item.id,
         label: item.label,
         kind: item.kind,
+        description:
+          typeof item?.description === 'string' && item.description.trim().length > 0
+            ? item.description
+            : null,
+        textContent:
+          typeof item?.textContent === 'string' && item.textContent.length > 0
+            ? item.textContent
+            : null,
+        mimeType:
+          typeof item?.mimeType === 'string' && item.mimeType.trim().length > 0
+            ? item.mimeType
+            : null,
+        sizeBytes: Number.isFinite(item?.sizeBytes) ? Math.max(0, Number(item.sizeBytes)) : null,
       },
     ];
   });
@@ -164,6 +177,11 @@ function hydrateFilePages(): FilePagesStore {
                 typeof node?.workerInputSignature === 'string' &&
                 node.workerInputSignature.trim().length > 0
                   ? node.workerInputSignature
+                  : null,
+              workerLastError:
+                typeof node?.workerLastError === 'string' &&
+                node.workerLastError.trim().length > 0
+                  ? node.workerLastError
                   : null,
             },
           ];

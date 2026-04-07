@@ -24,6 +24,7 @@ import {
   getUnitsForDimension,
   resolveSnapPositions,
 } from './canvas/utils';
+import { workspaceFileToContentItem } from '@/lib/workspaceFiles';
 import {
   FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
@@ -99,6 +100,19 @@ function normalizeContentItems(value: unknown): FilePageContentItem[] {
         id: item.id,
         label: item.label,
         kind: item.kind,
+        description:
+          typeof item?.description === 'string' && item.description.trim().length > 0
+            ? item.description
+            : null,
+        textContent:
+          typeof item?.textContent === 'string' && item.textContent.length > 0
+            ? item.textContent
+            : null,
+        mimeType:
+          typeof item?.mimeType === 'string' && item.mimeType.trim().length > 0
+            ? item.mimeType
+            : null,
+        sizeBytes: Number.isFinite(item?.sizeBytes) ? Math.max(0, Number(item.sizeBytes)) : null,
       },
     ];
   });
@@ -184,6 +198,11 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
                 typeof node?.workerInputSignature === 'string' &&
                 node.workerInputSignature.trim().length > 0
                   ? node.workerInputSignature
+                  : null,
+              workerLastError:
+                typeof node?.workerLastError === 'string' &&
+                node.workerLastError.trim().length > 0
+                  ? node.workerLastError
                   : null,
             },
           ];
@@ -650,12 +669,11 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
         id: `${FOLDER_NODE_PREFIX}${folder.id}`,
         kind: 'folder' as const,
         label: folder.label,
+        description: buildFolderDescription(folder),
       })),
-      ...sourceFolder.files.map((file) => ({
-        id: `${FILE_NODE_PREFIX}${file.id}`,
-        kind: 'file' as const,
-        label: file.label,
-      })),
+      ...sourceFolder.files.map((file) =>
+        workspaceFileToContentItem(file, `${FILE_NODE_PREFIX}${file.id}`),
+      ),
     ];
   }, [activeFolder]);
 

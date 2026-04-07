@@ -3,6 +3,9 @@ export interface WorkspaceFile {
   label: string;
   description: string;
   kind: 'canvas' | 'brief' | 'memo' | 'outline';
+  contentText?: string | null;
+  mimeType?: string | null;
+  sizeBytes?: number | null;
 }
 
 export interface WorkspaceFolder {
@@ -244,6 +247,13 @@ export function findFilePathById(
   }
 
   return null;
+}
+
+export function collectFilesInFolder(folder: WorkspaceFolder): WorkspaceFile[] {
+  return [
+    ...folder.files,
+    ...folder.children.flatMap((childFolder) => collectFilesInFolder(childFolder)),
+  ];
 }
 
 export function renameFolderById(

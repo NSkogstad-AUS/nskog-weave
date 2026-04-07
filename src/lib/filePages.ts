@@ -91,5 +91,6 @@ function createNode(
     workerProgress: kind === 'worker' ? 0 : null,
     workerOutputFolderId: null,
     workerInputSignature: null,
+    workerLastError: null,
   };
 }

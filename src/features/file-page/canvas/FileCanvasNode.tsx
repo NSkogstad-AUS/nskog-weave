@@ -1,9 +1,11 @@
 import { memo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
+  AlertTriangleIcon,
   ExpandIcon,
   LoaderCircleIcon,
   PencilLineIcon,
+  PlayIcon,
   SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -29,6 +31,7 @@ import { FileCanvasGroupChrome } from './FileCanvasGroupChrome';
 import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
+import { getWorkerModeMeta, getWorkerStatusMessage } from '@/lib/filePageWorkers';
 import { cn } from '@/lib/utils';
 import type { FilePageContentItem, FilePageElementIcon, FilePageNode } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
@@ -69,7 +72,8 @@ interface FileCanvasNodeProps {
     node: FilePageNode,
     axis: GroupResizeAxis,
   ) => void;
-  onSelectFolderContentNode?: (nodeId: string) => void;
+  onRunWorker?: (node: FilePageNode) => void;
+  onSelectFolderContentItem?: (item: FilePageContentItem) => void;
   onSelect: (nodeId: string) => void;
   onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
@@ -112,7 +116,8 @@ function FileCanvasNodeComponent({
   onPreviewIcon,
   onPreviewResize,
   onResizeHandlePointerDown,
-  onSelectFolderContentNode,
+  onRunWorker,
+  onSelectFolderContentItem,
   onSelect,
   onStartRename,
   onStopRename,
@@ -158,24 +163,24 @@ function FileCanvasNodeComponent({
   const nodeClassName = isGroupNode ? getGroupFrameStateClassName({ isSelected, isResizing }) : '';
   const secondaryText = isFolderNode
     ? folderSummaryText
+    : isWorkerNode
+      ? null
     : displaySize.widthUnits >= 3 && node.description.trim().length > 0
       ? node.description.trim()
       : node.kind === 'element'
         ? (elementMeta?.label ?? null)
         : null;
   const workerInputCount = folderContents.length;
+  const workerModeMeta = getWorkerModeMeta(node.workerMode);
   const workerStatus = node.workerStatus ?? 'idle';
   const workerProgress = node.workerProgress ?? 0;
-  const workerStatusMessage =
-    workerStatus === 'processing'
-      ? workerProgress < 34
-        ? 'Loading information...'
-        : workerProgress < 72
-          ? 'Processing now...'
-          : 'Preparing AI-ready files...'
-      : workerStatus === 'complete'
-        ? 'AI-ready output ready.'
-        : 'Connect files or folders on the left to generate AI-ready outputs.';
+  const workerStatusMessage = getWorkerStatusMessage(
+    node.workerMode,
+    workerStatus,
+    workerProgress,
+    node.workerLastError ?? null,
+  );
+  const canRunWorker = isWorkerNode && workerInputCount > 0 && workerStatus !== 'processing';
   const elementIconToneClassName =
     elementIcon === 'lightbulb'
       ? 'border-amber-200/80 bg-amber-50/85 text-amber-600'
@@ -361,11 +366,13 @@ function FileCanvasNodeComponent({
               </div>
 
               {isWorkerNode ? (
-                <div className="space-y-3 border-t border-slate-200/75 pt-4">
-                  <div className="flex items-center justify-between text-[11px] font-medium text-slate-500">
+                <div className="space-y-2.5 border-t border-slate-200/75 pt-3.5">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
                     <span className="flex items-center gap-2">
                       {workerStatus === 'processing' ? (
                         <LoaderCircleIcon className="size-3.5 animate-spin text-slate-500" />
+                      ) : workerStatus === 'error' ? (
+                        <AlertTriangleIcon className="size-3.5 text-rose-500" />
                       ) : workerStatus === 'complete' ? (
                         <SparklesIcon className="size-3.5 text-slate-500" />
                       ) : (
@@ -373,27 +380,56 @@ function FileCanvasNodeComponent({
                       )}
                       <span>{workerStatusMessage}</span>
                     </span>
-                    <span className="text-slate-400">AI Ready</span>
+                    <span className="shrink-0 text-slate-400">{workerModeMeta.badgeLabel}</span>
                   </div>
+                  {onRunWorker ? (
+                    <button
+                      type="button"
+                      disabled={!canRunWorker}
+                      onPointerDown={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                      }}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onRunWorker(node);
+                      }}
+                      className={cn(
+                        'flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border text-[11px] font-semibold transition-colors',
+                        canRunWorker
+                          ? 'border-slate-200/90 bg-slate-900 text-white hover:bg-slate-800'
+                          : 'border-slate-200/80 bg-slate-100 text-slate-400',
+                      )}
+                    >
+                      <PlayIcon className="size-3.5" />
+                      <span>{workerStatus === 'processing' ? 'Running...' : workerModeMeta.runActionLabel}</span>
+                    </button>
+                  ) : null}
                   <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                     <div
                       className={cn(
                         'h-full rounded-full transition-[width,background-color] duration-300',
-                        workerStatus === 'complete' ? 'bg-slate-900/70' : 'bg-slate-500/55',
+                        workerStatus === 'error'
+                          ? 'bg-rose-500/65'
+                          : workerStatus === 'complete'
+                            ? 'bg-slate-900/70'
+                            : 'bg-slate-500/55',
                       )}
                       style={{
                         width: `${workerStatus === 'processing'
                           ? Math.max(8, Math.min(100, workerProgress))
                           : workerStatus === 'complete'
                             ? 100
+                            : workerStatus === 'error'
+                              ? 100
                             : 8}%`,
                       }}
                     />
                   </div>
-                  <div className="flex items-center gap-2 text-[11px] text-slate-400">
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
                     <span>{workerInputCount} input{workerInputCount === 1 ? '' : 's'}</span>
-                    <span>&#8226;</span>
-                    <span>Output appears on the right</span>
+                    <span>{workerModeMeta.outputPlacementMessage}</span>
                   </div>
                 </div>
               ) : null}
@@ -411,10 +447,10 @@ function FileCanvasNodeComponent({
                           onPointerDown={(event) => {
                             event.preventDefault();
                             event.stopPropagation();
-                            onSelectFolderContentNode?.(childNode.id);
+                            onSelectFolderContentItem?.(childNode);
                           }}
                           className={cn(
-                            'flex cursor-pointer items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-50',
+                            'flex cursor-pointer items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-50',
                             childNode.id !== visibleFolderContents.at(-1)?.id &&
                               'border-b border-slate-100',
                           )}
@@ -422,8 +458,15 @@ function FileCanvasNodeComponent({
                           <span className="flex size-4 shrink-0 items-center justify-center">
                             <ChildIcon className="size-3.5 text-slate-400" />
                           </span>
-                          <span className="min-w-0 truncate text-[12px] font-medium text-slate-600">
-                            {childNode.label}
+                          <span className="min-w-0">
+                            <span className="block truncate text-[12px] font-medium text-slate-600">
+                              {childNode.label}
+                            </span>
+                            {childNode.description ? (
+                              <span className="mt-0.5 line-clamp-2 block text-[11px] leading-4 text-slate-400">
+                                {childNode.description}
+                              </span>
+                            ) : null}
                           </span>
                         </div>
                       );
@@ -483,6 +526,12 @@ function FileCanvasNodeComponent({
             <PencilLineIcon className="size-4" />
             Rename
           </ContextMenuItem>
+          {isWorkerNode && onRunWorker ? (
+            <ContextMenuItem disabled={!canRunWorker} onSelect={() => onRunWorker(node)}>
+              <PlayIcon className="size-4" />
+              {workerStatus === 'processing' ? 'Running...' : workerModeMeta.runActionLabel}
+            </ContextMenuItem>
+          ) : null}
           {folderExpandState === 'expand' && onExpandFolder ? (
             <ContextMenuItem onSelect={() => onExpandFolder(node)}>
               <ExpandIcon className="size-4" />
@@ -642,7 +691,8 @@ function areFileCanvasNodePropsEqual(
         !nextEntry ||
         entry.id !== nextEntry.id ||
         entry.kind !== nextEntry.kind ||
-        entry.label !== nextEntry.label
+        entry.label !== nextEntry.label ||
+        entry.description !== nextEntry.description
       );
     })
   ) {

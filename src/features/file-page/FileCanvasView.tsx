@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
-import { BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
+import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
 
 import {
   ContextMenu,
@@ -8,6 +8,12 @@ import {
   ContextMenuItem,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
+import {
+  getWorkerModeMeta,
+  getWorkerOutputItemLabel,
+  resolveWorkerMode,
+} from '@/lib/filePageWorkers';
+import { buildContentSnippet } from '@/lib/workspaceFiles';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
@@ -43,6 +49,7 @@ import type {
   FilePageNode,
   FilePageNodeSize,
   FilePageNodeUpdates,
+  FilePageWorkerMode,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -60,6 +67,9 @@ interface FileCanvasViewProps {
   getFolderContents?: (node: FilePageNode) => FilePageContentItem[];
   onExpandFolder?: (node: FilePageNode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
+  resolveCanvasFileItem?: (node: FilePageNode) => FilePageContentItem | null;
+  resolveCanvasFolderSourceFiles?: (node: FilePageNode) => FilePageContentItem[];
+  onPreviewContentItemChange?: (item: FilePageContentItem | null) => void;
 }
 
 type DragState = {
@@ -121,8 +131,31 @@ function sortCanvasContentItems(items: FilePageContentItem[]) {
   );
 }
 
-function getWorkerOutputContentItemLabel(label: string) {
-  return `${label} AI Ready`;
+function getContentItemDedupKey(item: FilePageContentItem) {
+  return item.id || `${item.kind}:${item.label.trim().toLowerCase()}`;
+}
+
+function createContentHash(value: string | null | undefined) {
+  const input = value ?? '';
+  let hash = 0;
+
+  for (let index = 0; index < input.length; index += 1) {
+    hash = (hash * 31 + input.charCodeAt(index)) | 0;
+  }
+
+  return hash.toString(16);
+}
+
+function createFallbackFileItem(node: FilePageNode): FilePageContentItem {
+  return {
+    id: node.id,
+    kind: 'file',
+    label: node.label,
+    description: node.description,
+    textContent: null,
+    mimeType: null,
+    sizeBytes: null,
+  };
 }
 
 function getPointBounds(point: Point) {
@@ -208,6 +241,9 @@ export function FileCanvasView({
   getFolderContents,
   onExpandFolder,
   onCollapseFolder,
+  resolveCanvasFileItem,
+  resolveCanvasFolderSourceFiles,
+  onPreviewContentItemChange,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const releaseTimerRef = useRef<number | null>(null);
@@ -2458,6 +2494,14 @@ export function FileCanvasView({
         node.generatedByWorkerId !== workerId,
     ), []);
 
+  const resolveSourceFileItem = useCallback((node: FilePageNode): FilePageContentItem | null => {
+    if (node.kind !== 'file') {
+      return null;
+    }
+
+    return resolveCanvasFileItem?.(node) ?? createFallbackFileItem(node);
+  }, [resolveCanvasFileItem]);
+
   const collectFolderSourceFiles = useCallback((
     folderId: string,
     visited = new Set<string>(),
@@ -2474,19 +2518,15 @@ export function FileCanvasView({
 
     const nextVisited = new Set(visited);
     nextVisited.add(folderId);
+    const resolvedFolderFiles = resolveCanvasFolderSourceFiles?.(folderNode) ?? [];
     const directChildFiles = nodesRef.current.flatMap((node) => {
       if (node.parentNodeId !== folderId) {
         return [];
       }
 
       if (node.kind === 'file') {
-        return [
-          {
-            id: node.id,
-            kind: 'file' as const,
-            label: node.label,
-          },
-        ];
+        const sourceItem = resolveSourceFileItem(node);
+        return sourceItem ? [sourceItem] : [];
       }
 
       if (node.kind === 'folder') {
@@ -2498,57 +2538,77 @@ export function FileCanvasView({
     const generatedFiles = (folderNode.contentItems ?? []).filter((item) => item.kind === 'file');
     const dedupedById = new Map<string, FilePageContentItem>();
 
-    [...directChildFiles, ...generatedFiles].forEach((item) => {
-      dedupedById.set(item.id, item);
+    [...resolvedFolderFiles, ...directChildFiles, ...generatedFiles].forEach((item) => {
+      dedupedById.set(getContentItemDedupKey(item), item);
     });
 
     return sortCanvasContentItems([...dedupedById.values()]);
-  }, [getNodeById]);
+  }, [getNodeById, resolveCanvasFolderSourceFiles, resolveSourceFileItem]);
 
-  const buildWorkerOutputItems = useCallback((workerId: string) => {
+  const collectWorkerSourceFiles = useCallback((workerId: string) => {
     const sourceFiles = getWorkerInputNodes(workerId).flatMap((node) =>
       node.kind === 'file'
-        ? [
-            {
-              id: node.id,
-              kind: 'file' as const,
-              label: node.label,
-            },
-          ]
+        ? (() => {
+            const sourceItem = resolveSourceFileItem(node);
+            return sourceItem ? [sourceItem] : [];
+          })()
         : collectFolderSourceFiles(node.id),
     );
     const dedupedByKey = new Map<string, FilePageContentItem>();
 
     sourceFiles.forEach((item) => {
-      const key = item.label.trim().toLowerCase();
-
-      if (dedupedByKey.has(key)) {
-        return;
-      }
-
-      dedupedByKey.set(key, {
-        id: `${workerId}:${key}`,
-        kind: 'file',
-        label: getWorkerOutputContentItemLabel(item.label),
-      });
+      dedupedByKey.set(getContentItemDedupKey(item), item);
     });
 
     return sortCanvasContentItems([...dedupedByKey.values()]);
-  }, [collectFolderSourceFiles, getWorkerInputNodes]);
+  }, [collectFolderSourceFiles, getWorkerInputNodes, resolveSourceFileItem]);
+
+  const buildSortWorkerOutputItems = useCallback((workerId: string) => {
+    const worker = getNodeById(workerId);
+
+    if (!worker || worker.kind !== 'worker') {
+      return [];
+    }
+
+    const orderedEntries = collectWorkerSourceFiles(workerId)
+      .map((item) => [item.label.trim().toLowerCase(), item] as const)
+      .sort(([, left], [, right]) =>
+        left.label.localeCompare(right.label, undefined, {
+          sensitivity: 'base',
+        }),
+      );
+
+    return sortCanvasContentItems(
+      orderedEntries.map(([key, item], index, items) => ({
+        id: `${workerId}:${key}`,
+        kind: 'file',
+        label: getWorkerOutputItemLabel(worker.workerMode, item.label, index, items.length),
+        description: item.description ?? `Sorted copy of ${item.label}.`,
+        textContent: item.textContent ?? null,
+        mimeType: item.mimeType ?? 'text/plain',
+        sizeBytes: item.sizeBytes ?? item.textContent?.length ?? null,
+      })),
+    );
+  }, [collectWorkerSourceFiles, getNodeById]);
 
   const buildWorkerInputSignature = useCallback((workerId: string) => {
+    const worker = getNodeById(workerId);
+    const workerMode = resolveWorkerMode(worker?.workerMode ?? null);
     const inputs = getWorkerInputNodes(workerId);
-    const files = buildWorkerOutputItems(workerId);
+    const files = collectWorkerSourceFiles(workerId);
 
     return JSON.stringify({
+      workerMode,
       inputs: inputs
         .map((node) => `${node.id}:${node.label}:${node.kind}`)
         .sort((left, right) => left.localeCompare(right)),
       files: files
-        .map((item) => item.label)
+        .map((item) =>
+          [item.id, item.label, createContentHash(item.textContent), item.mimeType ?? ''].join(':'),
+        )
         .sort((left, right) => left.localeCompare(right)),
     });
-  }, [buildWorkerOutputItems, getWorkerInputNodes]);
+  }, [collectWorkerSourceFiles, getNodeById, getWorkerInputNodes]);
 
   const clearWorkerProcessTimer = useCallback((workerId: string) => {
     const timerId = workerProcessTimersRef.current[workerId];
@@ -2571,7 +2631,11 @@ export function FileCanvasView({
     }
   }, []);
 
-  const completeWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+  const commitWorkerOutput = useCallback((
+    workerId: string,
+    inputSignature: string,
+    outputItems: FilePageContentItem[],
+  ) => {
     clearWorkerProcessTimer(workerId);
     const worker = getNodeById(workerId);
 
@@ -2579,7 +2643,7 @@ export function FileCanvasView({
       return;
     }
 
-    const outputItems = buildWorkerOutputItems(workerId);
+    const workerMeta = getWorkerModeMeta(worker.workerMode);
     const existingOutputFolder =
       (worker.workerOutputFolderId ? getNodeById(worker.workerOutputFolderId) : null) ??
       nodesRef.current.find(
@@ -2597,6 +2661,7 @@ export function FileCanvasView({
         workerProgress: 100,
         workerInputSignature: inputSignature,
         workerOutputFolderId: null,
+        workerLastError: null,
       });
       return;
     }
@@ -2649,8 +2714,8 @@ export function FileCanvasView({
 
       onAddNodeRef.current({
         id: nextFolderId,
-        label: 'AI Ready Files',
-        description: 'Generated output from the connected worker.',
+        label: workerMeta.outputFolderLabel,
+        description: workerMeta.outputFolderDescription,
         kind: 'folder',
         icon: 'shapes',
         groupId: worker.groupId ?? null,
@@ -2664,19 +2729,21 @@ export function FileCanvasView({
         workerProgress: null,
         workerOutputFolderId: null,
         workerInputSignature: null,
+        workerLastError: null,
       });
       onUpdateNodeRef.current(workerId, {
         workerStatus: 'complete',
         workerProgress: 100,
         workerInputSignature: inputSignature,
         workerOutputFolderId: nextFolderId,
+        workerLastError: null,
       });
       return;
     }
 
     onUpdateNodeRef.current(existingOutputFolder.id, {
-      label: 'AI Ready Files',
-      description: 'Generated output from the connected worker.',
+      label: workerMeta.outputFolderLabel,
+      description: workerMeta.outputFolderDescription,
       groupId: worker.groupId ?? null,
       parentNodeId: worker.id,
       contentItems: outputItems,
@@ -2687,14 +2754,50 @@ export function FileCanvasView({
       workerProgress: 100,
       workerInputSignature: inputSignature,
       workerOutputFolderId: existingOutputFolder.id,
+      workerLastError: null,
     });
-  }, [buildWorkerOutputItems, clearWorkerProcessTimer, getGroupBounds, getNodeById, removeWorkerOutputFolder]);
+  }, [clearWorkerProcessTimer, getGroupBounds, getNodeById]);
 
-  const startWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+  const failWorkerProcessing = useCallback((workerId: string, errorMessage: string) => {
+    clearWorkerProcessTimer(workerId);
+    onUpdateNodeRef.current(workerId, {
+      workerStatus: 'error',
+      workerProgress: 0,
+      workerLastError: errorMessage,
+    });
+  }, [clearWorkerProcessTimer]);
+
+  const startWorkerProgressLoop = useCallback((workerId: string) => {
     clearWorkerProcessTimer(workerId);
     onUpdateNodeRef.current(workerId, {
       workerStatus: 'processing',
       workerProgress: 8,
+      workerLastError: null,
+    });
+
+    let progress = 8;
+    const timerId = window.setInterval(() => {
+      progress = Math.min(92, progress + (progress < 56 ? 14 : 6));
+
+      onUpdateNodeRef.current(workerId, {
+        workerStatus: 'processing',
+        workerProgress: progress,
+      });
+    }, 260);
+
+    workerProcessTimersRef.current[workerId] = timerId;
+  }, [clearWorkerProcessTimer]);
+
+  const completeSortWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+    commitWorkerOutput(workerId, inputSignature, buildSortWorkerOutputItems(workerId));
+  }, [buildSortWorkerOutputItems, commitWorkerOutput]);
+
+  const startSortWorkerProcessing = useCallback((workerId: string, inputSignature: string) => {
+    clearWorkerProcessTimer(workerId);
+    onUpdateNodeRef.current(workerId, {
+      workerStatus: 'processing',
+      workerProgress: 8,
+      workerLastError: null,
     });
 
     let progress = 8;
@@ -2702,7 +2805,7 @@ export function FileCanvasView({
       progress = Math.min(100, progress + 14);
 
       if (progress >= 100) {
-        completeWorkerProcessing(workerId, inputSignature);
+        completeSortWorkerProcessing(workerId, inputSignature);
         return;
       }
 
@@ -2713,7 +2816,109 @@ export function FileCanvasView({
     }, 220);
 
     workerProcessTimersRef.current[workerId] = timerId;
-  }, [clearWorkerProcessTimer, completeWorkerProcessing]);
+  }, [clearWorkerProcessTimer, completeSortWorkerProcessing]);
+
+  const runAiWorker = useCallback(async (workerId: string) => {
+    const worker = getNodeById(workerId);
+
+    if (!worker || worker.kind !== 'worker') {
+      return;
+    }
+
+    const inputSignature = buildWorkerInputSignature(workerId);
+    const sourceFiles = collectWorkerSourceFiles(workerId);
+
+    if (sourceFiles.length === 0) {
+      failWorkerProcessing(workerId, 'Connect at least one file or folder before running the worker.');
+      return;
+    }
+
+    if (!sourceFiles.some((item) => (item.textContent ?? '').trim().length > 0)) {
+      failWorkerProcessing(workerId, 'No previewable text was found in the connected inputs.');
+      return;
+    }
+
+    startWorkerProgressLoop(workerId);
+
+    try {
+      const response = await fetch('/api/worker/run', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          mode: resolveWorkerMode(worker.workerMode),
+          workerLabel: worker.label,
+          inputs: sourceFiles.map((item) => ({
+            label: item.label,
+            description: item.description ?? '',
+            textContent: item.textContent ?? '',
+            mimeType: item.mimeType ?? null,
+          })),
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+
+      if (!response.ok) {
+        const errorMessage =
+          typeof payload?.error === 'string' && payload.error.trim().length > 0
+            ? payload.error
+            : 'The AI worker request failed.';
+        throw new Error(errorMessage);
+      }
+
+      const outputItems = Array.isArray(payload?.files)
+        ? payload.files.flatMap((file: unknown, index: number) => {
+            if (
+              typeof file !== 'object' ||
+              file === null ||
+              typeof (file as { label?: unknown }).label !== 'string' ||
+              typeof (file as { contentText?: unknown }).contentText !== 'string'
+            ) {
+              return [];
+            }
+
+            const label = (file as { label: string }).label.trim() || `AI Output ${index + 1}`;
+            const contentText = (file as { contentText: string }).contentText.trim();
+
+            if (contentText.length === 0) {
+              return [];
+            }
+
+            const descriptionValue =
+              typeof (file as { description?: unknown }).description === 'string'
+                ? (file as { description: string }).description.trim()
+                : '';
+
+            return [
+              {
+                id: `${workerId}:ai:${index}:${label.toLowerCase().replace(/\s+/g, '-')}`,
+                kind: 'file' as const,
+                label,
+                description: descriptionValue || buildContentSnippet(contentText, 'Generated by the AI worker.'),
+                textContent: contentText,
+                mimeType: 'text/markdown',
+                sizeBytes: contentText.length,
+              },
+            ];
+          })
+        : [];
+
+      commitWorkerOutput(workerId, inputSignature, outputItems);
+    } catch (error) {
+      failWorkerProcessing(
+        workerId,
+        error instanceof Error ? error.message : 'The AI worker request failed.',
+      );
+    }
+  }, [
+    buildWorkerInputSignature,
+    collectWorkerSourceFiles,
+    commitWorkerOutput,
+    failWorkerProcessing,
+    getNodeById,
+    startWorkerProgressLoop,
+  ]);
 
   const getWorkerInputConnectionTarget = useCallback((
     nodeId: string,
@@ -2839,6 +3044,7 @@ export function FileCanvasView({
         return;
       }
 
+      const workerMode = resolveWorkerMode(node.workerMode);
       const inputNodes = getWorkerInputNodes(node.id);
       const inputSignature = buildWorkerInputSignature(node.id);
       const outputFolderExists = node.workerOutputFolderId
@@ -2860,15 +3066,33 @@ export function FileCanvasView({
           node.workerStatus !== 'idle' ||
           (node.workerProgress ?? 0) !== 0 ||
           node.workerOutputFolderId ||
-          node.workerInputSignature
+          node.workerInputSignature ||
+          node.workerLastError
         ) {
           onUpdateNodeRef.current(node.id, {
             workerStatus: 'idle',
             workerProgress: 0,
             workerOutputFolderId: null,
             workerInputSignature: null,
+            workerLastError: null,
           });
         }
+        return;
+      }
+
+      if (workerMode === 'ai-ready') {
+        if (node.workerStatus === 'processing') {
+          return;
+        }
+
+        if (
+          node.workerStatus === 'complete' &&
+          node.workerInputSignature === inputSignature &&
+          outputFolderExists
+        ) {
+          return;
+        }
+
         return;
       }
 
@@ -2884,7 +3108,7 @@ export function FileCanvasView({
         return;
       }
 
-      startWorkerProcessing(node.id, inputSignature);
+      startSortWorkerProcessing(node.id, inputSignature);
     });
   }, [
     buildWorkerInputSignature,
@@ -2893,7 +3117,7 @@ export function FileCanvasView({
     getWorkerInputNodes,
     nodes,
     removeWorkerOutputFolder,
-    startWorkerProcessing,
+    startSortWorkerProcessing,
   ]);
 
   function resolveInsertionPosition(node: Pick<FilePageNode, 'kind' | 'size'>) {
@@ -2946,11 +3170,13 @@ export function FileCanvasView({
     });
   }
 
-  function handleAddWorker() {
+  function handleAddWorker(mode: FilePageWorkerMode) {
+    const workerMeta = getWorkerModeMeta(mode);
+
     addNodeAtContext({
       id: `worker-${Date.now()}`,
-      label: 'AI Worker',
-      description: 'Transforms connected files and folders into AI-ready source packs.',
+      label: workerMeta.defaultNodeLabel,
+      description: workerMeta.defaultNodeDescription,
       kind: 'worker',
       icon: 'target',
       size: {
@@ -2959,12 +3185,21 @@ export function FileCanvasView({
       },
       contentItems: [],
       generatedByWorkerId: null,
-      workerMode: 'ai-ready',
+      workerMode: mode,
       workerStatus: 'idle',
       workerProgress: 0,
       workerOutputFolderId: null,
       workerInputSignature: null,
+      workerLastError: null,
     });
+  }
+
+  function handleAddAiWorker() {
+    handleAddWorker('ai-ready');
+  }
+
+  function handleAddSortWorker() {
+    handleAddWorker('sort-data');
   }
 
   const clearNodeSizePreview = useCallback((nodeId?: string) => {
@@ -3184,9 +3419,10 @@ export function FileCanvasView({
   }, []);
 
   const selectSingleNode = useCallback((nodeId: string) => {
+    onPreviewContentItemChange?.(null);
     onSelectNodesRef.current([nodeId]);
     setDraftSelectedNodeIds([nodeId]);
-  }, []);
+  }, [onPreviewContentItemChange]);
 
   const beginWorkerInputConnection = useCallback((
     event: ReactPointerEvent<HTMLSpanElement>,
@@ -3446,9 +3682,21 @@ export function FileCanvasView({
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
         onResizeHandlePointerDown={node.kind !== 'element' ? beginNodeResize : undefined}
-        onSelectFolderContentNode={(nodeId) => {
-          if (getNodeById(nodeId)) {
-            selectSingleNode(nodeId);
+        onRunWorker={
+          node.kind === 'worker' && getWorkerModeMeta(node.workerMode).requiresManualRun
+            ? (workerNode) => {
+                void runAiWorker(workerNode.id);
+              }
+            : undefined
+        }
+        onSelectFolderContentItem={(item) => {
+          if (getNodeById(item.id)) {
+            selectSingleNode(item.id);
+            return;
+          }
+
+          if (item.kind === 'file') {
+            onPreviewContentItemChange?.(item);
           }
         }}
         onSelect={selectSingleNode}
@@ -3670,9 +3918,13 @@ export function FileCanvasView({
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="ml-2 w-52">
-        <ContextMenuItem onSelect={handleAddWorker}>
+        <ContextMenuItem onSelect={handleAddAiWorker}>
           <BotIcon className="size-4" />
           Add AI worker
+        </ContextMenuItem>
+        <ContextMenuItem onSelect={handleAddSortWorker}>
+          <ArrowUpDownIcon className="size-4" />
+          Add sort worker
         </ContextMenuItem>
         <ContextMenuItem onSelect={handleAddGroup}>
           <ShapesIcon className="size-4" />
