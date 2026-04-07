@@ -2,6 +2,7 @@ import type { WorkspaceFile } from '@/data/sidebarNavigation';
 import type { FilePageNode, FilePageState } from '@/types/filePage';
 import {
   DEFAULT_FILE_PAGE_WORKER_FOCUS,
+  DEFAULT_FILE_PAGE_WORKER_RUN_MODE,
   DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
 } from './filePageWorkers';
 
@@ -92,6 +93,7 @@ function createNode(
     },
     workerMode: kind === 'worker' ? 'ai-ready' : null,
     workerFocus: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_FOCUS : null,
+    workerRunMode: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_RUN_MODE : null,
     workerOutputMode: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE : null,
     workerStatus: kind === 'worker' ? 'idle' : null,
     workerProgress: kind === 'worker' ? 0 : null,

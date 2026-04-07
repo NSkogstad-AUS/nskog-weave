@@ -10,11 +10,14 @@ import {
 } from '@/components/ui/context-menu';
 import {
   DEFAULT_FILE_PAGE_WORKER_FOCUS,
+  DEFAULT_FILE_PAGE_WORKER_RUN_MODE,
   DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
+  getWorkerClientTimeoutMs,
   getWorkerModeMeta,
   getWorkerOutputItemLabel,
   resolveWorkerMode,
   resolveWorkerOutputMode,
+  resolveWorkerRunMode,
 } from '@/lib/filePageWorkers';
 import { buildContentSnippet } from '@/lib/workspaceFiles';
 import { cn } from '@/lib/utils';
@@ -55,6 +58,7 @@ import type {
   FilePageWorkerFocus,
   FilePageWorkerMode,
   FilePageWorkerOutputMode,
+  FilePageWorkerRunMode,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -75,6 +79,8 @@ interface FileCanvasViewProps {
   resolveCanvasFileItem?: (node: FilePageNode) => FilePageContentItem | null;
   resolveCanvasFolderSourceFiles?: (node: FilePageNode) => FilePageContentItem[];
   onPreviewContentItemChange?: (item: FilePageContentItem | null) => void;
+  onDownloadFileNode?: (node: FilePageNode) => void;
+  onRequestDownloadFolderNode?: (node: FilePageNode) => void;
 }
 
 type DragState = {
@@ -291,8 +297,11 @@ function getConnectorPath(
   return `M ${start.x} ${start.y} C ${start.x} ${start.y + controlOffset * direction}, ${end.x} ${end.y - controlOffset * direction}, ${end.x} ${end.y}`;
 }
 
-const AI_WORKER_REQUEST_TIMEOUT_MS = 45_000;
 const COLLATED_WORKER_SOURCE_ITEM_ID = '__collated__';
+
+function formatTimeoutLabel(milliseconds: number) {
+  return `${Math.max(1, Math.round(milliseconds / 1000))}s`;
+}
 
 export function FileCanvasView({
   nodes,
@@ -311,6 +320,8 @@ export function FileCanvasView({
   resolveCanvasFileItem,
   resolveCanvasFolderSourceFiles,
   onPreviewContentItemChange,
+  onDownloadFileNode,
+  onRequestDownloadFolderNode,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const releaseTimerRef = useRef<number | null>(null);
@@ -2653,6 +2664,7 @@ export function FileCanvasView({
     JSON.stringify({
       workerMode: resolveWorkerMode(worker.workerMode),
       workerFocus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerRunMode: worker.workerRunMode ?? DEFAULT_FILE_PAGE_WORKER_RUN_MODE,
       workerOutputMode: worker.workerOutputMode ?? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
       workerLabel: worker.label,
       sourceItemId: item.id,
@@ -2698,6 +2710,7 @@ export function FileCanvasView({
     return JSON.stringify({
       workerMode,
       workerFocus: worker?.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerRunMode: worker?.workerRunMode ?? DEFAULT_FILE_PAGE_WORKER_RUN_MODE,
       workerOutputMode: worker?.workerOutputMode ?? DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
       workerLabel: worker?.label ?? '',
       inputs: inputs
@@ -2950,7 +2963,10 @@ export function FileCanvasView({
       return;
     }
 
+    const workerRunMode = resolveWorkerRunMode(worker.workerRunMode);
     const workerOutputMode = resolveWorkerOutputMode(worker.workerOutputMode);
+    const clientTimeoutMs = getWorkerClientTimeoutMs(workerRunMode);
+    const clientTimeoutLabel = formatTimeoutLabel(clientTimeoutMs);
     const inputSignature = buildWorkerInputSignature(workerId);
     const sourceFiles = collectWorkerSourceFiles(workerId);
     const existingOutputFolder = getExistingWorkerOutputFolder(worker);
@@ -2997,7 +3013,7 @@ export function FileCanvasView({
       workerRequestTimeoutsRef.current[workerId] = window.setTimeout(() => {
         didTimeout = true;
         controller.abort();
-      }, AI_WORKER_REQUEST_TIMEOUT_MS);
+      }, clientTimeoutMs);
 
       try {
         const response = await fetch('/api/worker/run', {
@@ -3009,6 +3025,7 @@ export function FileCanvasView({
           body: JSON.stringify({
             mode: resolveWorkerMode(worker.workerMode),
             focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+            runMode: workerRunMode,
             outputMode: workerOutputMode,
             workerLabel: worker.label,
             inputs: processableSourceFiles.map((item) => ({
@@ -3085,7 +3102,7 @@ export function FileCanvasView({
         failWorkerProcessing(
           workerId,
           didTimeout
-            ? 'AI worker timed out. Try fewer or smaller files.'
+            ? `AI worker timed out locally after ${clientTimeoutLabel}. Try Fast mode, fewer files, or a smaller source.`
             : error instanceof Error
               ? error.message
               : 'The AI worker request failed.',
@@ -3169,7 +3186,7 @@ export function FileCanvasView({
     workerRequestTimeoutsRef.current[workerId] = window.setTimeout(() => {
       didTimeout = true;
       controller.abort();
-    }, AI_WORKER_REQUEST_TIMEOUT_MS);
+    }, clientTimeoutMs);
 
     try {
       const response = await fetch('/api/worker/run', {
@@ -3181,6 +3198,7 @@ export function FileCanvasView({
         body: JSON.stringify({
           mode: resolveWorkerMode(worker.workerMode),
           focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+          runMode: workerRunMode,
           outputMode: workerOutputMode,
           workerLabel: worker.label,
           inputs: processablePendingSourceFiles.map((item) => ({
@@ -3294,7 +3312,7 @@ export function FileCanvasView({
       failWorkerProcessing(
         workerId,
         didTimeout
-          ? 'AI worker timed out. Try fewer or smaller files.'
+          ? `AI worker timed out locally after ${clientTimeoutLabel}. Try Fast mode, fewer files, or a smaller source.`
           : error instanceof Error
             ? error.message
             : 'The AI worker request failed.',
@@ -3605,6 +3623,7 @@ export function FileCanvasView({
       generatedByWorkerId: null,
       workerMode: mode,
       workerFocus: DEFAULT_FILE_PAGE_WORKER_FOCUS,
+      workerRunMode: DEFAULT_FILE_PAGE_WORKER_RUN_MODE,
       workerOutputMode: DEFAULT_FILE_PAGE_WORKER_OUTPUT_MODE,
       workerStatus: 'idle',
       workerProgress: 0,
@@ -4118,12 +4137,33 @@ export function FileCanvasView({
         onContextMenu={openNodeContextMenu}
         onContextMenuOpenChange={setNodeContextMenuOpen}
         onDelete={deleteCanvasNode}
+        onDownload={
+          node.kind === 'file'
+            ? onDownloadFileNode
+            : node.kind === 'folder'
+              ? onRequestDownloadFolderNode
+              : undefined
+        }
         onEditingLabelChange={setEditingLabel}
         onChangeWorkerFocus={
           node.kind === 'worker' && node.workerMode === 'ai-ready'
             ? (workerNode, focus) => {
                 onUpdateNodeRef.current(workerNode.id, {
                   workerFocus: focus,
+                  workerOutputFolderId: null,
+                  workerStatus: 'idle',
+                  workerProgress: 0,
+                  workerInputSignature: null,
+                  workerLastError: null,
+                });
+              }
+            : undefined
+        }
+        onChangeWorkerRunMode={
+          node.kind === 'worker' && node.workerMode === 'ai-ready'
+            ? (workerNode, runMode) => {
+                onUpdateNodeRef.current(workerNode.id, {
+                  workerRunMode: runMode,
                   workerOutputFolderId: null,
                   workerStatus: 'idle',
                   workerProgress: 0,

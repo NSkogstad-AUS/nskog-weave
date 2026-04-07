@@ -121,19 +121,19 @@ const WORKER_OUTPUT_MODE_META: Record<FilePageWorkerOutputMode, WorkerOutputMode
 
 const WORKER_RUN_MODE_META: Record<FilePageWorkerRunMode, WorkerRunModeMeta> = {
   fast: {
-    label: 'Fast',
+    label: 'Fast (30s)',
     shortLabel: 'Fast',
     timeoutLabel: '30s',
     clientTimeoutMs: 30_000,
   },
   balanced: {
-    label: 'Balanced',
+    label: 'Balanced (50s)',
     shortLabel: 'Balanced',
     timeoutLabel: '50s',
     clientTimeoutMs: 50_000,
   },
   thorough: {
-    label: 'Thorough',
+    label: 'Thorough (75s)',
     shortLabel: 'Thorough',
     timeoutLabel: '75s',
     clientTimeoutMs: 75_000,

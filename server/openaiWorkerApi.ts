@@ -10,11 +10,13 @@ type WorkerRunInput = {
   mimeType: string | null;
 };
 
+type WorkerRunMode = 'fast' | 'balanced' | 'thorough';
 type WorkerRunOutputMode = 'per-file' | 'collated';
 
 type WorkerRunRequest = {
   mode: string;
   focus: 'general' | 'coding' | 'describing' | 'research';
+  runMode: WorkerRunMode;
   outputMode: WorkerRunOutputMode;
   workerLabel: string;
   inputs: WorkerRunInput[];
@@ -40,13 +42,38 @@ type WorkerProviderConfig =
     };
 
 const MAX_INPUT_FILES = 8;
-const MAX_INPUT_CHARACTERS_PER_FILE = 24_000;
-const PROVIDER_REQUEST_TIMEOUT_MS = 30_000;
-const OPENROUTER_MAX_TOKENS = 1_200;
-const OPENAI_MAX_OUTPUT_TOKENS = 1_200;
 const COLLATED_WORKER_SOURCE_ITEM_ID = '__collated__';
 const OPENROUTER_EMPTY_BODY_RETRY_DELAY_MS = 600;
 const inFlightWorkerRuns = new Map<string, Promise<string>>();
+
+const WORKER_RUN_SETTINGS: Record<
+  WorkerRunMode,
+  {
+    maxInputCharactersPerFile: number;
+    providerTimeoutMs: number;
+    openRouterMaxTokens: number;
+    openAiMaxOutputTokens: number;
+  }
+> = {
+  fast: {
+    maxInputCharactersPerFile: 12_000,
+    providerTimeoutMs: 20_000,
+    openRouterMaxTokens: 700,
+    openAiMaxOutputTokens: 700,
+  },
+  balanced: {
+    maxInputCharactersPerFile: 24_000,
+    providerTimeoutMs: 35_000,
+    openRouterMaxTokens: 1_200,
+    openAiMaxOutputTokens: 1_200,
+  },
+  thorough: {
+    maxInputCharactersPerFile: 36_000,
+    providerTimeoutMs: 55_000,
+    openRouterMaxTokens: 1_800,
+    openAiMaxOutputTokens: 1_800,
+  },
+};
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
@@ -58,6 +85,10 @@ function delay(milliseconds: number) {
   return new Promise((resolve) => {
     setTimeout(resolve, milliseconds);
   });
+}
+
+function formatTimeoutLabel(milliseconds: number) {
+  return `${Math.max(1, Math.round(milliseconds / 1000))}s`;
 }
 
 function readRequestBody(request: IncomingMessage) {
@@ -73,11 +104,11 @@ function readRequestBody(request: IncomingMessage) {
   });
 }
 
-async function fetchJsonWithTimeout(input: string, init: RequestInit) {
+async function fetchJsonWithTimeout(input: string, init: RequestInit, timeoutMs: number) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => {
     controller.abort();
-  }, PROVIDER_REQUEST_TIMEOUT_MS);
+  }, timeoutMs);
 
   try {
     const response = await fetch(input, {
@@ -112,7 +143,9 @@ async function fetchJsonWithTimeout(input: string, init: RequestInit) {
     };
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
-      throw new Error('The model provider timed out. Try fewer or smaller files, or a faster model.');
+      throw new Error(
+        `The model provider timed out after ${formatTimeoutLabel(timeoutMs)}. Try Fast mode, fewer files, or a faster model.`,
+      );
     }
 
     throw error;
@@ -362,6 +395,12 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
     return null;
   }
 
+  const runMode =
+    (payload as { runMode?: unknown }).runMode === 'fast' ||
+    (payload as { runMode?: unknown }).runMode === 'thorough'
+      ? (payload as { runMode: 'fast' | 'thorough' }).runMode
+      : 'balanced';
+  const runSettings = WORKER_RUN_SETTINGS[runMode];
   const inputs = (payload as { inputs: unknown[] }).inputs.flatMap((input) => {
     if (
       typeof input !== 'object' ||
@@ -389,7 +428,7 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
           typeof (input as { description?: unknown }).description === 'string'
             ? (input as { description: string }).description.trim()
             : '',
-        textContent: textContent.slice(0, MAX_INPUT_CHARACTERS_PER_FILE),
+        textContent: textContent.slice(0, runSettings.maxInputCharactersPerFile),
         mimeType:
           typeof (input as { mimeType?: unknown }).mimeType === 'string' &&
           (input as { mimeType: string }).mimeType.trim().length > 0
@@ -407,6 +446,7 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
       (payload as { focus?: unknown }).focus === 'research'
         ? (payload as { focus: 'coding' | 'describing' | 'research' }).focus
         : 'general',
+    runMode,
     outputMode:
       (payload as { outputMode?: unknown }).outputMode === 'collated'
         ? 'collated'
@@ -517,6 +557,25 @@ function getWorkerFocusInstructions(focus: WorkerRunRequest['focus']) {
   }
 }
 
+function getWorkerRunModeInstructions(runMode: WorkerRunRequest['runMode']) {
+  switch (runMode) {
+    case 'fast':
+      return [
+        'Optimize for speed. Keep the output compact and skip lower-value detail.',
+        'Prefer shorter sections and tighter summaries.',
+      ];
+    case 'thorough':
+      return [
+        'Be more comprehensive when the input supports it. Keep the result structured, but include more useful detail.',
+        'Preserve important nuance that may matter to downstream reasoning.',
+      ];
+    default:
+      return [
+        'Balance speed and completeness.',
+      ];
+  }
+}
+
 function buildWorkerMessages(requestBody: WorkerRunRequest) {
   const collatedMode = requestBody.outputMode === 'collated';
 
@@ -533,6 +592,7 @@ function buildWorkerMessages(requestBody: WorkerRunRequest) {
       content: JSON.stringify({
         workerLabel: requestBody.workerLabel || 'AI Worker',
         focus: requestBody.focus,
+        runMode: requestBody.runMode,
         outputMode: requestBody.outputMode,
         instructions: [
           'Return JSON only.',
@@ -550,6 +610,7 @@ function buildWorkerMessages(requestBody: WorkerRunRequest) {
           'Always return an object with a top-level "files" array.',
           'Each file must include: "sourceItemId", "label", "description", and "contentText".',
           `Example shape: ${JSON.stringify(getWorkerOutputJsonExample(requestBody.outputMode))}`,
+          ...getWorkerRunModeInstructions(requestBody.runMode),
           ...getWorkerFocusInstructions(requestBody.focus),
         ],
         inputs: requestBody.inputs,
@@ -652,6 +713,7 @@ function createWorkerRunCacheKey(
 
 async function sendOpenRouterRequest(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
+  runSettings: (typeof WORKER_RUN_SETTINGS)[WorkerRunMode],
   body: Record<string, unknown>,
 ) {
   const {
@@ -673,6 +735,7 @@ async function sendOpenRouterRequest(
       },
       body: JSON.stringify(body),
     },
+    runSettings.providerTimeoutMs,
   );
 
   return {
@@ -689,10 +752,11 @@ async function runOpenRouterWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
   requestBody: WorkerRunRequest,
 ) {
+  const runSettings = WORKER_RUN_SETTINGS[requestBody.runMode];
   const requestBodyPayload = {
     model: providerConfig.model,
     messages: buildWorkerMessages(requestBody),
-    max_tokens: OPENROUTER_MAX_TOKENS,
+    max_tokens: runSettings.openRouterMaxTokens,
     temperature: 0.2,
     stream: false,
   } satisfies Record<string, unknown>;
@@ -702,7 +766,7 @@ async function runOpenRouterWorker(
     | null = null;
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
-    lastResponse = await sendOpenRouterRequest(providerConfig, requestBodyPayload);
+    lastResponse = await sendOpenRouterRequest(providerConfig, runSettings, requestBodyPayload);
 
     if (
       lastResponse.upstreamResponse.ok &&
@@ -804,6 +868,7 @@ async function runOpenAiWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openai' }>,
   requestBody: WorkerRunRequest,
 ) {
+  const runSettings = WORKER_RUN_SETTINGS[requestBody.runMode];
   const { response: upstreamResponse, payload: upstreamPayload } = await fetchJsonWithTimeout(
     'https://api.openai.com/v1/responses',
     {
@@ -823,7 +888,7 @@ async function runOpenAiWorker(
             },
           ],
         })),
-        max_output_tokens: OPENAI_MAX_OUTPUT_TOKENS,
+        max_output_tokens: runSettings.openAiMaxOutputTokens,
         text: {
           format: {
             type: 'json_schema',
@@ -834,6 +899,7 @@ async function runOpenAiWorker(
         },
       }),
     },
+    runSettings.providerTimeoutMs,
   );
 
   if (!upstreamResponse.ok) {

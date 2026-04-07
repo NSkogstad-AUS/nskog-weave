@@ -1,5 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { UploadIcon } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogPopup,
+  AlertDialogTitle,
+} from '@/components/animate-ui/components/base/alert-dialog';
 
 import {
   SidebarInset,
@@ -7,6 +17,7 @@ import {
 } from '@/components/animate-ui/components/radix/sidebar';
 import {
   addFileToFolderById,
+  collectFilesInFolder,
   createWorkspaceFolders,
   findFileById,
   findFilePathById,
@@ -24,6 +35,7 @@ import {
   updateStoredFolderCanvasNodes,
   type FolderCanvasStore,
 } from '@/features/file-page/useFolderCanvasState';
+import { downloadFile, downloadFiles, type DownloadableFile } from '@/lib/fileDownloads';
 import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import { useFilePages } from './hooks/useFilePages';
@@ -35,6 +47,12 @@ const GENERATED_WORKSPACE_FILE_PREFIX = 'worker-output-file:';
 const ROOT_WORKSPACE_FOLDER_ID = 'workspace-root';
 
 type GeneratedWorkspaceOwnerType = 'file' | 'folder';
+type PendingFolderDownload =
+  | {
+      label: string;
+      files: DownloadableFile[];
+    }
+  | null;
 
 function createEmptyWorkspaceRootFolder(): WorkspaceFolder {
   return {
@@ -413,6 +431,15 @@ function normalizeWorkspaceFolder(value: unknown): WorkspaceFolder | null {
   };
 }
 
+function workspaceFileToDownloadableFile(file: WorkspaceFile): DownloadableFile {
+  return {
+    label: file.label,
+    description: file.description,
+    contentText: file.contentText ?? null,
+    mimeType: file.mimeType ?? null,
+  };
+}
+
 function hydrateWorkspaceFolders() {
   if (typeof window === 'undefined') {
     return createWorkspaceFolders();
@@ -464,6 +491,7 @@ function App() {
       }
     | null
   >(null);
+  const [pendingFolderDownload, setPendingFolderDownload] = useState<PendingFolderDownload>(null);
   const fileDragDepthRef = useRef(0);
   const activeFileSeedMatch = useMemo(
     () => (openFileId ? findFilePathById(folders, openFileId) : null),
@@ -599,6 +627,57 @@ function App() {
     setOpenFolderId((current) => (current === folderId ? null : current));
   }, [updatePageByFileId]);
 
+  const handleDownloadFile = useCallback((fileId: string) => {
+    const fileMatch = findFileById(displayFolders, fileId);
+
+    if (!fileMatch) {
+      return;
+    }
+
+    downloadFile(workspaceFileToDownloadableFile(fileMatch.file));
+  }, [displayFolders]);
+
+  const handleRequestDownloadFolder = useCallback((folderId: string) => {
+    const folder = findFolderById(displayFolders, folderId);
+
+    if (!folder) {
+      return;
+    }
+
+    const files = collectFilesInFolder(folder).map(workspaceFileToDownloadableFile);
+
+    if (files.length === 0) {
+      return;
+    }
+
+    setPendingFolderDownload({
+      label: folder.label,
+      files,
+    });
+  }, [displayFolders]);
+
+  const handleDownloadCanvasFiles = useCallback((files: DownloadableFile[]) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    downloadFiles(files);
+  }, []);
+
+  const handleRequestDownloadCanvasFolder = useCallback((
+    label: string,
+    files: DownloadableFile[],
+  ) => {
+    if (files.length === 0) {
+      return;
+    }
+
+    setPendingFolderDownload({
+      label,
+      files,
+    });
+  }, []);
+
   const handleUploadFiles = useCallback(async (files: File[]) => {
     if (files.length === 0) {
       return;
@@ -733,6 +812,8 @@ function App() {
             setOpenFolderId(folderId);
             setOpenFileId(null);
           }}
+          onDownloadFile={handleDownloadFile}
+          onRequestDownloadFolder={handleRequestDownloadFolder}
           onFileDelete={handleFileDelete}
           onFolderDelete={handleFolderDelete}
         />
@@ -751,6 +832,8 @@ function App() {
               onUpdateNode={updateNode}
               onDeleteNode={deleteNode}
               onSelectNodes={setSelectedNodeIds}
+              onDownloadFiles={handleDownloadCanvasFiles}
+              onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
               onHoveredSidebarItemChange={setHoveredSidebarItem}
               onViewChange={(view) => {
                 if (activeFile) {
@@ -784,6 +867,41 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <AlertDialog
+        open={pendingFolderDownload !== null}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingFolderDownload(null);
+          }
+        }}
+      >
+        <AlertDialogPopup from="top">
+          <AlertDialogHeader className="space-y-2">
+            <AlertDialogTitle>Download folder</AlertDialogTitle>
+            <AlertDialogDescription>
+              {pendingFolderDownload
+                ? `You'll download ${pendingFolderDownload.files.length} file${pendingFolderDownload.files.length === 1 ? '' : 's'} from "${pendingFolderDownload.label}". Are you sure?`
+                : ''}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={() => {
+                if (!pendingFolderDownload) {
+                  return;
+                }
+
+                downloadFiles(pendingFolderDownload.files);
+                setPendingFolderDownload(null);
+              }}
+            >
+              Download
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogPopup>
+      </AlertDialog>
     </div>
   );
 }

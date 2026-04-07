@@ -2,6 +2,7 @@ import { memo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlertTriangleIcon,
+  DownloadIcon,
   ExpandIcon,
   LoaderCircleIcon,
   PencilLineIcon,
@@ -32,14 +33,16 @@ import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
 import {
-  getWorkerFocusMeta,
   getWorkerFocusOptions,
   getWorkerModeMeta,
   getWorkerOutputModeMeta,
   getWorkerOutputModeOptions,
+  getWorkerRunModeMeta,
+  getWorkerRunModeOptions,
   getWorkerStatusMessage,
   resolveWorkerFocus,
   resolveWorkerOutputMode,
+  resolveWorkerRunMode,
 } from '@/lib/filePageWorkers';
 import { cn } from '@/lib/utils';
 import type {
@@ -48,6 +51,7 @@ import type {
   FilePageNode,
   FilePageWorkerFocus,
   FilePageWorkerOutputMode,
+  FilePageWorkerRunMode,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -75,8 +79,10 @@ interface FileCanvasNodeProps {
   onContextMenu: (node: FilePageNode) => void;
   onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
   onDelete: (node: FilePageNode) => void;
+  onDownload?: (node: FilePageNode) => void;
   onEditingLabelChange: (value: string) => void;
   onChangeWorkerFocus?: (node: FilePageNode, focus: FilePageWorkerFocus) => void;
+  onChangeWorkerRunMode?: (node: FilePageNode, runMode: FilePageWorkerRunMode) => void;
   onChangeWorkerOutputMode?: (node: FilePageNode, outputMode: FilePageWorkerOutputMode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
   onExpandFolder?: (node: FilePageNode) => void;
@@ -125,8 +131,10 @@ function FileCanvasNodeComponent({
   onContextMenu,
   onContextMenuOpenChange,
   onDelete,
+  onDownload,
   onEditingLabelChange,
   onChangeWorkerFocus,
+  onChangeWorkerRunMode,
   onChangeWorkerOutputMode,
   onCollapseFolder,
   onExpandFolder,
@@ -192,8 +200,10 @@ function FileCanvasNodeComponent({
   const workerInputCount = folderContents.length;
   const workerModeMeta = getWorkerModeMeta(node.workerMode);
   const workerFocus = resolveWorkerFocus(node.workerFocus);
-  const workerFocusMeta = getWorkerFocusMeta(workerFocus);
   const workerFocusOptions = getWorkerFocusOptions();
+  const workerRunMode = resolveWorkerRunMode(node.workerRunMode);
+  const workerRunModeMeta = getWorkerRunModeMeta(workerRunMode);
+  const workerRunModeOptions = getWorkerRunModeOptions();
   const workerOutputMode = resolveWorkerOutputMode(node.workerOutputMode);
   const workerOutputModeMeta = getWorkerOutputModeMeta(workerOutputMode);
   const workerOutputModeOptions = getWorkerOutputModeOptions();
@@ -431,6 +441,30 @@ function FileCanvasNodeComponent({
                           ))}
                         </select>
                       </label>
+                      {onChangeWorkerRunMode ? (
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                          <span className="shrink-0">Mode</span>
+                          <select
+                            value={workerRunMode}
+                            onPointerDown={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onClick={(event) => {
+                              event.stopPropagation();
+                            }}
+                            onChange={(event) =>
+                              onChangeWorkerRunMode(node, event.target.value as FilePageWorkerRunMode)
+                            }
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                          >
+                            {workerRunModeOptions.map((option) => (
+                              <option key={option.value} value={option.value}>
+                                {option.label}
+                              </option>
+                            ))}
+                          </select>
+                        </label>
+                      ) : null}
                       {onChangeWorkerOutputMode ? (
                         <label className="flex items-center gap-2 text-[11px] text-slate-500">
                           <span className="shrink-0">Output</span>
@@ -506,7 +540,7 @@ function FileCanvasNodeComponent({
                     <span>{workerInputCount} input{workerInputCount === 1 ? '' : 's'}</span>
                     <span>
                       {node.workerMode === 'ai-ready'
-                        ? `${workerFocusMeta.label} · ${workerOutputModeMeta.shortLabel}`
+                        ? `${workerRunModeMeta.shortLabel} · ${workerRunModeMeta.timeoutLabel} · ${workerOutputModeMeta.shortLabel}`
                         : workerModeMeta.outputPlacementMessage}
                     </span>
                   </div>
@@ -601,6 +635,12 @@ function FileCanvasNodeComponent({
           <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
         )}
         <ContextMenuContent side="right" className="ml-2 w-52">
+          {(node.kind === 'file' || node.kind === 'folder') && onDownload ? (
+            <ContextMenuItem onSelect={() => onDownload(node)}>
+              <DownloadIcon className="size-4" />
+              Download
+            </ContextMenuItem>
+          ) : null}
           <ContextMenuItem onSelect={() => onStartRename(node)}>
             <PencilLineIcon className="size-4" />
             Rename
@@ -630,6 +670,22 @@ function FileCanvasNodeComponent({
                   ))}
                 </ContextMenuSubContent>
               </ContextMenuSub>
+              {onChangeWorkerRunMode ? (
+                <ContextMenuSub>
+                  <ContextMenuSubTrigger>Mode</ContextMenuSubTrigger>
+                  <ContextMenuSubContent className="w-44">
+                    {workerRunModeOptions.map((option) => (
+                      <ContextMenuItem
+                        key={option.value}
+                        onSelect={() => onChangeWorkerRunMode(node, option.value)}
+                        className={cn(option.value === workerRunMode && 'bg-sidebar-accent/55')}
+                      >
+                        {option.label}
+                      </ContextMenuItem>
+                    ))}
+                  </ContextMenuSubContent>
+                </ContextMenuSub>
+              ) : null}
               {onChangeWorkerOutputMode ? (
                 <ContextMenuSub>
                   <ContextMenuSubTrigger>Output</ContextMenuSubTrigger>

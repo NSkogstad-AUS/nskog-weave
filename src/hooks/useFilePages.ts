@@ -11,6 +11,7 @@ import {
   FILE_PAGE_WORKER_FOCUSES,
   FILE_PAGE_WORKER_MODES,
   FILE_PAGE_WORKER_OUTPUT_MODES,
+  FILE_PAGE_WORKER_RUN_MODES,
   FILE_PAGE_WORKER_STATUSES,
   type FilePageElementIcon,
   type FilePageContentItem,
@@ -65,6 +66,12 @@ function normalizeWorkerFocus(value: unknown): FilePageNode['workerFocus'] {
 function normalizeWorkerOutputMode(value: unknown): FilePageNode['workerOutputMode'] {
   return FILE_PAGE_WORKER_OUTPUT_MODES.includes(value as NonNullable<FilePageNode['workerOutputMode']>)
     ? (value as NonNullable<FilePageNode['workerOutputMode']>)
+    : null;
+}
+
+function normalizeWorkerRunMode(value: unknown): FilePageNode['workerRunMode'] {
+  return FILE_PAGE_WORKER_RUN_MODES.includes(value as NonNullable<FilePageNode['workerRunMode']>)
+    ? (value as NonNullable<FilePageNode['workerRunMode']>)
     : null;
 }
 
@@ -194,6 +201,7 @@ function hydrateFilePages(): FilePagesStore {
               },
               workerMode: normalizeWorkerMode(node?.workerMode),
               workerFocus: normalizeWorkerFocus(node?.workerFocus),
+              workerRunMode: normalizeWorkerRunMode(node?.workerRunMode),
               workerOutputMode: normalizeWorkerOutputMode(node?.workerOutputMode),
               workerStatus: normalizeWorkerStatus(node?.workerStatus),
               workerProgress: Number.isFinite(node?.workerProgress)

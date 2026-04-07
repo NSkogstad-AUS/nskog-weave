@@ -51,6 +51,8 @@ function queueAfterMenuClose(callback: () => void) {
 
 interface WorkspaceSidebarProps {
   folders?: WorkspaceFolder[];
+  onDownloadFile?: (fileId: string) => void;
+  onRequestDownloadFolder?: (folderId: string) => void;
   highlightedItem?: ActiveItem;
   onFileDelete?: (fileId: string) => void;
   onFolderDelete?: (folderId: string) => void;
@@ -62,6 +64,8 @@ interface WorkspaceSidebarProps {
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   folders: controlledFolders,
+  onDownloadFile,
+  onRequestDownloadFolder,
   highlightedItem = null,
   onFileDelete,
   onFolderDelete,
@@ -226,6 +230,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     onCommitRename={commitRename}
                     onCreateFile={createFileInFolder}
                     onCreateSeparator={createSeparatorInFolder}
+                    onDownloadFile={onDownloadFile}
+                    onRequestDownloadFolder={onRequestDownloadFolder}
                     onDeleteFile={deleteFile}
                     onDeleteFolder={deleteFolder}
                     onDeleteSeparator={deleteSeparator}

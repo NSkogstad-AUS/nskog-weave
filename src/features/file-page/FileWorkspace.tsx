@@ -13,6 +13,7 @@ import {
   workspaceFileToContentItem,
   workspaceFileToPreviewDocument,
 } from '@/lib/workspaceFiles';
+import type { DownloadableFile } from '@/lib/fileDownloads';
 import type {
   FilePageContentItem,
   FilePageNode,
@@ -40,6 +41,8 @@ interface FileWorkspaceProps {
   onUpdateNode: (nodeId: string, updates: FilePageNodeUpdates) => void;
   onDeleteNode: (nodeId: string) => void;
   onSelectNodes: (nodeIds: string[]) => void;
+  onDownloadFiles: (files: DownloadableFile[]) => void;
+  onRequestDownloadFolder: (label: string, files: DownloadableFile[]) => void;
   onHoveredSidebarItemChange: (
     item:
       | {
@@ -64,6 +67,8 @@ export function FileWorkspace({
   onUpdateNode,
   onDeleteNode,
   onSelectNodes,
+  onDownloadFiles,
+  onRequestDownloadFolder,
   onHoveredSidebarItemChange,
   onViewChange,
 }: FileWorkspaceProps) {
@@ -156,6 +161,57 @@ export function FileWorkspace({
     return activeFile ? workspaceFileToPreviewDocument(activeFile) : null;
   }, [activeFile, previewedContentItem, selectedNodePreview]);
 
+  const buildDownloadableFile = useCallback((file: {
+    label: string;
+    description?: string | null;
+    contentText?: string | null;
+    mimeType?: string | null;
+  }): DownloadableFile => ({
+    label: file.label,
+    description: file.description ?? '',
+    contentText: file.contentText ?? null,
+    mimeType: file.mimeType ?? null,
+  }), []);
+
+  const resolveCanvasDownloadFiles = useCallback((node: FilePageNode): DownloadableFile[] => {
+    if (node.kind === 'file') {
+      if (activeFile && node.id === `${activeFile.id}-file-primary`) {
+        return [buildDownloadableFile(activeFile)];
+      }
+
+      if (activeFolder && node.id.startsWith('file:')) {
+        const fileMatch = findFileById([activeFolder], node.id.slice('file:'.length));
+        return fileMatch ? [buildDownloadableFile(fileMatch.file)] : [];
+      }
+
+      const sourceItem = resolveCanvasFileItem(node);
+      return sourceItem
+        ? [buildDownloadableFile(sourceItem)]
+        : [buildDownloadableFile(node)];
+    }
+
+    if (node.kind !== 'folder') {
+      return [];
+    }
+
+    const generatedFiles = (node.contentItems ?? [])
+      .filter((item) => item.kind === 'file')
+      .map((item) => buildDownloadableFile(item));
+
+    if (generatedFiles.length > 0) {
+      return generatedFiles;
+    }
+
+    if (activeFolder && node.id.startsWith('folder:')) {
+      const sourceFolder = findFolderById([activeFolder], node.id.slice('folder:'.length));
+      return sourceFolder
+        ? collectFilesInFolder(sourceFolder).map((file) => buildDownloadableFile(file))
+        : [];
+    }
+
+    return [];
+  }, [activeFile, activeFolder, buildDownloadableFile, resolveCanvasFileItem]);
+
   useEffect(() => {
     setPreviewedContentItem(null);
   }, [activeFile?.id, activeFolder?.id, displaySelectedNodeIds.join('|')]);
@@ -201,6 +257,20 @@ export function FileWorkspace({
               onDeleteNode={activeFile ? onDeleteNode : folderCanvasState.deleteNode}
               onHoverNodeChange={handleHoverNodeChange}
               onSelectNodes={activeFile ? onSelectNodes : folderCanvasState.selectNodes}
+              onDownloadFileNode={(node) => {
+                const files = resolveCanvasDownloadFiles(node);
+
+                if (files.length > 0) {
+                  onDownloadFiles(files.slice(0, 1));
+                }
+              }}
+              onRequestDownloadFolderNode={(node) => {
+                const files = resolveCanvasDownloadFiles(node);
+
+                if (files.length > 0) {
+                  onRequestDownloadFolder(node.label, files);
+                }
+              }}
               getFolderExpandState={
                 activeFile ? undefined : folderCanvasState.getFolderExpandState
               }

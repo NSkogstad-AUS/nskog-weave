@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   ChevronDownIcon,
+  DownloadIcon,
   FilePlus2Icon,
   FileTextIcon,
   FolderIcon,
@@ -188,6 +189,7 @@ function FileRow({
   onCancelRename,
   onChangeRename,
   onCommitRename,
+  onDownload,
   onDelete,
   onSelect,
 }: {
@@ -201,6 +203,7 @@ function FileRow({
   onCancelRename: () => void;
   onChangeRename: (value: string) => void;
   onCommitRename: () => void;
+  onDownload?: () => void;
   onDelete: () => void;
   onSelect: () => void;
 }) {
@@ -251,6 +254,17 @@ function FileRow({
               <PencilIcon />
               Rename
             </ContextMenuItem>
+            {onDownload ? (
+              <ContextMenuItem
+                onSelect={() => {
+                  onSelect();
+                  onDownload();
+                }}
+              >
+                <DownloadIcon />
+                Download
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <Trash2Icon className="size-4 shrink-0" />
@@ -351,6 +365,7 @@ function FolderRow({
   onCommitRename,
   onCreateFile,
   onCreateSeparator,
+  onDownloadFile,
   onDeleteFile,
   onDeleteFolder,
   onDeleteSeparator,
@@ -359,6 +374,7 @@ function FolderRow({
   onDropSeparator,
   onHoverDropTarget,
   onRequestDeleteFolder,
+  onRequestDownloadFolder,
   onSelectFile,
   onSelectFolder,
   onToggleExpanded,
@@ -380,6 +396,7 @@ function FolderRow({
   onCommitRename: () => void;
   onCreateFile: (folderId: string) => void;
   onCreateSeparator: (folderId: string) => void;
+  onDownloadFile?: (fileId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onDeleteSeparator: (separatorId: string) => void;
@@ -388,6 +405,7 @@ function FolderRow({
   onDropSeparator: (target: SeparatorDropTarget) => void;
   onHoverDropTarget: (target: SeparatorDropTarget) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
+  onRequestDownloadFolder?: (folderId: string) => void;
   onSelectFile: (fileId: string) => void;
   onSelectFolder: (folderId: string) => void;
   onToggleExpanded: (folderId: string) => void;
@@ -545,6 +563,17 @@ function FolderRow({
               <PencilIcon />
               Rename
             </ContextMenuItem>
+            {onRequestDownloadFolder ? (
+              <ContextMenuItem
+                onSelect={() => {
+                  onSelectFolder(folder.id);
+                  onRequestDownloadFolder(folder.id);
+                }}
+              >
+                <DownloadIcon />
+                Download
+              </ContextMenuItem>
+            ) : null}
             {hasChildren ? (
               <ContextMenuItem onSelect={() => onToggleExpanded(folder.id)}>
                 {isExpanded ? <FolderIcon /> : <FolderOpenIcon />}
@@ -612,6 +641,7 @@ function FolderRow({
                       onCommitRename={onCommitRename}
                       onCreateFile={onCreateFile}
                       onCreateSeparator={onCreateSeparator}
+                      onDownloadFile={onDownloadFile}
                       onDeleteFile={onDeleteFile}
                       onDeleteFolder={onDeleteFolder}
                       onDeleteSeparator={onDeleteSeparator}
@@ -620,6 +650,7 @@ function FolderRow({
                       onDropSeparator={onDropSeparator}
                       onHoverDropTarget={onHoverDropTarget}
                       onRequestDeleteFolder={onRequestDeleteFolder}
+                      onRequestDownloadFolder={onRequestDownloadFolder}
                       onSelectFile={onSelectFile}
                       onSelectFolder={onSelectFolder}
                       onToggleExpanded={onToggleExpanded}
@@ -647,6 +678,9 @@ function FolderRow({
                       onCancelRename={onCancelRename}
                       onChangeRename={onChangeRename}
                       onCommitRename={onCommitRename}
+                      onDownload={
+                        onDownloadFile ? () => onDownloadFile(item.file.id) : undefined
+                      }
                       onDelete={() => onDeleteFile(item.file.id)}
                       onSelect={() => onSelectFile(item.file.id)}
                     />
@@ -691,11 +725,13 @@ interface SidebarTreeProps {
   onCommitRename: () => void;
   onCreateFile: (folderId: string) => void;
   onCreateSeparator: (folderId: string) => void;
+  onDownloadFile?: (fileId: string) => void;
   onDeleteFile: (fileId: string) => void;
   onDeleteFolder: (folderId: string) => void;
   onDeleteSeparator: (separatorId: string) => void;
   onMoveSeparator: (separatorId: string, targetFolderId: string, targetIndex: number) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
+  onRequestDownloadFolder?: (folderId: string) => void;
   onSelectFile: (fileId: string) => void;
   onSelectFolder: (folderId: string) => void;
   onToggleExpanded: (folderId: string) => void;
@@ -714,11 +750,13 @@ export function SidebarTree({
   onCommitRename,
   onCreateFile,
   onCreateSeparator,
+  onDownloadFile,
   onDeleteFile,
   onDeleteFolder,
   onDeleteSeparator,
   onMoveSeparator,
   onRequestDeleteFolder,
+  onRequestDownloadFolder,
   onSelectFile,
   onSelectFolder,
   onToggleExpanded,
@@ -748,6 +786,7 @@ export function SidebarTree({
           onCommitRename={onCommitRename}
           onCreateFile={onCreateFile}
           onCreateSeparator={onCreateSeparator}
+          onDownloadFile={onDownloadFile}
           onDeleteFile={onDeleteFile}
           onDeleteFolder={onDeleteFolder}
           onDeleteSeparator={onDeleteSeparator}
@@ -770,6 +809,7 @@ export function SidebarTree({
           }}
           onHoverDropTarget={setActiveDropTarget}
           onRequestDeleteFolder={onRequestDeleteFolder}
+          onRequestDownloadFolder={onRequestDownloadFolder}
           onSelectFile={onSelectFile}
           onSelectFolder={onSelectFolder}
           onToggleExpanded={onToggleExpanded}
