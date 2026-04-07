@@ -50,30 +50,110 @@ const WORKER_RUN_SETTINGS: Record<
   WorkerRunMode,
   {
     maxInputCharactersPerFile: number;
+    maxTotalInputCharacters: number;
+    maxCollatedInputCharacters: number;
     providerTimeoutMs: number;
     openRouterMaxTokens: number;
     openAiMaxOutputTokens: number;
   }
 > = {
   fast: {
-    maxInputCharactersPerFile: 12_000,
+    maxInputCharactersPerFile: 10_000,
+    maxTotalInputCharacters: 12_000,
+    maxCollatedInputCharacters: 9_000,
     providerTimeoutMs: 20_000,
-    openRouterMaxTokens: 700,
-    openAiMaxOutputTokens: 700,
+    openRouterMaxTokens: 900,
+    openAiMaxOutputTokens: 900,
   },
   balanced: {
-    maxInputCharactersPerFile: 24_000,
+    maxInputCharactersPerFile: 18_000,
+    maxTotalInputCharacters: 22_000,
+    maxCollatedInputCharacters: 16_000,
     providerTimeoutMs: 35_000,
-    openRouterMaxTokens: 1_200,
-    openAiMaxOutputTokens: 1_200,
+    openRouterMaxTokens: 1_600,
+    openAiMaxOutputTokens: 1_600,
   },
   thorough: {
-    maxInputCharactersPerFile: 36_000,
+    maxInputCharactersPerFile: 28_000,
+    maxTotalInputCharacters: 34_000,
+    maxCollatedInputCharacters: 24_000,
     providerTimeoutMs: 55_000,
-    openRouterMaxTokens: 1_800,
-    openAiMaxOutputTokens: 1_800,
+    openRouterMaxTokens: 2_400,
+    openAiMaxOutputTokens: 2_400,
   },
 };
+
+function distributeInputCharacterBudget(
+  inputs: WorkerRunInput[],
+  {
+    maxInputCharactersPerFile,
+    maxTotalInputCharacters,
+  }: {
+    maxInputCharactersPerFile: number;
+    maxTotalInputCharacters: number;
+  },
+) {
+  const clampedInputs = inputs.map((input) => ({
+    ...input,
+    textContent: input.textContent.trim().slice(0, maxInputCharactersPerFile),
+  }));
+
+  if (clampedInputs.length === 0) {
+    return clampedInputs;
+  }
+
+  let remainingBudget = Math.max(1, maxTotalInputCharacters);
+  const characterBudgets = new Array(clampedInputs.length).fill(0);
+  let pendingIndexes = clampedInputs
+    .map((input, index) => ({
+      index,
+      maxLength: Math.min(maxInputCharactersPerFile, input.textContent.length),
+    }))
+    .filter((entry) => entry.maxLength > 0);
+
+  while (remainingBudget > 0 && pendingIndexes.length > 0) {
+    const fairShare = Math.max(1, Math.floor(remainingBudget / pendingIndexes.length));
+    const nextPendingIndexes: typeof pendingIndexes = [];
+
+    pendingIndexes.forEach(({ index, maxLength }) => {
+      const remainingLength = maxLength - characterBudgets[index];
+
+      if (remainingLength <= 0 || remainingBudget <= 0) {
+        return;
+      }
+
+      const grantedCharacters = Math.min(remainingLength, fairShare, remainingBudget);
+      characterBudgets[index] += grantedCharacters;
+      remainingBudget -= grantedCharacters;
+
+      if (characterBudgets[index] < maxLength) {
+        nextPendingIndexes.push({ index, maxLength });
+      }
+    });
+
+    if (nextPendingIndexes.length === pendingIndexes.length) {
+      break;
+    }
+
+    pendingIndexes = nextPendingIndexes;
+  }
+
+  return clampedInputs.flatMap((input, index) => {
+    const allocatedCharacters = Math.max(0, characterBudgets[index] ?? 0);
+    const nextTextContent = input.textContent.slice(0, allocatedCharacters).trim();
+
+    if (!nextTextContent) {
+      return [];
+    }
+
+    return [
+      {
+        ...input,
+        textContent: nextTextContent,
+      },
+    ];
+  });
+}
 
 function sendJson(response: ServerResponse, statusCode: number, payload: unknown) {
   response.statusCode = statusCode;
@@ -260,6 +340,27 @@ function readOpenRouterNoContentReason(payload: unknown) {
   return detailParts.length > 0 ? ` (${detailParts.join('; ')})` : '';
 }
 
+function isOpenRouterLengthTruncated(payload: unknown) {
+  const firstChoice = (payload as {
+    choices?: Array<{
+      finish_reason?: unknown;
+      native_finish_reason?: unknown;
+    }>;
+  })?.choices?.[0];
+  const finishReason =
+    typeof firstChoice?.finish_reason === 'string'
+      ? firstChoice.finish_reason.trim().toLowerCase()
+      : '';
+  const nativeFinishReason =
+    typeof firstChoice?.native_finish_reason === 'string'
+      ? firstChoice.native_finish_reason.trim().toLowerCase()
+      : '';
+
+  return [finishReason, nativeFinishReason].some((value) =>
+    ['length', 'max_tokens', 'max_output_tokens'].includes(value),
+  );
+}
+
 function buildOpenRouterFallbackResponseText(
   payload: unknown,
   upstreamResponse: Response,
@@ -401,7 +502,11 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
       ? (payload as { runMode: 'fast' | 'thorough' }).runMode
       : 'balanced';
   const runSettings = WORKER_RUN_SETTINGS[runMode];
-  const inputs = (payload as { inputs: unknown[] }).inputs.flatMap((input) => {
+  const outputMode =
+    (payload as { outputMode?: unknown }).outputMode === 'collated'
+      ? 'collated'
+      : 'per-file';
+  const rawInputs = (payload as { inputs: unknown[] }).inputs.flatMap((input) => {
     if (
       typeof input !== 'object' ||
       input === null ||
@@ -428,7 +533,7 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
           typeof (input as { description?: unknown }).description === 'string'
             ? (input as { description: string }).description.trim()
             : '',
-        textContent: textContent.slice(0, runSettings.maxInputCharactersPerFile),
+        textContent,
         mimeType:
           typeof (input as { mimeType?: unknown }).mimeType === 'string' &&
           (input as { mimeType: string }).mimeType.trim().length > 0
@@ -436,6 +541,13 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
             : null,
       },
     ];
+  });
+  const inputs = distributeInputCharacterBudget(rawInputs.slice(0, MAX_INPUT_FILES), {
+    maxInputCharactersPerFile: runSettings.maxInputCharactersPerFile,
+    maxTotalInputCharacters:
+      outputMode === 'collated'
+        ? runSettings.maxCollatedInputCharacters
+        : runSettings.maxTotalInputCharacters,
   });
 
   return {
@@ -447,10 +559,7 @@ function normalizeWorkerRunRequest(payload: unknown): WorkerRunRequest | null {
         ? (payload as { focus: 'coding' | 'describing' | 'research' }).focus
         : 'general',
     runMode,
-    outputMode:
-      (payload as { outputMode?: unknown }).outputMode === 'collated'
-        ? 'collated'
-        : 'per-file',
+    outputMode,
     workerLabel: (payload as { workerLabel: string }).workerLabel.trim(),
     inputs: inputs.slice(0, MAX_INPUT_FILES),
   };
@@ -861,6 +970,20 @@ async function runOpenRouterWorker(
     return fallbackResponseText;
   }
 
+  if (isOpenRouterLengthTruncated(upstreamPayload)) {
+    const truncatedFiles = parseWorkerOutputFiles(responseText);
+
+    if (truncatedFiles.length > 0) {
+      return JSON.stringify(
+        {
+          files: annotateTruncatedWorkerOutputFiles(truncatedFiles),
+        },
+        null,
+        2,
+      );
+    }
+  }
+
   return responseText;
 }
 
@@ -1010,6 +1133,17 @@ function buildFallbackWorkerOutputFiles(
         description: 'Fallback output captured from the raw model response.',
         contentText: trimmedResponseText,
       }));
+}
+
+function annotateTruncatedWorkerOutputFiles(files: WorkerOutputFile[]) {
+  return files.map((file) => ({
+    ...file,
+    description:
+      file.description.trim().length > 0
+        ? `${file.description.trim()} Partial output captured before the model hit its response limit.`
+        : 'Partial output captured before the model hit its response limit.',
+    contentText: `${file.contentText.trim()}\n\n> Note: The model hit its response limit before finishing this output. Try Thorough mode or fewer files if you need a longer result.`,
+  }));
 }
 
 async function handleWorkerRun(request: IncomingMessage, response: ServerResponse) {

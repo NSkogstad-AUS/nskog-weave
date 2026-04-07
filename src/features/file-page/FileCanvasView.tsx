@@ -216,6 +216,10 @@ function buildAiOutputFileLabel(
   return `${workerSegment}_${sourceSegment}_v${version}_${datePart}_${timePart}.md`;
 }
 
+function getAiWorkerRequestConcurrency(_runMode: FilePageWorkerRunMode) {
+  return 2;
+}
+
 function createFallbackFileItem(node: FilePageNode): FilePageContentItem {
   return {
     id: node.id,
@@ -2965,8 +2969,8 @@ export function FileCanvasView({
 
     const workerRunMode = resolveWorkerRunMode(worker.workerRunMode);
     const workerOutputMode = resolveWorkerOutputMode(worker.workerOutputMode);
-    const clientTimeoutMs = getWorkerClientTimeoutMs(workerRunMode);
-    const clientTimeoutLabel = formatTimeoutLabel(clientTimeoutMs);
+    const baseClientTimeoutMs = getWorkerClientTimeoutMs(workerRunMode);
+    const baseClientTimeoutLabel = formatTimeoutLabel(baseClientTimeoutMs);
     const inputSignature = buildWorkerInputSignature(workerId);
     const sourceFiles = collectWorkerSourceFiles(workerId);
     const existingOutputFolder = getExistingWorkerOutputFolder(worker);
@@ -3013,7 +3017,7 @@ export function FileCanvasView({
       workerRequestTimeoutsRef.current[workerId] = window.setTimeout(() => {
         didTimeout = true;
         controller.abort();
-      }, clientTimeoutMs);
+      }, baseClientTimeoutMs);
 
       try {
         const response = await fetch('/api/worker/run', {
@@ -3102,7 +3106,7 @@ export function FileCanvasView({
         failWorkerProcessing(
           workerId,
           didTimeout
-            ? `AI worker timed out locally after ${clientTimeoutLabel}. Try Fast mode, fewer files, or a smaller source.`
+            ? `AI worker timed out locally after ${baseClientTimeoutLabel}. Try Fast mode, fewer files, or a smaller source.`
             : error instanceof Error
               ? error.message
               : 'The AI worker request failed.',
@@ -3177,6 +3181,14 @@ export function FileCanvasView({
       return;
     }
 
+    const requestConcurrency = getAiWorkerRequestConcurrency(workerRunMode);
+    const requestWaveCount = Math.max(
+      1,
+      Math.ceil(processablePendingSourceFiles.length / requestConcurrency),
+    );
+    const clientTimeoutMs = baseClientTimeoutMs * requestWaveCount;
+    const clientTimeoutLabel = formatTimeoutLabel(clientTimeoutMs);
+
     startWorkerProgressLoop(workerId);
     const controller = new AbortController();
     let didTimeout = false;
@@ -3189,111 +3201,133 @@ export function FileCanvasView({
     }, clientTimeoutMs);
 
     try {
-      const response = await fetch('/api/worker/run', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        signal: controller.signal,
-        body: JSON.stringify({
-          mode: resolveWorkerMode(worker.workerMode),
-          focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
-          runMode: workerRunMode,
-          outputMode: workerOutputMode,
-          workerLabel: worker.label,
-          inputs: processablePendingSourceFiles.map((item) => ({
-            sourceItemId: item.sourceItemId,
-            label: item.label,
-            description: item.description ?? '',
-            textContent: item.textContent ?? '',
-            mimeType: item.mimeType ?? null,
-          })),
-        }),
-      });
-      const payload = await response.json().catch(() => null);
+      const pendingBatches = processablePendingSourceFiles.map((item) => [item]);
+      const generatedOutputItems: FilePageContentItem[] = [];
+      let nextBatchIndex = 0;
 
-      if (!response.ok) {
-        const errorMessage =
-          typeof payload?.error === 'string' && payload.error.trim().length > 0
-            ? payload.error
-            : 'The AI worker request failed.';
-        throw new Error(errorMessage);
-      }
+      const runBatchWorker = async () => {
+        while (nextBatchIndex < pendingBatches.length) {
+          const batchIndex = nextBatchIndex;
+          nextBatchIndex += 1;
+          const batchItems = pendingBatches[batchIndex] ?? [];
 
-      const claimedSourceIds = new Set<string>();
-      const generatedOutputItems = Array.isArray(payload?.files)
-        ? payload.files.flatMap((file: unknown, index: number) => {
-            if (
-              typeof file !== 'object' ||
-              file === null ||
-              typeof (file as { contentText?: unknown }).contentText !== 'string'
-            ) {
-              return [];
-            }
+          const response = await fetch('/api/worker/run', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            signal: controller.signal,
+            body: JSON.stringify({
+              mode: resolveWorkerMode(worker.workerMode),
+              focus: worker.workerFocus ?? DEFAULT_FILE_PAGE_WORKER_FOCUS,
+              runMode: workerRunMode,
+              outputMode: workerOutputMode,
+              workerLabel: worker.label,
+              inputs: batchItems.map((item) => ({
+                sourceItemId: item.sourceItemId,
+                label: item.label,
+                description: item.description ?? '',
+                textContent: item.textContent ?? '',
+                mimeType: item.mimeType ?? null,
+              })),
+            }),
+          });
+          const payload = await response.json().catch(() => null);
 
-            const contentText = (file as { contentText: string }).contentText.trim();
+          if (!response.ok) {
+            const errorMessage =
+              typeof payload?.error === 'string' && payload.error.trim().length > 0
+                ? payload.error
+                : 'The AI worker request failed.';
+            throw new Error(errorMessage);
+          }
 
-            if (contentText.length === 0) {
-              return [];
-            }
+          const claimedSourceIds = new Set<string>();
+          const generatedBatchItems = Array.isArray(payload?.files)
+            ? payload.files.flatMap((file: unknown, index: number) => {
+                if (
+                  typeof file !== 'object' ||
+                  file === null ||
+                  typeof (file as { contentText?: unknown }).contentText !== 'string'
+                ) {
+                  return [];
+                }
 
-            const explicitSourceItemId =
-              typeof (file as { sourceItemId?: unknown }).sourceItemId === 'string'
-                ? (file as { sourceItemId: string }).sourceItemId.trim()
-                : '';
-            const explicitSourceMatch =
-              explicitSourceItemId.length > 0 && !claimedSourceIds.has(explicitSourceItemId)
-                ? processablePendingSourceFiles.find((item) => item.sourceItemId === explicitSourceItemId)
-                : undefined;
-            const matchedSource =
-              explicitSourceMatch ??
-              processablePendingSourceFiles.find(
-                (item, pendingIndex) => pendingIndex === index && !claimedSourceIds.has(item.sourceItemId),
-              ) ??
-              processablePendingSourceFiles.find((item) => !claimedSourceIds.has(item.sourceItemId));
+                const contentText = (file as { contentText: string }).contentText.trim();
 
-            if (!matchedSource) {
-              return [];
-            }
+                if (contentText.length === 0) {
+                  return [];
+                }
 
-            claimedSourceIds.add(matchedSource.sourceItemId);
+                const explicitSourceItemId =
+                  typeof (file as { sourceItemId?: unknown }).sourceItemId === 'string'
+                    ? (file as { sourceItemId: string }).sourceItemId.trim()
+                    : '';
+                const explicitSourceMatch =
+                  explicitSourceItemId.length > 0 && !claimedSourceIds.has(explicitSourceItemId)
+                    ? batchItems.find((item) => item.sourceItemId === explicitSourceItemId)
+                    : undefined;
+                const matchedSource =
+                  explicitSourceMatch ??
+                  batchItems.find(
+                    (item, pendingIndex) => pendingIndex === index && !claimedSourceIds.has(item.sourceItemId),
+                  ) ??
+                  batchItems.find((item) => !claimedSourceIds.has(item.sourceItemId));
 
-            const descriptionValue =
-              typeof (file as { description?: unknown }).description === 'string'
-                ? (file as { description: string }).description.trim()
-                : '';
-            const existingOutput = existingOutputsBySourceId.get(matchedSource.sourceItemId);
-            const nextVersion =
-              typeof existingOutput?.outputVersion === 'number' && Number.isFinite(existingOutput.outputVersion)
-                ? Math.max(1, existingOutput.outputVersion) + 1
-                : 1;
-            const generatedAt = new Date().toISOString();
-            const label = buildAiOutputFileLabel(
-              worker.label,
-              matchedSource.label,
-              nextVersion,
-              generatedAt,
-            );
+                if (!matchedSource) {
+                  return [];
+                }
 
-            return [
-              {
-                id: buildAiOutputItemId(workerId, matchedSource.sourceItemId),
-                kind: 'file' as const,
-                label,
-                description:
-                  descriptionValue ||
-                  buildContentSnippet(contentText, `AI-ready output for ${matchedSource.label}.`),
-                textContent: contentText,
-                mimeType: 'text/markdown',
-                sizeBytes: contentText.length,
-                sourceItemId: matchedSource.sourceItemId,
-                sourceSignature: matchedSource.sourceSignature,
-                outputVersion: nextVersion,
-                generatedAt,
-              },
-            ];
-          })
-        : [];
+                claimedSourceIds.add(matchedSource.sourceItemId);
+
+                const descriptionValue =
+                  typeof (file as { description?: unknown }).description === 'string'
+                    ? (file as { description: string }).description.trim()
+                    : '';
+                const existingOutput = existingOutputsBySourceId.get(matchedSource.sourceItemId);
+                const nextVersion =
+                  typeof existingOutput?.outputVersion === 'number' &&
+                  Number.isFinite(existingOutput.outputVersion)
+                    ? Math.max(1, existingOutput.outputVersion) + 1
+                    : 1;
+                const generatedAt = new Date().toISOString();
+                const label = buildAiOutputFileLabel(
+                  worker.label,
+                  matchedSource.label,
+                  nextVersion,
+                  generatedAt,
+                );
+
+                return [
+                  {
+                    id: buildAiOutputItemId(workerId, matchedSource.sourceItemId),
+                    kind: 'file' as const,
+                    label,
+                    description:
+                      descriptionValue ||
+                      buildContentSnippet(contentText, `AI-ready output for ${matchedSource.label}.`),
+                    textContent: contentText,
+                    mimeType: 'text/markdown',
+                    sizeBytes: contentText.length,
+                    sourceItemId: matchedSource.sourceItemId,
+                    sourceSignature: matchedSource.sourceSignature,
+                    outputVersion: nextVersion,
+                    generatedAt,
+                  },
+                ];
+              })
+            : [];
+
+          generatedOutputItems.push(...generatedBatchItems);
+        }
+      };
+
+      await Promise.all(
+        Array.from(
+          { length: Math.min(requestConcurrency, pendingBatches.length) },
+          () => runBatchWorker(),
+        ),
+      );
 
       if (generatedOutputItems.length === 0) {
         throw new Error('The AI worker returned no usable output.');
