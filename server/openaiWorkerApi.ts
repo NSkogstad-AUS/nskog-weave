@@ -983,6 +983,17 @@ function shouldRetryOpenRouterWithBasicPayload(payload: unknown, rawText: string
   ].some((token) => errorMessage.includes(token));
 }
 
+function shouldRetryOpenRouterSuccessfulButUnusableResponse(
+  payload: unknown,
+  rawText: string,
+) {
+  if (rawText.trim().length === 0) {
+    return true;
+  }
+
+  return extractOpenRouterResponseText(payload).trim().length === 0;
+}
+
 async function runOpenRouterWorker(
   providerConfig: Extract<WorkerProviderConfig, { provider: 'openrouter' }>,
   requestBody: WorkerRunRequest,
@@ -1057,6 +1068,17 @@ async function runOpenRouterWorker(
     lastResponse &&
     !lastResponse.upstreamResponse.ok &&
     shouldRetryOpenRouterWithBasicPayload(lastResponse.upstreamPayload, lastResponse.rawText)
+  ) {
+    lastResponse = await sendWithGuardedRetry(basicRequestBodyPayload);
+  }
+
+  if (
+    lastResponse &&
+    lastResponse.upstreamResponse.ok &&
+    shouldRetryOpenRouterSuccessfulButUnusableResponse(
+      lastResponse.upstreamPayload,
+      lastResponse.rawText,
+    )
   ) {
     lastResponse = await sendWithGuardedRetry(basicRequestBodyPayload);
   }
