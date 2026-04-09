@@ -979,6 +979,10 @@ function shouldRetryOpenRouterWithBasicPayload(payload: unknown, rawText: string
     'unsupported',
     'not supported',
     'invalid provider route',
+    'no endpoints found',
+    'requested parameters',
+    'provider routing',
+    'codes/routing',
     'plugin',
   ].some((token) => errorMessage.includes(token));
 }
@@ -1030,10 +1034,6 @@ async function runOpenRouterWorker(
   } satisfies Record<string, unknown>;
   const basicRequestBodyPayload = {
     ...baseRequestBodyPayload,
-    provider: {
-      ...getOpenRouterProviderOptions(requestBody.runMode),
-      require_parameters: false,
-    },
   } satisfies Record<string, unknown>;
   let emptyBodyAttempts = 0;
 

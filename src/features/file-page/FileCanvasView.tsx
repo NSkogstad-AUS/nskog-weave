@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import type {
+  DragEvent as ReactDragEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
 
 import {
@@ -33,6 +36,11 @@ import {
   SLOT_STEP_X,
   SLOT_STEP_Y,
 } from './canvas/constants';
+import {
+  CanvasPaletteSidebar,
+  type CanvasPaletteSidebarItem,
+  type CanvasPaletteTemplateId,
+} from './canvas/CanvasPaletteSidebar';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import type { GroupResizeAxis } from './canvas/groupChrome';
 import {
@@ -140,6 +148,34 @@ const OUTER_WIDGET_SNAP_THRESHOLD = 4;
 const GROUP_SNAP_TOLERANCE = Math.round(Math.min(SLOT_STEP_X, SLOT_STEP_Y) * 0.25);
 const WORKER_CONNECTION_THRESHOLD_X = SLOT_STEP_X * 1.25;
 const WORKER_CONNECTION_THRESHOLD_Y = SLOT_STEP_Y * 1.25;
+const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-template';
+const CANVAS_PALETTE_TEXT_PREFIX = 'weave-canvas-palette-template:';
+
+function isCanvasPaletteTemplateId(value: string): value is CanvasPaletteTemplateId {
+  return value === 'ai-worker' || value === 'sort-worker' || value === 'group';
+}
+
+function hasCanvasPaletteTemplate(dataTransfer: DataTransfer) {
+  return Array.from(dataTransfer.types).includes(CANVAS_PALETTE_DATA_TRANSFER_TYPE);
+}
+
+function readCanvasPaletteTemplate(dataTransfer: DataTransfer): CanvasPaletteTemplateId | null {
+  const directTemplate = dataTransfer.getData(CANVAS_PALETTE_DATA_TRANSFER_TYPE);
+
+  if (isCanvasPaletteTemplateId(directTemplate)) {
+    return directTemplate;
+  }
+
+  const fallbackTemplate = dataTransfer.getData('text/plain');
+
+  if (!fallbackTemplate.startsWith(CANVAS_PALETTE_TEXT_PREFIX)) {
+    return null;
+  }
+
+  const candidateTemplateId = fallbackTemplate.slice(CANVAS_PALETTE_TEXT_PREFIX.length);
+
+  return isCanvasPaletteTemplateId(candidateTemplateId) ? candidateTemplateId : null;
+}
 
 function sortCanvasContentItems(items: FilePageContentItem[]) {
   return [...items].sort((left, right) =>
@@ -393,6 +429,7 @@ export function FileCanvasView({
   const panStateRef = useRef<PanState | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const workerConnectionDragStateRef = useRef<WorkerConnectionDragState | null>(null);
+  const paletteDragDepthRef = useRef(0);
   const rawDragPositionsRef = useRef<Record<string, Point>>({});
   const draftPositionsRef = useRef<Record<string, Point>>({});
   const snapPreviewPositionsRef = useRef<Record<string, Point>>({});
@@ -435,6 +472,9 @@ export function FileCanvasView({
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
+  const [draggedPaletteTemplateId, setDraggedPaletteTemplateId] =
+    useState<CanvasPaletteTemplateId | null>(null);
+  const [isPaletteDragOverCanvas, setIsPaletteDragOverCanvas] = useState(false);
   const renderedNodes = useMemo(
     () =>
       [...nodes].sort((left, right) => {
@@ -1762,7 +1802,10 @@ export function FileCanvasView({
   }, [beginMarqueeSelection, getLocalPoint, getNodeById]);
 
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
-    if ((event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
+    if (
+      (event.target as HTMLElement).closest('[data-canvas-node="true"]') ||
+      (event.target as HTMLElement).closest('[data-canvas-chrome="true"]')
+    ) {
       return;
     }
 
@@ -3655,60 +3698,89 @@ export function FileCanvasView({
     startSortWorkerProcessing,
   ]);
 
-  function resolveInsertionPosition(node: Pick<FilePageNode, 'kind' | 'size'>) {
-    const localPoint = contextMenuPointRef.current ?? {
+  const resolveInsertionPosition = useCallback((
+    node: Pick<FilePageNode, 'kind' | 'size'>,
+    localPoint: Point | null = contextMenuPointRef.current,
+    anchor: 'top-left' | 'center' = 'top-left',
+  ) => {
+    const resolvedPoint = localPoint ?? {
       x: CANVAS_PADDING,
       y: CANVAS_PADDING,
     };
-    return {
-      x: clampToCanvas(localPoint.x),
-      y: clampToCanvas(localPoint.y),
-    };
-  }
+    const nodeDimensions = getNodeDimensionsForKind(node.size, node.kind);
+    const offsetX = anchor === 'center' ? nodeDimensions.width / 2 : 0;
+    const offsetY = anchor === 'center' ? nodeDimensions.height / 2 : 0;
 
-  const addNodeAtContext = useCallback((node: Omit<FilePageNode, 'position'>) => {
+    return {
+      x: clampToCanvas(resolvedPoint.x - offsetX),
+      y: clampToCanvas(resolvedPoint.y - offsetY),
+    };
+  }, []);
+
+  const addNodeWithPosition = useCallback((
+    node: Omit<FilePageNode, 'position'>,
+    position: Point,
+  ) => {
     const nextNode = {
       ...node,
-      position: resolveInsertionPosition(node),
+      position,
     };
 
+    onPreviewContentItemChange?.(null);
     onAddNodeRef.current(nextNode);
-    selectSingleNode(nextNode.id);
+    onSelectNodesRef.current([nextNode.id]);
+    setDraftSelectedNodeIds([nextNode.id]);
+  }, [onPreviewContentItemChange]);
+
+  const addNodeAtContext = useCallback((node: Omit<FilePageNode, 'position'>) => {
+    addNodeWithPosition(node, resolveInsertionPosition(node));
     contextMenuPointRef.current = null;
-  }, [resolveInsertionPosition]);
+  }, [addNodeWithPosition, resolveInsertionPosition]);
 
-  function handleAddBasicElement() {
-    addNodeAtContext({
-      id: `element-${Date.now()}`,
-      label: 'Basic element',
-      description: 'Freeform canvas object for quick thinking and placement.',
-      kind: 'element',
-      icon: 'sparkles',
-      size: {
-        widthUnits: 1,
-        heightUnits: 1,
-      },
-    });
-  }
+  const addNodeInViewport = useCallback((node: Omit<FilePageNode, 'position'>) => {
+    if (!canvasRef.current) {
+      addNodeWithPosition(node, resolveInsertionPosition(node));
+      return;
+    }
 
-  function handleAddGroup() {
-    addNodeAtContext({
-      id: `group-${Date.now()}`,
-      label: 'Group',
-      description: 'Shared canvas region for clustering related notes and files.',
-      kind: 'group',
-      icon: 'shapes',
-      size: {
-        widthUnits: 3,
-        heightUnits: 2,
-      },
-    });
-  }
+    const rect = canvasRef.current.getBoundingClientRect();
+    const viewportCenter = {
+      x: rect.width / 2 - viewportRef.current.x,
+      y: rect.height / 2 - viewportRef.current.y,
+    };
 
-  function handleAddWorker(mode: FilePageWorkerMode) {
+    addNodeWithPosition(node, resolveInsertionPosition(node, viewportCenter, 'center'));
+    contextMenuPointRef.current = null;
+  }, [addNodeWithPosition, resolveInsertionPosition]);
+
+  const buildBasicElementNode = useCallback((): Omit<FilePageNode, 'position'> => ({
+    id: `element-${Date.now()}`,
+    label: 'Basic element',
+    description: 'Freeform canvas object for quick thinking and placement.',
+    kind: 'element',
+    icon: 'sparkles',
+    size: {
+      widthUnits: 1,
+      heightUnits: 1,
+    },
+  }), []);
+
+  const buildGroupNode = useCallback((): Omit<FilePageNode, 'position'> => ({
+    id: `group-${Date.now()}`,
+    label: 'Group',
+    description: 'Shared canvas region for clustering related notes and files.',
+    kind: 'group',
+    icon: 'shapes',
+    size: {
+      widthUnits: 3,
+      heightUnits: 2,
+    },
+  }), []);
+
+  const buildWorkerNode = useCallback((mode: FilePageWorkerMode): Omit<FilePageNode, 'position'> => {
     const workerMeta = getWorkerModeMeta(mode);
 
-    addNodeAtContext({
+    return {
       id: `worker-${Date.now()}`,
       label: workerMeta.defaultNodeLabel,
       description: workerMeta.defaultNodeDescription,
@@ -3729,7 +3801,152 @@ export function FileCanvasView({
       workerOutputFolderId: null,
       workerInputSignature: null,
       workerLastError: null,
-    });
+    };
+  }, []);
+
+  const buildCanvasPaletteNode = useCallback((
+    templateId: CanvasPaletteTemplateId,
+  ): Omit<FilePageNode, 'position'> => {
+    switch (templateId) {
+      case 'ai-worker':
+        return buildWorkerNode('ai-ready');
+      case 'sort-worker':
+        return buildWorkerNode('sort-data');
+      case 'group':
+      default:
+        return buildGroupNode();
+    }
+  }, [buildGroupNode, buildWorkerNode]);
+
+  const canvasPaletteItems = useMemo<CanvasPaletteSidebarItem[]>(() => {
+    const aiWorkerMeta = getWorkerModeMeta('ai-ready');
+    const sortWorkerMeta = getWorkerModeMeta('sort-data');
+
+    return [
+      {
+        id: 'ai-worker',
+        label: aiWorkerMeta.defaultNodeLabel,
+        description: aiWorkerMeta.defaultNodeDescription,
+        section: 'Workers',
+      },
+      {
+        id: 'sort-worker',
+        label: sortWorkerMeta.defaultNodeLabel,
+        description: sortWorkerMeta.defaultNodeDescription,
+        section: 'Workers',
+      },
+      {
+        id: 'group',
+        label: 'Group',
+        description: 'Shared canvas region for clustering related notes, workers, and files.',
+        section: 'Structure',
+      },
+    ];
+  }, []);
+
+  const clearPaletteDragState = useCallback(() => {
+    paletteDragDepthRef.current = 0;
+    setDraggedPaletteTemplateId(null);
+    setIsPaletteDragOverCanvas(false);
+  }, []);
+
+  const handleInsertPaletteNode = useCallback((templateId: CanvasPaletteTemplateId) => {
+    addNodeInViewport(buildCanvasPaletteNode(templateId));
+  }, [addNodeInViewport, buildCanvasPaletteNode]);
+
+  const handlePaletteItemDragStart = useCallback((
+    templateId: CanvasPaletteTemplateId,
+    event: ReactDragEvent<HTMLButtonElement>,
+  ) => {
+    setDraggedPaletteTemplateId(templateId);
+    event.dataTransfer.effectAllowed = 'copy';
+    event.dataTransfer.setData(CANVAS_PALETTE_DATA_TRANSFER_TYPE, templateId);
+    event.dataTransfer.setData('text/plain', `${CANVAS_PALETTE_TEXT_PREFIX}${templateId}`);
+  }, []);
+
+  const handleCanvasPaletteDragEnter = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (
+      (event.target as HTMLElement).closest('[data-canvas-chrome="true"]') ||
+      !hasCanvasPaletteTemplate(event.dataTransfer)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    paletteDragDepthRef.current += 1;
+    setIsPaletteDragOverCanvas(true);
+  }, []);
+
+  const handleCanvasPaletteDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (
+      (event.target as HTMLElement).closest('[data-canvas-chrome="true"]') ||
+      !hasCanvasPaletteTemplate(event.dataTransfer)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'copy';
+
+    if (!isPaletteDragOverCanvas) {
+      setIsPaletteDragOverCanvas(true);
+    }
+  }, [isPaletteDragOverCanvas]);
+
+  const handleCanvasPaletteDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    if (
+      (event.target as HTMLElement).closest('[data-canvas-chrome="true"]') ||
+      !hasCanvasPaletteTemplate(event.dataTransfer)
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    paletteDragDepthRef.current = Math.max(0, paletteDragDepthRef.current - 1);
+
+    if (paletteDragDepthRef.current === 0) {
+      setIsPaletteDragOverCanvas(false);
+    }
+  }, []);
+
+  const handleCanvasPaletteDrop = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
+    const templateId = readCanvasPaletteTemplate(event.dataTransfer);
+
+    if (
+      !templateId ||
+      (event.target as HTMLElement).closest('[data-canvas-chrome="true"]')
+    ) {
+      return;
+    }
+
+    event.preventDefault();
+    clearPaletteDragState();
+    const localPoint = getLocalPoint(event.clientX, event.clientY);
+
+    if (!localPoint) {
+      return;
+    }
+
+    const nextNode = buildCanvasPaletteNode(templateId);
+    addNodeWithPosition(nextNode, resolveInsertionPosition(nextNode, localPoint, 'center'));
+  }, [
+    addNodeWithPosition,
+    buildCanvasPaletteNode,
+    clearPaletteDragState,
+    getLocalPoint,
+    resolveInsertionPosition,
+  ]);
+
+  function handleAddBasicElement() {
+    addNodeAtContext(buildBasicElementNode());
+  }
+
+  function handleAddGroup() {
+    addNodeAtContext(buildGroupNode());
+  }
+
+  function handleAddWorker(mode: FilePageWorkerMode) {
+    addNodeAtContext(buildWorkerNode(mode));
   }
 
   function handleAddAiWorker() {
@@ -4085,7 +4302,10 @@ export function FileCanvasView({
 
       connectedNodes.forEach((candidate) => {
         if (candidate.generatedByWorkerId === node.id) {
-          onDeleteNodeRef.current(candidate.id);
+          onUpdateNodeRef.current(candidate.id, {
+            parentNodeId: null,
+            generatedByWorkerId: null,
+          });
           return;
         }
 
@@ -4388,6 +4608,10 @@ export function FileCanvasView({
         <div
           ref={canvasRef}
           onContextMenu={handleCanvasContextMenu}
+          onDragEnter={handleCanvasPaletteDragEnter}
+          onDragOver={handleCanvasPaletteDragOver}
+          onDragLeave={handleCanvasPaletteDragLeave}
+          onDrop={handleCanvasPaletteDrop}
           onPointerLeave={() => {
             if (!contextMenuNodeId) {
               onHoverNodeChange(null);
@@ -4398,7 +4622,10 @@ export function FileCanvasView({
               return;
             }
 
-            if ((event.target as HTMLElement).closest('[data-canvas-node="true"]')) {
+            if (
+              (event.target as HTMLElement).closest('[data-canvas-node="true"]') ||
+              (event.target as HTMLElement).closest('[data-canvas-chrome="true"]')
+            ) {
               return;
             }
 
@@ -4428,8 +4655,20 @@ export function FileCanvasView({
           className={cn(
             'relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-[#fffdf7]/92 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none',
             panState ? 'cursor-grabbing' : 'cursor-grab',
+            isPaletteDragOverCanvas && 'border-sky-300/80 shadow-[0_36px_90px_-58px_rgba(14,165,233,0.28)]',
           )}
         >
+          <CanvasPaletteSidebar
+            items={canvasPaletteItems}
+            draggedItemId={draggedPaletteTemplateId}
+            isCanvasDropActive={isPaletteDragOverCanvas}
+            onInsertItem={handleInsertPaletteNode}
+            onDragStartItem={handlePaletteItemDragStart}
+            onDragEndItem={clearPaletteDragState}
+          />
+          {isPaletteDragOverCanvas ? (
+            <div className="pointer-events-none absolute inset-4 z-20 rounded-[2rem] border border-dashed border-sky-300/80 bg-sky-100/18 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22)]" />
+          ) : null}
           <div
             className="absolute inset-0"
             style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
