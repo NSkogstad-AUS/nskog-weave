@@ -4,11 +4,14 @@ import {
   ArrowUpDownIcon,
   BotIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   GripVerticalIcon,
   ShapesIcon,
   type LucideIcon,
 } from 'lucide-react';
 
+import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
 export type CanvasPaletteTemplateId = 'ai-worker' | 'sort-worker' | 'group';
@@ -48,7 +51,11 @@ export function CanvasPaletteSidebar({
   onDragStartItem,
   onInsertItem,
 }: CanvasPaletteSidebarProps) {
-  const [isOpen, setIsOpen] = useState(true);
+  const [isSidebarOpen, setIsSidebarOpen] = useState(true);
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>({
+    Workers: true,
+    Structure: true,
+  });
   const sections = useMemo(
     () =>
       SECTION_ORDER.map((section) => ({
@@ -65,101 +72,159 @@ export function CanvasPaletteSidebar({
         event.preventDefault();
         event.stopPropagation();
       }}
-      onPointerDownCapture={(event) => {
-        event.stopPropagation();
-      }}
-      className="pointer-events-auto absolute right-5 top-24 z-30 w-[min(19rem,calc(100%-2.5rem))]"
+      className={cn(
+        'hidden h-full shrink-0 border-l border-sidebar-border/80 bg-sidebar/95 backdrop-blur-md transition-[width] duration-300 ease-out md:flex',
+        isSidebarOpen ? 'w-[19rem]' : 'w-[4.25rem]',
+      )}
     >
-      <div className="rounded-[1.7rem] border border-slate-200/80 bg-white/84 p-3 shadow-[0_28px_70px_-40px_rgba(15,23,42,0.38),0_14px_30px_-24px_rgba(15,23,42,0.24)] backdrop-blur-xl">
-        <button
-          type="button"
-          onClick={() => setIsOpen((current) => !current)}
-          className="flex w-full items-center justify-between rounded-[1.35rem] border border-slate-200/80 bg-white/78 px-4 py-3 text-left transition hover:border-slate-300/85 hover:bg-white"
-        >
-          <div className="min-w-0">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
-              Canvas Shelf
-            </div>
-            <div className="mt-1 text-sm font-semibold text-slate-950">
-              Drag blocks onto the canvas
-            </div>
+      <div className={cn('min-w-0 flex-1 flex-col', isSidebarOpen ? 'flex' : 'hidden')}>
+        <div className="border-b border-sidebar-border/80 px-4 py-4">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+            Canvas Tools
           </div>
-          <ChevronDownIcon
+          <div className="mt-1 text-sm font-semibold text-slate-950">
+            Drag blocks into the workflow
+          </div>
+          <div className="mt-2 text-xs leading-5 text-slate-500">
+            Add workers and groups from a docked sidebar instead of the canvas context menu.
+          </div>
+        </div>
+
+        <div className="flex min-h-0 flex-1 flex-col overflow-y-auto px-3 py-3">
+          <div
             className={cn(
-              'size-4 shrink-0 text-slate-500 transition-transform duration-200',
-              isOpen ? 'rotate-0' : '-rotate-90',
+              'rounded-[1.1rem] border px-3.5 py-3 text-xs leading-5 transition',
+              isCanvasDropActive
+                ? 'border-sky-300/80 bg-sky-50/90 text-sky-700'
+                : 'border-slate-200/80 bg-slate-50/80 text-slate-500',
             )}
-          />
-        </button>
+          >
+            {isCanvasDropActive
+              ? 'Release anywhere on the canvas to place the block.'
+              : 'Click a block to drop it into view, or drag it to a specific spot.'}
+          </div>
 
-        {isOpen ? (
-          <div className="mt-3 space-y-3">
-            <div
-              className={cn(
-                'rounded-[1.2rem] border px-3.5 py-3 text-xs leading-5 transition',
-                isCanvasDropActive
-                  ? 'border-sky-300/80 bg-sky-50/90 text-sky-700'
-                  : 'border-slate-200/80 bg-slate-50/80 text-slate-500',
-              )}
-            >
-              {isCanvasDropActive
-                ? 'Release anywhere on the canvas to place the block.'
-                : 'Click a block to insert it in view, or drag it into position.'}
-            </div>
+          <div className="mt-3 space-y-2">
+            {sections.map(({ section, items: sectionItems }) => {
+              const sectionOpen = openSections[section] ?? true;
 
-            {sections.map(({ section, items: sectionItems }) => (
+              return (
+                <div
+                  key={section}
+                  className="overflow-hidden rounded-[1.2rem] border border-slate-200/80 bg-white/76"
+                >
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setOpenSections((current) => ({
+                        ...current,
+                        [section]: !sectionOpen,
+                      }))
+                    }
+                    className="flex w-full items-center justify-between px-3.5 py-3 text-left transition hover:bg-slate-50/90"
+                  >
+                    <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">
+                      {section}
+                    </span>
+                    <ChevronDownIcon
+                      className={cn(
+                        'size-4 text-slate-400 transition-transform duration-200',
+                        sectionOpen ? 'rotate-0' : '-rotate-90',
+                      )}
+                    />
+                  </button>
+
+                  {sectionOpen ? (
+                    <div className="space-y-2 border-t border-slate-200/70 px-2.5 py-2.5">
+                      {sectionItems.map((item) => {
+                        const Icon = ITEM_ICON_MAP[item.id];
+                        const isDragging = draggedItemId === item.id;
+
+                        return (
+                          <button
+                            key={item.id}
+                            type="button"
+                            draggable
+                            onClick={() => onInsertItem(item.id)}
+                            onDragStart={(event) => onDragStartItem(item.id, event)}
+                            onDragEnd={onDragEndItem}
+                            className={cn(
+                              'group flex w-full items-start gap-3 rounded-[1rem] border border-slate-200/80 bg-white px-3 py-3 text-left transition',
+                              isDragging
+                                ? 'border-sky-300/80 bg-sky-50/90 shadow-[0_14px_28px_-24px_rgba(14,165,233,0.9)]'
+                                : 'hover:-translate-y-px hover:border-slate-300/80 hover:bg-slate-50/95',
+                            )}
+                          >
+                            <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/95 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white">
+                              <Icon className="size-4" />
+                            </span>
+                            <span className="min-w-0 flex-1">
+                              <span className="flex items-center gap-2">
+                                <span className="truncate text-sm font-semibold text-slate-950">
+                                  {item.label}
+                                </span>
+                                <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                  Drag
+                                </span>
+                              </span>
+                              <span className="mt-1 block text-xs leading-5 text-slate-500">
+                                {item.description}
+                              </span>
+                            </span>
+                            <GripVerticalIcon className="mt-1 size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400" />
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
+
+      <div className="flex w-[4.25rem] shrink-0 flex-col border-l border-sidebar-border/80">
+        <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80 px-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="icon-lg"
+            onClick={() => setIsSidebarOpen((current) => !current)}
+            className="size-9 rounded-2xl border-sidebar-border bg-background/80 shadow-sm"
+          >
+            {isSidebarOpen ? (
+              <ChevronRightIcon className="size-4 text-slate-600" />
+            ) : (
+              <ChevronLeftIcon className="size-4 text-slate-600" />
+            )}
+            <span className="sr-only">Toggle canvas tools sidebar</span>
+          </Button>
+        </div>
+
+        <div className="flex flex-1 flex-col items-center gap-3 px-2 py-4">
+          {sections.map(({ section, items: sectionItems }) => {
+            const firstItem = sectionItems[0];
+
+            if (!firstItem) {
+              return null;
+            }
+
+            const Icon = ITEM_ICON_MAP[firstItem.id];
+
+            return (
               <div
                 key={section}
-                className="rounded-[1.25rem] border border-slate-200/75 bg-white/72 p-2.5"
+                className="flex w-full flex-col items-center gap-2 rounded-[1.2rem] border border-slate-200/75 bg-white/80 px-2 py-3"
               >
-                <div className="px-2 pb-2 text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+                <Icon className="size-4 text-slate-500" />
+                <span className="text-[10px] font-semibold uppercase tracking-[0.22em] text-slate-400 [writing-mode:vertical-rl]">
                   {section}
-                </div>
-                <div className="space-y-2">
-                  {sectionItems.map((item) => {
-                    const Icon = ITEM_ICON_MAP[item.id];
-                    const isDragging = draggedItemId === item.id;
-
-                    return (
-                      <button
-                        key={item.id}
-                        type="button"
-                        draggable
-                        onClick={() => onInsertItem(item.id)}
-                        onDragStart={(event) => onDragStartItem(item.id, event)}
-                        onDragEnd={onDragEndItem}
-                        className={cn(
-                          'group flex w-full items-start gap-3 rounded-[1.15rem] border border-slate-200/75 bg-white px-3 py-3 text-left transition',
-                          isDragging
-                            ? 'border-sky-300/80 bg-sky-50/90 shadow-[0_14px_28px_-24px_rgba(14,165,233,0.9)]'
-                            : 'hover:-translate-y-px hover:border-slate-300/80 hover:bg-slate-50/95',
-                        )}
-                      >
-                        <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[1rem] border border-slate-200/80 bg-slate-50/95 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white">
-                          <Icon className="size-4" />
-                        </span>
-                        <span className="min-w-0 flex-1">
-                          <span className="flex items-center gap-2">
-                            <span className="truncate text-sm font-semibold text-slate-950">
-                              {item.label}
-                            </span>
-                            <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                              Drag
-                            </span>
-                          </span>
-                          <span className="mt-1 block text-xs leading-5 text-slate-500">
-                            {item.description}
-                          </span>
-                        </span>
-                        <GripVerticalIcon className="mt-1 size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400" />
-                      </button>
-                    );
-                  })}
-                </div>
+                </span>
               </div>
-            ))}
-          </div>
-        ) : null}
+            );
+          })}
+        </div>
       </div>
     </aside>
   );

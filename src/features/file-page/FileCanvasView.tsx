@@ -4606,58 +4606,192 @@ export function FileCanvasView({
     <ContextMenu>
       <ContextMenuTrigger asChild>
         <div
-          ref={canvasRef}
-          onContextMenu={handleCanvasContextMenu}
-          onDragEnter={handleCanvasPaletteDragEnter}
-          onDragOver={handleCanvasPaletteDragOver}
-          onDragLeave={handleCanvasPaletteDragLeave}
-          onDrop={handleCanvasPaletteDrop}
-          onPointerLeave={() => {
-            if (!contextMenuNodeId) {
-              onHoverNodeChange(null);
-            }
-          }}
-          onPointerDown={(event) => {
-            if (event.button !== 0) {
-              return;
-            }
-
-            if (
-              (event.target as HTMLElement).closest('[data-canvas-node="true"]') ||
-              (event.target as HTMLElement).closest('[data-canvas-chrome="true"]')
-            ) {
-              return;
-            }
-
-            event.preventDefault();
-
-            if (event.shiftKey) {
-              const localPoint = getLocalPoint(event.clientX, event.clientY);
-
-              if (!localPoint) {
-                return;
-              }
-
-              beginMarqueeSelection(localPoint, true);
-              return;
-            }
-
-            onSelectNodes([]);
-            draftSelectedNodeIdsRef.current = [];
-            setDraftSelectedNodeIds([]);
-            const nextPanState = {
-              origin: { x: event.clientX, y: event.clientY },
-              baseViewport: viewport,
-            };
-            panStateRef.current = nextPanState;
-            setPanState(nextPanState);
-          }}
           className={cn(
-            'relative h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-[#fffdf7]/92 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] touch-none',
-            panState ? 'cursor-grabbing' : 'cursor-grab',
+            'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]',
             isPaletteDragOverCanvas && 'border-sky-300/80 shadow-[0_36px_90px_-58px_rgba(14,165,233,0.28)]',
           )}
         >
+          <div
+            ref={canvasRef}
+            onContextMenu={handleCanvasContextMenu}
+            onDragEnter={handleCanvasPaletteDragEnter}
+            onDragOver={handleCanvasPaletteDragOver}
+            onDragLeave={handleCanvasPaletteDragLeave}
+            onDrop={handleCanvasPaletteDrop}
+            onPointerLeave={() => {
+              if (!contextMenuNodeId) {
+                onHoverNodeChange(null);
+              }
+            }}
+            onPointerDown={(event) => {
+              if (event.button !== 0) {
+                return;
+              }
+
+              if (
+                (event.target as HTMLElement).closest('[data-canvas-node="true"]') ||
+                (event.target as HTMLElement).closest('[data-canvas-chrome="true"]')
+              ) {
+                return;
+              }
+
+              event.preventDefault();
+
+              if (event.shiftKey) {
+                const localPoint = getLocalPoint(event.clientX, event.clientY);
+
+                if (!localPoint) {
+                  return;
+                }
+
+                beginMarqueeSelection(localPoint, true);
+                return;
+              }
+
+              onSelectNodes([]);
+              draftSelectedNodeIdsRef.current = [];
+              setDraftSelectedNodeIds([]);
+              const nextPanState = {
+                origin: { x: event.clientX, y: event.clientY },
+                baseViewport: viewport,
+              };
+              panStateRef.current = nextPanState;
+              setPanState(nextPanState);
+            }}
+            className={cn(
+              'relative min-w-0 flex-1 overflow-hidden bg-[#fffdf7]/92 touch-none',
+              panState ? 'cursor-grabbing' : 'cursor-grab',
+            )}
+          >
+            {isPaletteDragOverCanvas ? (
+              <div
+                aria-hidden="true"
+                className="pointer-events-none absolute inset-4 z-20 rounded-[2rem] border border-dashed border-sky-300/80 bg-sky-100/18 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22)]"
+              />
+            ) : null}
+
+            <div
+              className="absolute inset-0"
+              style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
+            >
+              {outerCanvasFields.map((field) => (
+                <div
+                  key={field.id}
+                  aria-hidden="true"
+                  className={cn(
+                    'pointer-events-none absolute rounded-[2.5rem] transition-[opacity,width,height,left,top] duration-150',
+                    field.isActive ? 'opacity-100' : 'opacity-85',
+                  )}
+                  style={{
+                    left: field.left,
+                    top: field.top,
+                    width: field.width,
+                    height: field.height,
+                    backgroundImage:
+                      field.isActive
+                        ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
+                        : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
+                    backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+                    maskImage:
+                      field.isActive
+                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
+                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
+                    WebkitMaskImage:
+                      field.isActive
+                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
+                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
+                  }}
+                />
+              ))}
+              {groupNodes.map((node) => renderCanvasNode(node))}
+              {groupCanvasFields.map((field) => (
+                <div
+                  key={field.id}
+                  aria-hidden="true"
+                  className={cn(
+                    'pointer-events-none absolute rounded-[2rem] transition-[opacity,width,height,left,top] duration-150',
+                    field.isActive ? 'opacity-100' : 'opacity-85',
+                  )}
+                  style={{
+                    left: field.left,
+                    top: field.top,
+                    width: field.width,
+                    height: field.height,
+                    backgroundImage:
+                      field.isActive
+                        ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
+                        : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
+                    backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
+                    maskImage:
+                      field.isActive
+                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
+                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
+                    WebkitMaskImage:
+                      field.isActive
+                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
+                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
+                  }}
+                />
+              ))}
+              {belowGroupConnectorPaths.length > 0 ? (
+                <svg
+                  aria-hidden="true"
+                  className="absolute inset-0 overflow-visible"
+                >
+                  {belowGroupConnectorPaths.map((connector) => renderConnector(connector))}
+                </svg>
+              ) : null}
+              {aboveGroupConnectorPaths.length > 0 ? (
+                <svg
+                  aria-hidden="true"
+                  className="absolute inset-0 overflow-visible"
+                >
+                  {aboveGroupConnectorPaths.map((connector) => renderConnector(connector))}
+                </svg>
+              ) : null}
+              {contentNodes.map((node) => renderCanvasNode(node))}
+              {activeWorkerConnectionPreview ? (
+                <svg
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 overflow-visible"
+                >
+                  <g>
+                    <path
+                      d={activeWorkerConnectionPreview.path}
+                      fill="none"
+                      stroke="rgba(148, 163, 184, 0.18)"
+                      strokeWidth={5}
+                      strokeLinecap="round"
+                    />
+                    <path
+                      d={activeWorkerConnectionPreview.path}
+                      fill="none"
+                      stroke="rgba(71, 85, 105, 0.78)"
+                      strokeWidth={1.8}
+                      strokeLinecap="round"
+                    />
+                  </g>
+                </svg>
+              ) : null}
+
+              {marqueeState ? (
+                <div
+                  aria-hidden="true"
+                  className="pointer-events-none absolute rounded-2xl border border-sky-400/50 bg-sky-400/10 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18)]"
+                  style={{
+                    left: normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+                    top: normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+                    width:
+                      normalizeRectangle(marqueeState.origin, marqueeState.current).right -
+                      normalizeRectangle(marqueeState.origin, marqueeState.current).left,
+                    height:
+                      normalizeRectangle(marqueeState.origin, marqueeState.current).bottom -
+                      normalizeRectangle(marqueeState.origin, marqueeState.current).top,
+                  }}
+                />
+              ) : null}
+            </div>
+          </div>
           <CanvasPaletteSidebar
             items={canvasPaletteItems}
             draggedItemId={draggedPaletteTemplateId}
@@ -4666,130 +4800,6 @@ export function FileCanvasView({
             onDragStartItem={handlePaletteItemDragStart}
             onDragEndItem={clearPaletteDragState}
           />
-          {isPaletteDragOverCanvas ? (
-            <div className="pointer-events-none absolute inset-4 z-20 rounded-[2rem] border border-dashed border-sky-300/80 bg-sky-100/18 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22)]" />
-          ) : null}
-          <div
-            className="absolute inset-0"
-            style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
-          >
-            {outerCanvasFields.map((field) => (
-              <div
-                key={field.id}
-                aria-hidden="true"
-                className={cn(
-                  'pointer-events-none absolute rounded-[2.5rem] transition-[opacity,width,height,left,top] duration-150',
-                  field.isActive ? 'opacity-100' : 'opacity-85',
-                )}
-                style={{
-                  left: field.left,
-                  top: field.top,
-                  width: field.width,
-                  height: field.height,
-                  backgroundImage:
-                    field.isActive
-                      ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
-                      : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
-                  backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-                  maskImage:
-                    field.isActive
-                      ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                      : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                  WebkitMaskImage:
-                    field.isActive
-                      ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                      : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                }}
-              />
-            ))}
-            {groupNodes.map((node) => renderCanvasNode(node))}
-            {groupCanvasFields.map((field) => (
-              <div
-                key={field.id}
-                aria-hidden="true"
-                className={cn(
-                  'pointer-events-none absolute rounded-[2rem] transition-[opacity,width,height,left,top] duration-150',
-                  field.isActive ? 'opacity-100' : 'opacity-85',
-                )}
-                style={{
-                  left: field.left,
-                  top: field.top,
-                  width: field.width,
-                  height: field.height,
-                  backgroundImage:
-                    field.isActive
-                      ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
-                      : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
-                  backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-                  maskImage:
-                    field.isActive
-                      ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                      : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                  WebkitMaskImage:
-                    field.isActive
-                      ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                      : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                }}
-              />
-            ))}
-            {belowGroupConnectorPaths.length > 0 ? (
-              <svg
-                aria-hidden="true"
-                className="absolute inset-0 overflow-visible"
-              >
-                {belowGroupConnectorPaths.map((connector) => renderConnector(connector))}
-              </svg>
-            ) : null}
-            {aboveGroupConnectorPaths.length > 0 ? (
-              <svg
-                aria-hidden="true"
-                className="absolute inset-0 overflow-visible"
-              >
-                {aboveGroupConnectorPaths.map((connector) => renderConnector(connector))}
-              </svg>
-            ) : null}
-            {contentNodes.map((node) => renderCanvasNode(node))}
-            {activeWorkerConnectionPreview ? (
-              <svg
-                aria-hidden="true"
-                className="pointer-events-none absolute inset-0 overflow-visible"
-              >
-                <g>
-                  <path
-                    d={activeWorkerConnectionPreview.path}
-                    fill="none"
-                    stroke="rgba(148, 163, 184, 0.18)"
-                    strokeWidth={5}
-                    strokeLinecap="round"
-                  />
-                  <path
-                    d={activeWorkerConnectionPreview.path}
-                    fill="none"
-                    stroke="rgba(71, 85, 105, 0.78)"
-                    strokeWidth={1.8}
-                    strokeLinecap="round"
-                  />
-                </g>
-              </svg>
-            ) : null}
-
-            {marqueeState ? (
-              <div
-                aria-hidden="true"
-                className="pointer-events-none absolute rounded-2xl border border-sky-400/50 bg-sky-400/10 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.18)]"
-                style={{
-                  left: normalizeRectangle(marqueeState.origin, marqueeState.current).left,
-                  top: normalizeRectangle(marqueeState.origin, marqueeState.current).top,
-                  width:
-                    normalizeRectangle(marqueeState.origin, marqueeState.current).right -
-                    normalizeRectangle(marqueeState.origin, marqueeState.current).left,
-                  height:
-                    normalizeRectangle(marqueeState.origin, marqueeState.current).bottom -
-                    normalizeRectangle(marqueeState.origin, marqueeState.current).top,
-                }}
-              />
-            ) : null}
-          </div>
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="ml-2 w-52">
