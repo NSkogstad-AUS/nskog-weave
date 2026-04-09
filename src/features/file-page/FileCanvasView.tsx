@@ -37,10 +37,10 @@ import {
   SLOT_STEP_Y,
 } from './canvas/constants';
 import {
-  CanvasPaletteSidebar,
   type CanvasPaletteSidebarItem,
   type CanvasPaletteTemplateId,
 } from './canvas/CanvasPaletteSidebar';
+import { FileCanvasFloatingToolbar } from './canvas/FileCanvasFloatingToolbar';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import type { GroupResizeAxis } from './canvas/groupChrome';
 import {
@@ -3843,6 +3843,14 @@ export function FileCanvasView({
       },
     ];
   }, []);
+  const structurePaletteItems = useMemo(
+    () => canvasPaletteItems.filter((item) => item.section === 'Structure'),
+    [canvasPaletteItems],
+  );
+  const workerPaletteItems = useMemo(
+    () => canvasPaletteItems.filter((item) => item.section === 'Workers'),
+    [canvasPaletteItems],
+  );
 
   const clearPaletteDragState = useCallback(() => {
     paletteDragDepthRef.current = 0;
@@ -4608,7 +4616,6 @@ export function FileCanvasView({
         <div
           className={cn(
             'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]',
-            isPaletteDragOverCanvas && 'border-sky-300/80 shadow-[0_36px_90px_-58px_rgba(14,165,233,0.28)]',
           )}
         >
           <div
@@ -4663,6 +4670,12 @@ export function FileCanvasView({
               panState ? 'cursor-grabbing' : 'cursor-grab',
             )}
           >
+            <FileCanvasFloatingToolbar
+              structureItems={structurePaletteItems}
+              workerItems={workerPaletteItems}
+              onInsertItem={handleInsertPaletteNode}
+            />
+
             {isPaletteDragOverCanvas ? (
               <div
                 aria-hidden="true"
@@ -4792,14 +4805,6 @@ export function FileCanvasView({
               ) : null}
             </div>
           </div>
-          <CanvasPaletteSidebar
-            items={canvasPaletteItems}
-            draggedItemId={draggedPaletteTemplateId}
-            isCanvasDropActive={isPaletteDragOverCanvas}
-            onInsertItem={handleInsertPaletteNode}
-            onDragStartItem={handlePaletteItemDragStart}
-            onDragEndItem={clearPaletteDragState}
-          />
         </div>
       </ContextMenuTrigger>
       <ContextMenuContent className="ml-2 w-52">

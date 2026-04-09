@@ -819,31 +819,24 @@ function App() {
         />
         <SidebarInset className="min-h-screen bg-transparent md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
           <div className="flex h-full min-h-screen flex-col">
-            <FileWorkspace
-              activeFile={activeFile}
-              activeFolder={activeFolder}
-              activeView={activeView}
-              locationSegments={locationSegments}
-              nodes={activePage?.nodes ?? []}
-              selectedNodeIds={selectedNodeIds}
-              onMoveNodes={moveNodes}
-              onResizeNode={resizeNode}
-              onAddNode={addNode}
-              onUpdateNode={updateNode}
-              onDeleteNode={deleteNode}
-              onSelectNodes={setSelectedNodeIds}
-              onDownloadFiles={handleDownloadCanvasFiles}
-              onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
-              onHoveredSidebarItemChange={setHoveredSidebarItem}
-              onViewChange={(view) => {
-                if (activeFile) {
-                  setView(view);
-                  return;
-                }
-
-                setFolderView(view);
-              }}
-            />
+            <div className="min-h-0 flex-1">
+              <FileWorkspace
+                activeFile={activeFile}
+                activeFolder={activeFolder}
+                activeView={activeView}
+                nodes={activePage?.nodes ?? []}
+                selectedNodeIds={selectedNodeIds}
+                onMoveNodes={moveNodes}
+                onResizeNode={resizeNode}
+                onAddNode={addNode}
+                onUpdateNode={updateNode}
+                onDeleteNode={deleteNode}
+                onSelectNodes={setSelectedNodeIds}
+                onDownloadFiles={handleDownloadCanvasFiles}
+                onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
+                onHoveredSidebarItemChange={setHoveredSidebarItem}
+              />
+            </div>
           </div>
         </SidebarInset>
       </SidebarProvider>

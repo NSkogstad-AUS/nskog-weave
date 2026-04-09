@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback } from 'react';
 import { FileTextIcon } from 'lucide-react';
 
 import {
@@ -8,22 +8,15 @@ import {
   type WorkspaceFile,
   type WorkspaceFolder,
 } from '@/data/sidebarNavigation';
-import {
-  contentItemToPreviewDocument,
-  workspaceFileToContentItem,
-  workspaceFileToPreviewDocument,
-} from '@/lib/workspaceFiles';
+import { workspaceFileToContentItem } from '@/lib/workspaceFiles';
 import type { DownloadableFile } from '@/lib/fileDownloads';
 import type {
-  FilePageContentItem,
   FilePageNode,
   FilePageNodeSize,
   FilePageNodeUpdates,
   FilePageView,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
-import { FileContentPreview } from './FileContentPreview';
-import { FileWorkspaceHeader } from './FileWorkspaceHeader';
 import { FileCanvasView } from './FileCanvasView';
 import { FileExplorerView } from './FileExplorerView';
 import { useFolderCanvasState } from './useFolderCanvasState';
@@ -32,7 +25,6 @@ interface FileWorkspaceProps {
   activeFile: WorkspaceFile | null;
   activeFolder: WorkspaceFolder | null;
   activeView: FilePageView | null;
-  locationSegments: string[];
   nodes: FilePageNode[];
   selectedNodeIds: string[];
   onMoveNodes: (positions: Record<string, Point>) => void;
@@ -51,14 +43,12 @@ interface FileWorkspaceProps {
         }
       | null,
   ) => void;
-  onViewChange: (view: FilePageView) => void;
 }
 
 export function FileWorkspace({
   activeFile,
   activeFolder,
   activeView,
-  locationSegments,
   nodes,
   selectedNodeIds,
   onMoveNodes,
@@ -70,17 +60,12 @@ export function FileWorkspace({
   onDownloadFiles,
   onRequestDownloadFolder,
   onHoveredSidebarItemChange,
-  onViewChange,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
   const displayNodes = activeFile ? nodes : folderCanvasState.activeNodes;
   const displaySelectedNodeIds = activeFile
     ? selectedNodeIds
     : folderCanvasState.activeSelectedNodeIds;
-  const [previewedContentItem, setPreviewedContentItem] = useState<FilePageContentItem | null>(null);
-  const pageEyebrow = activeFile ? 'File' : 'Folder';
-  const breadcrumbPrefix = locationSegments.slice(0, -1).join('/');
-  const breadcrumbCurrent = locationSegments.at(-1) ?? '';
   const handleHoverNodeChange = useCallback(
     (node: FilePageNode | null) => {
       if (!node) {
@@ -137,29 +122,6 @@ export function FileWorkspace({
         )
       : [];
   }, [activeFolder]);
-  const selectedNodePreview = useMemo(() => {
-    const selectedNode = displaySelectedNodeIds
-      .map((nodeId) => displayNodes.find((node) => node.id === nodeId) ?? null)
-      .find((node): node is FilePageNode => Boolean(node));
-
-    if (!selectedNode) {
-      return null;
-    }
-
-    const previewItem = resolveCanvasFileItem(selectedNode);
-    return previewItem ? contentItemToPreviewDocument(previewItem) : null;
-  }, [displayNodes, displaySelectedNodeIds, resolveCanvasFileItem]);
-  const previewDocument = useMemo(() => {
-    if (previewedContentItem) {
-      return contentItemToPreviewDocument(previewedContentItem);
-    }
-
-    if (selectedNodePreview) {
-      return selectedNodePreview;
-    }
-
-    return activeFile ? workspaceFileToPreviewDocument(activeFile) : null;
-  }, [activeFile, previewedContentItem, selectedNodePreview]);
 
   const buildDownloadableFile = useCallback((file: {
     label: string;
@@ -212,10 +174,6 @@ export function FileWorkspace({
     return [];
   }, [activeFile, activeFolder, buildDownloadableFile, resolveCanvasFileItem]);
 
-  useEffect(() => {
-    setPreviewedContentItem(null);
-  }, [activeFile?.id, activeFolder?.id, displaySelectedNodeIds.join('|')]);
-
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
       <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)]">
@@ -237,15 +195,7 @@ export function FileWorkspace({
   return (
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex flex-1">
-        <div className="relative min-h-0 flex-1">
-          <FileWorkspaceHeader
-            activeView={activeView}
-            breadcrumbCurrent={breadcrumbCurrent}
-            breadcrumbPrefix={breadcrumbPrefix}
-            pageEyebrow={pageEyebrow}
-            onViewChange={onViewChange}
-          />
-
+        <div className="min-h-0 flex-1">
           {activeView === 'canvas' ? (
             <FileCanvasView
               nodes={displayNodes}
@@ -285,11 +235,9 @@ export function FileWorkspace({
               }
               resolveCanvasFileItem={resolveCanvasFileItem}
               resolveCanvasFolderSourceFiles={resolveCanvasFolderSourceFiles}
-              onPreviewContentItemChange={setPreviewedContentItem}
             />
           ) : (
             <FileExplorerView
-              className="pt-24"
               nodes={displayNodes}
               selectedNodeIds={displaySelectedNodeIds}
               onSelectNode={(nodeId) =>
@@ -298,8 +246,6 @@ export function FileWorkspace({
             />
           )}
         </div>
-
-        {previewDocument ? <FileContentPreview document={previewDocument} /> : null}
       </div>
     </div>
   );
