@@ -108,34 +108,32 @@ export function FileCanvasFloatingToolbar({
       >
         <div
           className={cn(
-            'grid w-full max-w-[min(100%,72rem)] transition-[grid-template-rows] duration-300 ease-out',
-            isCollapsed ? 'grid-rows-[0fr]' : 'grid-rows-[1fr]',
+            'w-full max-w-[min(100%,72rem)] overflow-hidden transition-[max-height,opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[max-height,opacity,transform]',
+            isCollapsed ? 'max-h-0 -translate-y-1 opacity-0' : 'max-h-28 translate-y-0 opacity-100',
           )}
         >
-          <div className="overflow-hidden">
-            <nav
-              id="canvas-insert-toolbar"
-              className={cn(
-                'panel-surface flex max-w-full items-center gap-2 overflow-x-auto rounded-[1.6rem] p-2 soft-scrollbar',
-                'transition-[transform,opacity,filter] duration-300 ease-out',
-                isCollapsed
-                  ? '-translate-y-6 opacity-0 blur-[2px] pointer-events-none'
-                  : 'translate-y-0 opacity-100 blur-0',
-              )}
-              aria-label="Canvas insert toolbar"
-            >
-              {items.map((item) => (
-                <ToolbarItemButton
-                  key={item.id}
-                  draggedItemId={draggedItemId}
-                  item={item}
-                  onDragEndItem={onDragEndItem}
-                  onDragStartItem={onDragStartItem}
-                  onInsertItem={onInsertItem}
-                />
-              ))}
-            </nav>
-          </div>
+          <nav
+            id="canvas-insert-toolbar"
+            className={cn(
+              'panel-surface flex max-w-full items-center gap-2 overflow-x-auto rounded-[1.6rem] p-2 soft-scrollbar',
+              'transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[transform,opacity]',
+              isCollapsed
+                ? '-translate-y-4 opacity-0 pointer-events-none'
+                : 'translate-y-0 opacity-100',
+            )}
+            aria-label="Canvas insert toolbar"
+          >
+            {items.map((item) => (
+              <ToolbarItemButton
+                key={item.id}
+                draggedItemId={draggedItemId}
+                item={item}
+                onDragEndItem={onDragEndItem}
+                onDragStartItem={onDragStartItem}
+                onInsertItem={onInsertItem}
+              />
+            ))}
+          </nav>
         </div>
 
         <button
@@ -144,21 +142,12 @@ export function FileCanvasFloatingToolbar({
           aria-expanded={!isCollapsed}
           aria-controls="canvas-insert-toolbar"
           className={cn(
-            'mt-2 flex h-11 min-w-[14rem] items-center justify-between rounded-[1.05rem] border border-slate-200/85 bg-white/92 px-4 text-left shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[transform,background-color,border-color,box-shadow] duration-300 ease-out',
+            'flex h-11 items-center justify-center rounded-[1.05rem] border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
+            isCollapsed ? 'mt-0.5 w-36 -translate-y-1' : 'mt-2 w-24 translate-y-0',
             'hover:-translate-y-px hover:border-slate-300/85 hover:bg-white',
           )}
+          aria-label={isCollapsed ? 'Show header tools' : 'Hide header tools'}
         >
-          <span className="flex min-w-0 items-center gap-3">
-            <span className="h-5 w-8 rounded-[0.5rem] border border-slate-200/80 bg-slate-100/90" />
-            <span className="min-w-0">
-              <span className="block text-sm font-semibold text-slate-900">
-                {isCollapsed ? 'Show header tools' : 'Hide header tools'}
-              </span>
-              <span className="block text-xs text-slate-500">
-                {isCollapsed ? 'Slide the toolbar back down' : 'Slide the toolbar up out of view'}
-              </span>
-            </span>
-          </span>
           {isCollapsed ? (
             <ChevronDownIcon className="size-4 shrink-0 text-slate-500" />
           ) : (
