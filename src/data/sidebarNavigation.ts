@@ -377,6 +377,25 @@ export function renameFileById(
   }));
 }
 
+export function updateFileContentById(
+  folders: WorkspaceFolder[],
+  fileId: string,
+  contentText: string,
+): WorkspaceFolder[] {
+  return mapFolders(folders, (folder) => ({
+    ...folder,
+    files: folder.files.map((file) =>
+      file.id === fileId
+        ? {
+            ...file,
+            contentText,
+            sizeBytes: contentText.length,
+          }
+        : file,
+    ),
+  }));
+}
+
 export function deleteFolderById(
   folders: WorkspaceFolder[],
   folderId: string,

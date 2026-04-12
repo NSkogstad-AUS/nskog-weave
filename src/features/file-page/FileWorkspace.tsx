@@ -43,6 +43,7 @@ interface FileWorkspaceProps {
         }
       | null,
   ) => void;
+  onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
 }
 
 export function FileWorkspace({
@@ -60,6 +61,7 @@ export function FileWorkspace({
   onDownloadFiles,
   onRequestDownloadFolder,
   onHoveredSidebarItemChange,
+  onUpdateWorkspaceFileContent,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
   const displayNodes = activeFile ? nodes : folderCanvasState.activeNodes;
@@ -109,6 +111,21 @@ export function FileWorkspace({
 
     return null;
   }, [activeFile, activeFolder]);
+  const resolveCanvasFileId = useCallback((node: FilePageNode) => {
+    if (node.kind !== 'file') {
+      return null;
+    }
+
+    if (activeFile && node.id === `${activeFile.id}-file-primary`) {
+      return activeFile.id;
+    }
+
+    if (node.id.startsWith('file:')) {
+      return node.id.slice('file:'.length);
+    }
+
+    return null;
+  }, [activeFile]);
   const resolveCanvasFolderSourceFiles = useCallback((node: FilePageNode) => {
     if (!activeFolder || node.kind !== 'folder' || !node.id.startsWith('folder:')) {
       return [];
@@ -234,7 +251,9 @@ export function FileWorkspace({
                 activeFile ? undefined : folderCanvasState.collapseFolderNode
               }
               resolveCanvasFileItem={resolveCanvasFileItem}
+              resolveCanvasFileId={resolveCanvasFileId}
               resolveCanvasFolderSourceFiles={resolveCanvasFolderSourceFiles}
+              onUpdateWorkspaceFileContent={onUpdateWorkspaceFileContent}
             />
           ) : (
             <FileExplorerView

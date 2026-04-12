@@ -23,6 +23,7 @@ import {
   findFilePathById,
   findFolderById,
   findFolderPathById,
+  updateFileContentById,
   type WorkspaceFolderOrderEntry,
   type WorkspaceSeparator,
   type WorkspaceFile,
@@ -226,6 +227,33 @@ function removeGeneratedContentItemFromNodes(
     nextNodes.push(node);
     return nextNodes;
   }, []);
+}
+
+function updateGeneratedContentItemTextInNodes(
+  nodes: FilePageNode[],
+  contentItemId: string,
+  contentText: string,
+): FilePageNode[] {
+  return nodes.map((node) => {
+    const contentItems = node.contentItems ?? [];
+
+    if (!contentItems.some((item) => item.id === contentItemId && item.kind === 'file')) {
+      return node;
+    }
+
+    return {
+      ...node,
+      contentItems: contentItems.map((item) =>
+        item.id === contentItemId && item.kind === 'file'
+          ? {
+              ...item,
+              textContent: contentText,
+              sizeBytes: contentText.length,
+            }
+          : item,
+      ),
+    };
+  });
 }
 
 function removeGeneratedFolderFromNodes(
@@ -604,6 +632,36 @@ function App() {
     [removeFilePage, updatePageByFileId],
   );
 
+  const handleUpdateWorkspaceFileContent = useCallback((
+    fileId: string,
+    contentText: string,
+  ) => {
+    const generatedFileMatch = parseGeneratedWorkspaceFileId(fileId);
+
+    if (generatedFileMatch) {
+      if (generatedFileMatch.ownerType === 'file') {
+        updatePageByFileId(generatedFileMatch.ownerId, (page) => ({
+          ...page,
+          nodes: updateGeneratedContentItemTextInNodes(
+            page.nodes,
+            generatedFileMatch.entityId,
+            contentText,
+          ),
+        }));
+      } else {
+        setFolderCanvasPages(
+          updateStoredFolderCanvasNodes(generatedFileMatch.ownerId, (nodes) =>
+            updateGeneratedContentItemTextInNodes(nodes, generatedFileMatch.entityId, contentText),
+          ),
+        );
+      }
+
+      return;
+    }
+
+    setFolders((current) => updateFileContentById(current, fileId, contentText));
+  }, [updatePageByFileId]);
+
   const handleFolderDelete = useCallback((folderId: string) => {
     const generatedFolderMatch = parseGeneratedWorkspaceFolderId(folderId);
 
@@ -835,6 +893,7 @@ function App() {
                 onDownloadFiles={handleDownloadCanvasFiles}
                 onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
                 onHoveredSidebarItemChange={setHoveredSidebarItem}
+                onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
               />
             </div>
           </div>

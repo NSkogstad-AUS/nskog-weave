@@ -41,6 +41,11 @@ import {
   type CanvasPaletteSidebarItem,
   type CanvasPaletteTemplateId,
 } from './canvas/CanvasPaletteSidebar';
+import {
+  FileCanvasFloatingInspector,
+  type CanvasFloatingInspectorRect,
+  type CanvasFloatingInspectorTarget,
+} from './canvas/FileCanvasFloatingInspector';
 import { FileCanvasFloatingToolbar } from './canvas/FileCanvasFloatingToolbar';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import type { GroupResizeAxis } from './canvas/groupChrome';
@@ -87,10 +92,12 @@ interface FileCanvasViewProps {
   onExpandFolder?: (node: FilePageNode) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
   resolveCanvasFileItem?: (node: FilePageNode) => FilePageContentItem | null;
+  resolveCanvasFileId?: (node: FilePageNode) => string | null;
   resolveCanvasFolderSourceFiles?: (node: FilePageNode) => FilePageContentItem[];
   onPreviewContentItemChange?: (item: FilePageContentItem | null) => void;
   onDownloadFileNode?: (node: FilePageNode) => void;
   onRequestDownloadFolderNode?: (node: FilePageNode) => void;
+  onUpdateWorkspaceFileContent?: (fileId: string, contentText: string) => void;
 }
 
 type DragState = {
@@ -146,10 +153,36 @@ type ConnectorPath = {
   deletable: boolean;
 };
 
+type FloatingInspectorWindowState = {
+  rect: CanvasFloatingInspectorRect;
+  minimized: boolean;
+  maximized: boolean;
+  restoreRect: CanvasFloatingInspectorRect | null;
+};
+
+type FloatingInspectorState = {
+  target: CanvasFloatingInspectorTarget;
+  window: FloatingInspectorWindowState;
+  fileId: string | null;
+};
+
+type FloatingInspectorDragState = {
+  origin: Point;
+  baseRect: CanvasFloatingInspectorRect;
+};
+
+type FloatingInspectorResizeState = {
+  origin: Point;
+  baseRect: CanvasFloatingInspectorRect;
+};
+
 const OUTER_WIDGET_SNAP_THRESHOLD = 4;
 const GROUP_SNAP_TOLERANCE = Math.round(Math.min(SLOT_STEP_X, SLOT_STEP_Y) * 0.25);
 const WORKER_CONNECTION_THRESHOLD_X = SLOT_STEP_X * 1.25;
 const WORKER_CONNECTION_THRESHOLD_Y = SLOT_STEP_Y * 1.25;
+const FLOATING_INSPECTOR_MIN_WIDTH = 360;
+const FLOATING_INSPECTOR_MIN_HEIGHT = 240;
+const FLOATING_INSPECTOR_HEADER_HEIGHT = 60;
 const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-template';
 const CANVAS_PALETTE_TEXT_PREFIX = 'weave-canvas-palette-template:';
 
@@ -440,10 +473,12 @@ export function FileCanvasView({
   onExpandFolder,
   onCollapseFolder,
   resolveCanvasFileItem,
+  resolveCanvasFileId,
   resolveCanvasFolderSourceFiles,
   onPreviewContentItemChange,
   onDownloadFileNode,
   onRequestDownloadFolderNode,
+  onUpdateWorkspaceFileContent,
 }: FileCanvasViewProps) {
   const canvasRef = useRef<HTMLDivElement | null>(null);
   const releaseTimerRef = useRef<number | null>(null);
@@ -453,6 +488,8 @@ export function FileCanvasView({
   const panStateRef = useRef<PanState | null>(null);
   const resizeStateRef = useRef<ResizeState | null>(null);
   const workerConnectionDragStateRef = useRef<WorkerConnectionDragState | null>(null);
+  const floatingInspectorDragStateRef = useRef<FloatingInspectorDragState | null>(null);
+  const floatingInspectorResizeStateRef = useRef<FloatingInspectorResizeState | null>(null);
   const paletteDragDepthRef = useRef(0);
   const rawDragPositionsRef = useRef<Record<string, Point>>({});
   const draftPositionsRef = useRef<Record<string, Point>>({});
@@ -500,6 +537,7 @@ export function FileCanvasView({
     useState<CanvasPaletteTemplateId | null>(null);
   const [paletteDragPreviewPoint, setPaletteDragPreviewPoint] = useState<Point | null>(null);
   const [isPaletteDragOverCanvas, setIsPaletteDragOverCanvas] = useState(false);
+  const [floatingInspector, setFloatingInspector] = useState<FloatingInspectorState | null>(null);
   const renderedNodes = useMemo(
     () =>
       [...nodes].sort((left, right) => {
@@ -1587,6 +1625,197 @@ export function FileCanvasView({
       window.removeEventListener('pointerup', handlePointerUp);
     };
   }, []);
+
+  const closeFloatingInspector = useCallback(() => {
+    floatingInspectorDragStateRef.current = null;
+    floatingInspectorResizeStateRef.current = null;
+    setFloatingInspector(null);
+  }, []);
+
+  const toggleFloatingInspectorMinimize = useCallback(() => {
+    setFloatingInspector((current) =>
+      current
+        ? {
+            ...current,
+            window: {
+              ...current.window,
+              minimized: !current.window.minimized,
+            },
+          }
+        : current,
+    );
+  }, []);
+
+  const toggleFloatingInspectorMaximize = useCallback(() => {
+    setFloatingInspector((current) => {
+      if (!current) {
+        return current;
+      }
+
+      if (current.window.maximized) {
+        return {
+          ...current,
+          window: {
+            ...current.window,
+            rect: current.window.restoreRect ?? current.window.rect,
+            minimized: false,
+            maximized: false,
+            restoreRect: null,
+          },
+        };
+      }
+
+      const canvasRect = canvasRef.current?.getBoundingClientRect();
+
+      if (!canvasRect) {
+        return current;
+      }
+
+      return {
+        ...current,
+        window: {
+          ...current.window,
+          rect: {
+            x: 16,
+            y: 16,
+            width: Math.max(FLOATING_INSPECTOR_MIN_WIDTH, canvasRect.width - 32),
+            height: Math.max(FLOATING_INSPECTOR_MIN_HEIGHT, canvasRect.height - 32),
+          },
+          minimized: false,
+          maximized: true,
+          restoreRect: current.window.rect,
+        },
+      };
+    });
+  }, []);
+
+  const handleFloatingInspectorHeaderPointerDown = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setFloatingInspector((current) => {
+      if (!current || current.window.maximized) {
+        return current;
+      }
+
+      floatingInspectorDragStateRef.current = {
+        origin: { x: event.clientX, y: event.clientY },
+        baseRect: current.window.rect,
+      };
+
+      return current;
+    });
+  }, []);
+
+  const handleFloatingInspectorResizePointerDown = useCallback((
+    event: ReactPointerEvent<HTMLDivElement>,
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+
+    setFloatingInspector((current) => {
+      if (!current || current.window.maximized || current.window.minimized) {
+        return current;
+      }
+
+      floatingInspectorResizeStateRef.current = {
+        origin: { x: event.clientX, y: event.clientY },
+        baseRect: current.window.rect,
+      };
+
+      return current;
+    });
+  }, []);
+
+  const handleFloatingInspectorTextChange = useCallback((value: string) => {
+    setFloatingInspector((current) => {
+      if (!current || current.target.type !== 'file') {
+        return current;
+      }
+
+      return {
+        ...current,
+        target: {
+          ...current.target,
+          textContent: value,
+          sizeBytes: value.length,
+        },
+      };
+    });
+
+    if (floatingInspector?.fileId && onUpdateWorkspaceFileContent) {
+      onUpdateWorkspaceFileContent(floatingInspector.fileId, value);
+    }
+  }, [floatingInspector?.fileId, onUpdateWorkspaceFileContent]);
+
+  useEffect(() => {
+    const handlePointerMove = (event: PointerEvent) => {
+      const liveDragState = floatingInspectorDragStateRef.current;
+      const liveResizeState = floatingInspectorResizeStateRef.current;
+
+      if (!liveDragState && !liveResizeState) {
+        return;
+      }
+
+      if (liveDragState) {
+        const nextRect = clampFloatingInspectorRect({
+          ...liveDragState.baseRect,
+          x: liveDragState.baseRect.x + (event.clientX - liveDragState.origin.x),
+          y: liveDragState.baseRect.y + (event.clientY - liveDragState.origin.y),
+        });
+
+        setFloatingInspector((current) =>
+          current
+            ? {
+                ...current,
+                window: {
+                  ...current.window,
+                  rect: nextRect,
+                },
+              }
+            : current,
+        );
+        return;
+      }
+
+      if (!liveResizeState) {
+        return;
+      }
+
+      const nextRect = clampFloatingInspectorRect({
+        ...liveResizeState.baseRect,
+        width: liveResizeState.baseRect.width + (event.clientX - liveResizeState.origin.x),
+        height: liveResizeState.baseRect.height + (event.clientY - liveResizeState.origin.y),
+      });
+
+      setFloatingInspector((current) =>
+        current
+          ? {
+              ...current,
+              window: {
+                ...current.window,
+                rect: nextRect,
+              },
+            }
+          : current,
+      );
+    };
+
+    const handlePointerUp = () => {
+      floatingInspectorDragStateRef.current = null;
+      floatingInspectorResizeStateRef.current = null;
+    };
+
+    window.addEventListener('pointermove', handlePointerMove);
+    window.addEventListener('pointerup', handlePointerUp);
+
+    return () => {
+      window.removeEventListener('pointermove', handlePointerMove);
+      window.removeEventListener('pointerup', handlePointerUp);
+    };
+  }, [clampFloatingInspectorRect]);
 
   useEffect(() => {
     if (dragState || marqueeState || panState || resizeState) {
@@ -2786,6 +3015,198 @@ export function FileCanvasView({
 
     return sortCanvasContentItems([...dedupedByKey.values()]);
   }, [collectFolderSourceFiles, getWorkerInputNodes, resolveSourceFileItem]);
+
+  function clampFloatingInspectorRect(
+    rect: CanvasFloatingInspectorRect,
+    minimized = false,
+  ) {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+
+    if (!canvasRect) {
+      return rect;
+    }
+
+    const width = Math.max(
+      FLOATING_INSPECTOR_MIN_WIDTH,
+      Math.min(rect.width, canvasRect.width - 24),
+    );
+    const height = minimized
+      ? FLOATING_INSPECTOR_HEADER_HEIGHT
+      : Math.max(
+          FLOATING_INSPECTOR_MIN_HEIGHT,
+          Math.min(rect.height, canvasRect.height - 24),
+        );
+    const maxX = Math.max(12, canvasRect.width - width - 12);
+    const maxY = Math.max(12, canvasRect.height - height - 12);
+
+    return {
+      x: Math.min(Math.max(rect.x, 12), maxX),
+      y: Math.min(Math.max(rect.y, 12), maxY),
+      width,
+      height,
+    };
+  }
+
+  function getDefaultFloatingInspectorRect() {
+    const canvasRect = canvasRef.current?.getBoundingClientRect();
+    const defaultRect = {
+      x: 72,
+      y: 88,
+      width: 620,
+      height: 460,
+    };
+
+    if (!canvasRect) {
+      return defaultRect;
+    }
+
+    return clampFloatingInspectorRect({
+      x: Math.max(24, Math.round((canvasRect.width - defaultRect.width) / 2)),
+      y: Math.max(32, Math.round((canvasRect.height - defaultRect.height) / 4)),
+      width: Math.min(defaultRect.width, canvasRect.width - 24),
+      height: Math.min(defaultRect.height, canvasRect.height - 24),
+    });
+  }
+
+  const resolveNodeFolderContents = useCallback((node: FilePageNode) => {
+    const derivedFolderContents = folderContentsById[node.id];
+    const sourceFolderContents = getFolderContents?.(node);
+
+    return node.kind === 'worker'
+      ? workerInputContentsById[node.id] ?? []
+      : sourceFolderContents && sourceFolderContents.length > 0
+        ? sourceFolderContents
+        : derivedFolderContents && derivedFolderContents.length > 0
+          ? derivedFolderContents
+          : node.contentItems ?? [];
+  }, [folderContentsById, getFolderContents, workerInputContentsById]);
+
+  const buildFloatingInspectorTargetFromNode = useCallback((
+    node: FilePageNode,
+  ): { target: CanvasFloatingInspectorTarget; fileId: string | null } | null => {
+    if (node.kind === 'file') {
+      const sourceItem = resolveSourceFileItem(node);
+
+      if (!sourceItem) {
+        return null;
+      }
+
+      const fileId = resolveCanvasFileId?.(node) ?? null;
+
+      return {
+        fileId,
+        target: {
+          type: 'file',
+          label: node.label,
+          description: sourceItem.description ?? node.description,
+          textContent: sourceItem.textContent ?? '',
+          editable: fileId !== null && typeof onUpdateWorkspaceFileContent === 'function',
+          mimeType: sourceItem.mimeType ?? null,
+          sizeBytes: sourceItem.sizeBytes ?? null,
+        },
+      };
+    }
+
+    if (node.kind === 'folder') {
+      return {
+        fileId: null,
+        target: {
+          type: 'folder',
+          label: node.label,
+          description: node.description,
+          items: resolveNodeFolderContents(node),
+        },
+      };
+    }
+
+    return null;
+  }, [
+    onUpdateWorkspaceFileContent,
+    resolveCanvasFileId,
+    resolveNodeFolderContents,
+    resolveSourceFileItem,
+  ]);
+
+  const buildFloatingInspectorTargetFromItem = useCallback((
+    item: FilePageContentItem,
+  ): { target: CanvasFloatingInspectorTarget; fileId: string | null } | null => {
+    if (item.kind !== 'file') {
+      return null;
+    }
+
+    const fileId = item.id.startsWith('file:') ? item.id.slice('file:'.length) : null;
+
+    return {
+      fileId,
+      target: {
+        type: 'file',
+        label: item.label,
+        description: item.description ?? '',
+        textContent: item.textContent ?? '',
+        editable: fileId !== null && typeof onUpdateWorkspaceFileContent === 'function',
+        mimeType: item.mimeType ?? null,
+        sizeBytes: item.sizeBytes ?? null,
+      },
+    };
+  }, [onUpdateWorkspaceFileContent]);
+
+  const openFloatingInspector = useCallback((
+    nextTarget: CanvasFloatingInspectorTarget,
+    fileId: string | null = null,
+  ) => {
+    setFloatingInspector((current) => {
+      const nextRect = current
+        ? clampFloatingInspectorRect(
+            current.window.maximized
+              ? current.window.restoreRect ?? current.window.rect
+              : current.window.rect,
+          )
+        : getDefaultFloatingInspectorRect();
+
+      return {
+        fileId,
+        target: nextTarget,
+        window: {
+          rect: nextRect,
+          minimized: false,
+          maximized: false,
+          restoreRect: current?.window.restoreRect ?? null,
+        },
+      };
+    });
+  }, [clampFloatingInspectorRect, getDefaultFloatingInspectorRect]);
+
+  const openFloatingInspectorForNode = useCallback((node: FilePageNode) => {
+    const previewTarget = buildFloatingInspectorTargetFromNode(node);
+
+    if (!previewTarget) {
+      return;
+    }
+
+    openFloatingInspector(previewTarget.target, previewTarget.fileId);
+  }, [buildFloatingInspectorTargetFromNode, openFloatingInspector]);
+
+  const openFloatingInspectorForItem = useCallback((item: FilePageContentItem) => {
+    const nodeMatch = getNodeById(item.id);
+
+    if (nodeMatch && (nodeMatch.kind === 'file' || nodeMatch.kind === 'folder')) {
+      openFloatingInspectorForNode(nodeMatch);
+      return;
+    }
+
+    const previewTarget = buildFloatingInspectorTargetFromItem(item);
+
+    if (!previewTarget) {
+      return;
+    }
+
+    openFloatingInspector(previewTarget.target, previewTarget.fileId);
+  }, [
+    buildFloatingInspectorTargetFromItem,
+    getNodeById,
+    openFloatingInspector,
+    openFloatingInspectorForNode,
+  ]);
 
   const buildWorkerSourceSignature = useCallback((
     worker: FilePageNode,
@@ -4506,16 +4927,7 @@ export function FileCanvasView({
       previewPosition &&
       !arePointsEqual(previewPosition, displayPosition);
     const folderExpandState = getFolderExpandState?.(node) ?? 'hidden';
-    const derivedFolderContents = folderContentsById[node.id];
-    const sourceFolderContents = getFolderContents?.(node);
-    const folderContents =
-      node.kind === 'worker'
-        ? workerInputContentsById[node.id] ?? []
-        : sourceFolderContents && sourceFolderContents.length > 0
-          ? sourceFolderContents
-          : derivedFolderContents && derivedFolderContents.length > 0
-            ? derivedFolderContents
-            : node.contentItems ?? [];
+    const folderContents = resolveNodeFolderContents(node);
 
     return (
       <FileCanvasNode
@@ -4594,6 +5006,7 @@ export function FileCanvasView({
             : undefined
         }
         onHoverChange={setNodeHover}
+        onOpenPreview={openFloatingInspectorForNode}
         onPointerDown={handleNodePointerDown}
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
@@ -4607,13 +5020,19 @@ export function FileCanvasView({
         }
         onSelectFolderContentItem={(item) => {
           if (getNodeById(item.id)) {
-            selectSingleNode(item.id);
+            const existingNode = getNodeById(item.id);
+
+            if (existingNode) {
+              selectSingleNode(item.id);
+
+              if (existingNode.kind === 'file' || existingNode.kind === 'folder') {
+                openFloatingInspectorForNode(existingNode);
+              }
+            }
             return;
           }
 
-          if (item.kind === 'file') {
-            onPreviewContentItemChange?.(item);
-          }
+          openFloatingInspectorForItem(item);
         }}
         onSelect={selectSingleNode}
         onCollapseFolder={onCollapseFolder}
@@ -4762,6 +5181,22 @@ export function FileCanvasView({
               <div
                 aria-hidden="true"
                 className="pointer-events-none absolute inset-4 z-20 rounded-[2rem] border border-dashed border-sky-300/80 bg-sky-100/18 shadow-[inset_0_0_0_1px_rgba(125,211,252,0.22)]"
+              />
+            ) : null}
+
+            {floatingInspector ? (
+              <FileCanvasFloatingInspector
+                rect={floatingInspector.window.rect}
+                target={floatingInspector.target}
+                isMinimized={floatingInspector.window.minimized}
+                isMaximized={floatingInspector.window.maximized}
+                onClose={closeFloatingInspector}
+                onHeaderPointerDown={handleFloatingInspectorHeaderPointerDown}
+                onResizeHandlePointerDown={handleFloatingInspectorResizePointerDown}
+                onTextChange={handleFloatingInspectorTextChange}
+                onToggleMaximize={toggleFloatingInspectorMaximize}
+                onToggleMinimize={toggleFloatingInspectorMinimize}
+                onOpenItem={openFloatingInspectorForItem}
               />
             ) : null}
 

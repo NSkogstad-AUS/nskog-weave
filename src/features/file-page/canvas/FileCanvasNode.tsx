@@ -87,6 +87,7 @@ interface FileCanvasNodeProps {
   onCollapseFolder?: (node: FilePageNode) => void;
   onExpandFolder?: (node: FilePageNode) => void;
   onHoverChange: (node: FilePageNode, hovered: boolean) => void;
+  onOpenPreview?: (node: FilePageNode) => void;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>, node: FilePageNode) => void;
   onPreviewIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
   onPreviewResize: (node: FilePageNode, size: FilePageNode['size']) => void;
@@ -139,6 +140,7 @@ function FileCanvasNodeComponent({
   onCollapseFolder,
   onExpandFolder,
   onHoverChange,
+  onOpenPreview,
   onPointerDown,
   onPreviewIcon,
   onPreviewResize,
@@ -232,6 +234,14 @@ function FileCanvasNodeComponent({
       type="button"
       data-canvas-node="true"
       onPointerDown={(event) => onPointerDown(event, node)}
+      onClick={(event) => {
+        if (!onOpenPreview || isDragging || (node.kind !== 'file' && node.kind !== 'folder')) {
+          return;
+        }
+
+        event.stopPropagation();
+        onOpenPreview(node);
+      }}
       onPointerEnter={() => onHoverChange(node, true)}
       onPointerLeave={() => {
         if (!isContextMenuOpen) {
