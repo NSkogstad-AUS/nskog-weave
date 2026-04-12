@@ -2,20 +2,12 @@ import type { DragEvent as ReactDragEvent } from 'react';
 import {
   ArrowUpDownIcon,
   BotIcon,
-  ChevronDownIcon,
   GripVerticalIcon,
   SparklesIcon,
   ShapesIcon,
   type LucideIcon,
 } from 'lucide-react';
 
-import { Button } from '@/components/ui/button';
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import type {
   CanvasPaletteSidebarItem,
@@ -41,30 +33,15 @@ const ITEM_ICON_MAP: Record<CanvasPaletteTemplateId, LucideIcon> = {
   element: SparklesIcon,
 };
 
-const SECTION_META = {
-  Structure: {
-    icon: ShapesIcon,
-    label: 'Structure',
-  },
-  Worker: {
-    icon: BotIcon,
-    label: 'Worker',
-  },
-} as const;
-
-function ToolbarMenu({
+function ToolbarItemButton({
   draggedItemId,
-  items,
-  label,
-  icon: Icon,
+  item,
   onDragEndItem,
   onDragStartItem,
   onInsertItem,
 }: {
   draggedItemId: CanvasPaletteTemplateId | null;
-  items: CanvasPaletteSidebarItem[];
-  label: string;
-  icon: LucideIcon;
+  item: CanvasPaletteSidebarItem;
   onDragEndItem: () => void;
   onDragStartItem: (
     itemId: CanvasPaletteTemplateId,
@@ -72,61 +49,36 @@ function ToolbarMenu({
   ) => void;
   onInsertItem: (itemId: CanvasPaletteTemplateId) => void;
 }) {
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          type="button"
-          variant="ghost"
-          className="h-10 rounded-2xl px-4 text-slate-700 hover:bg-white/80 hover:text-slate-950 data-[state=open]:bg-white/90 data-[state=open]:text-slate-950"
-        >
-          <Icon className="size-4" />
-          {label}
-          <ChevronDownIcon className="size-4 text-slate-400" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent
-        align="center"
-        sideOffset={10}
-        className="w-72 min-w-72 rounded-[1.2rem] border border-slate-200/80 bg-white/96 p-2 shadow-[0_20px_45px_-24px_rgba(15,23,42,0.34)]"
-      >
-        {items.map((item) => {
-          const ItemIcon = ITEM_ICON_MAP[item.id];
-          const isDragging = draggedItemId === item.id;
+  const Icon = ITEM_ICON_MAP[item.id];
+  const isDragging = draggedItemId === item.id;
 
-          return (
-            <DropdownMenuItem
-              key={item.id}
-              draggable
-              onSelect={() => onInsertItem(item.id)}
-              onDragStart={(event) => onDragStartItem(item.id, event)}
-              onDragEnd={onDragEndItem}
-              className={cn(
-                'items-start gap-3 rounded-[1rem] px-3 py-2.5 focus:bg-slate-50',
-                'cursor-grab active:cursor-grabbing',
-                isDragging && 'bg-sky-50/90',
-              )}
-            >
-              <span className="mt-0.5 flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/90 text-slate-600">
-                <ItemIcon className="size-4" />
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="flex items-center gap-2">
-                  <span className="block text-sm font-semibold text-slate-950">{item.label}</span>
-                  <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-                    Drag
-                  </span>
-                </span>
-                <span className="mt-0.5 block text-xs leading-5 text-slate-500">
-                  {item.description}
-                </span>
-              </span>
-              <GripVerticalIcon className="mt-1 size-4 shrink-0 text-slate-300" />
-            </DropdownMenuItem>
-          );
-        })}
-      </DropdownMenuContent>
-    </DropdownMenu>
+  return (
+    <button
+      type="button"
+      draggable
+      onClick={() => onInsertItem(item.id)}
+      onDragStart={(event) => onDragStartItem(item.id, event)}
+      onDragEnd={onDragEndItem}
+      className={cn(
+        'group flex min-w-0 items-center gap-3 rounded-[1.1rem] border border-slate-200/80 bg-white/88 px-3 py-2 text-left shadow-[0_12px_30px_-28px_rgba(15,23,42,0.34)] transition',
+        'cursor-grab active:cursor-grabbing hover:-translate-y-px hover:border-slate-300/80 hover:bg-white',
+        isDragging && 'border-sky-300/80 bg-sky-50/90 shadow-[0_18px_34px_-28px_rgba(14,165,233,0.85)]',
+      )}
+    >
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/90 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white">
+        <Icon className="size-4" />
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="flex items-center gap-2">
+          <span className="truncate text-sm font-semibold text-slate-950">{item.label}</span>
+          <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+            Drag
+          </span>
+        </span>
+        <span className="mt-0.5 block truncate text-xs text-slate-500">{item.section}</span>
+      </span>
+      <GripVerticalIcon className="size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400" />
+    </button>
   );
 }
 
@@ -138,6 +90,8 @@ export function FileCanvasFloatingToolbar({
   onDragStartItem,
   onInsertItem,
 }: FileCanvasFloatingToolbarProps) {
+  const items = [...structureItems, ...workerItems];
+
   return (
     <div className="pointer-events-none absolute inset-x-0 top-5 z-30 flex justify-center px-4">
       <nav
@@ -147,28 +101,20 @@ export function FileCanvasFloatingToolbar({
           event.stopPropagation();
         }}
         className={cn(
-          'panel-surface pointer-events-auto flex max-w-full items-center gap-1 rounded-[1.6rem] p-1.5',
+          'panel-surface pointer-events-auto flex max-w-full items-center gap-2 overflow-x-auto rounded-[1.6rem] p-2',
         )}
         aria-label="Canvas insert toolbar"
       >
-        <ToolbarMenu
-          draggedItemId={draggedItemId}
-          items={structureItems}
-          label={SECTION_META.Structure.label}
-          icon={SECTION_META.Structure.icon}
-          onDragEndItem={onDragEndItem}
-          onDragStartItem={onDragStartItem}
-          onInsertItem={onInsertItem}
-        />
-        <ToolbarMenu
-          draggedItemId={draggedItemId}
-          items={workerItems}
-          label={SECTION_META.Worker.label}
-          icon={SECTION_META.Worker.icon}
-          onDragEndItem={onDragEndItem}
-          onDragStartItem={onDragStartItem}
-          onInsertItem={onInsertItem}
-        />
+        {items.map((item) => (
+          <ToolbarItemButton
+            key={item.id}
+            draggedItemId={draggedItemId}
+            item={item}
+            onDragEndItem={onDragEndItem}
+            onDragStartItem={onDragStartItem}
+            onInsertItem={onInsertItem}
+          />
+        ))}
       </nav>
     </div>
   );
