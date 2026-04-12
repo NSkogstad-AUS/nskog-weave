@@ -5,7 +5,6 @@ import {
   BotIcon,
   ChevronDownIcon,
   ChevronUpIcon,
-  GripVerticalIcon,
   SparklesIcon,
   ShapesIcon,
   type LucideIcon,
@@ -63,24 +62,17 @@ function ToolbarItemButton({
       onDragStart={(event) => onDragStartItem(item.id, event)}
       onDragEnd={onDragEndItem}
       className={cn(
-        'group flex min-w-0 items-center gap-3 rounded-[1.1rem] border border-slate-200/80 bg-white/88 px-3 py-2 text-left shadow-[0_12px_30px_-28px_rgba(15,23,42,0.34)] transition',
+        'group flex min-w-0 items-center gap-1 rounded-[1.1rem] border border-slate-200/80 bg-white/88 px-3 py-2 text-left shadow-[0_12px_30px_-28px_rgba(15,23,42,0.34)] transition',
         'cursor-grab active:cursor-grabbing hover:-translate-y-px hover:border-slate-300/80 hover:bg-white',
         isDragging && 'border-sky-300/80 bg-sky-50/90 shadow-[0_18px_34px_-28px_rgba(14,165,233,0.85)]',
       )}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/90 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] text-slate-600">
         <Icon className="size-4" />
       </span>
-      <span className="min-w-0 flex-1">
-        <span className="flex items-center gap-2">
-          <span className="truncate text-sm font-semibold text-slate-950">{item.label}</span>
-          <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
-            Drag
-          </span>
-        </span>
-        <span className="mt-0.5 block truncate text-xs text-slate-500">{item.section}</span>
+      <span className="-ml-0.5 min-w-0">
+        <span className="block truncate text-sm font-semibold text-slate-950">{item.label}</span>
       </span>
-      <GripVerticalIcon className="size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400" />
     </button>
   );
 }

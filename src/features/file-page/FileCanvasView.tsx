@@ -31,6 +31,7 @@ import {
   GROUP_CONTENT_INSET_LEFT,
   GROUP_CONTENT_INSET_TOP,
   GROUP_MIN_GRID_UNITS,
+  NODE_CARD_CLASS,
   SLOT_GAP_X,
   SLOT_GAP_Y,
   SLOT_STEP_X,
@@ -43,6 +44,7 @@ import {
 import { FileCanvasFloatingToolbar } from './canvas/FileCanvasFloatingToolbar';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import type { GroupResizeAxis } from './canvas/groupChrome';
+import { ELEMENT_ICON_META, NODE_META } from './canvas/meta';
 import {
   boundsOverlap,
   clampNodePositionToBounds,
@@ -162,6 +164,23 @@ function isCanvasPaletteTemplateId(value: string): value is CanvasPaletteTemplat
 
 function hasCanvasPaletteTemplate(dataTransfer: DataTransfer) {
   return Array.from(dataTransfer.types).includes(CANVAS_PALETTE_DATA_TRANSFER_TYPE);
+}
+
+function setTransparentDragImage(dataTransfer: DataTransfer) {
+  const dragImage = document.createElement('div');
+  dragImage.style.position = 'fixed';
+  dragImage.style.left = '-9999px';
+  dragImage.style.top = '-9999px';
+  dragImage.style.width = '1px';
+  dragImage.style.height = '1px';
+  dragImage.style.opacity = '0';
+  dragImage.style.pointerEvents = 'none';
+  document.body.appendChild(dragImage);
+  dataTransfer.setDragImage(dragImage, 0, 0);
+
+  window.requestAnimationFrame(() => {
+    dragImage.remove();
+  });
 }
 
 function readCanvasPaletteTemplate(dataTransfer: DataTransfer): CanvasPaletteTemplateId | null {
@@ -479,6 +498,7 @@ export function FileCanvasView({
   const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
   const [draggedPaletteTemplateId, setDraggedPaletteTemplateId] =
     useState<CanvasPaletteTemplateId | null>(null);
+  const [paletteDragPreviewPoint, setPaletteDragPreviewPoint] = useState<Point | null>(null);
   const [isPaletteDragOverCanvas, setIsPaletteDragOverCanvas] = useState(false);
   const renderedNodes = useMemo(
     () =>
@@ -3868,6 +3888,7 @@ export function FileCanvasView({
   const clearPaletteDragState = useCallback(() => {
     paletteDragDepthRef.current = 0;
     setDraggedPaletteTemplateId(null);
+    setPaletteDragPreviewPoint(null);
     setIsPaletteDragOverCanvas(false);
   }, []);
 
@@ -3880,9 +3901,11 @@ export function FileCanvasView({
     event: ReactDragEvent<HTMLElement>,
   ) => {
     setDraggedPaletteTemplateId(templateId);
+    setPaletteDragPreviewPoint(null);
     event.dataTransfer.effectAllowed = 'copy';
     event.dataTransfer.setData(CANVAS_PALETTE_DATA_TRANSFER_TYPE, templateId);
     event.dataTransfer.setData('text/plain', `${CANVAS_PALETTE_TEXT_PREFIX}${templateId}`);
+    setTransparentDragImage(event.dataTransfer);
   }, []);
 
   const handleCanvasPaletteDragEnter = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
@@ -3896,7 +3919,12 @@ export function FileCanvasView({
     event.preventDefault();
     paletteDragDepthRef.current += 1;
     setIsPaletteDragOverCanvas(true);
-  }, []);
+    const localPoint = getLocalPoint(event.clientX, event.clientY);
+
+    if (localPoint) {
+      setPaletteDragPreviewPoint(localPoint);
+    }
+  }, [getLocalPoint]);
 
   const handleCanvasPaletteDragOver = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     if (
@@ -3908,11 +3936,16 @@ export function FileCanvasView({
 
     event.preventDefault();
     event.dataTransfer.dropEffect = 'copy';
+    const localPoint = getLocalPoint(event.clientX, event.clientY);
+
+    if (localPoint) {
+      setPaletteDragPreviewPoint(localPoint);
+    }
 
     if (!isPaletteDragOverCanvas) {
       setIsPaletteDragOverCanvas(true);
     }
-  }, [isPaletteDragOverCanvas]);
+  }, [getLocalPoint, isPaletteDragOverCanvas]);
 
   const handleCanvasPaletteDragLeave = useCallback((event: ReactDragEvent<HTMLDivElement>) => {
     if (
@@ -3926,6 +3959,7 @@ export function FileCanvasView({
     paletteDragDepthRef.current = Math.max(0, paletteDragDepthRef.current - 1);
 
     if (paletteDragDepthRef.current === 0) {
+      setPaletteDragPreviewPoint(null);
       setIsPaletteDragOverCanvas(false);
     }
   }, []);
@@ -3957,6 +3991,38 @@ export function FileCanvasView({
     getLocalPoint,
     resolveInsertionPosition,
   ]);
+
+  const paletteDragPreview = useMemo(() => {
+    if (!draggedPaletteTemplateId || !paletteDragPreviewPoint) {
+      return null;
+    }
+
+    const node = buildCanvasPaletteNode(draggedPaletteTemplateId);
+    const position = resolveInsertionPosition(node, paletteDragPreviewPoint, 'center');
+    const bounds = getNodeBoundsWithSize(position, node.size, node.kind);
+    const dimensions = getNodeDimensionsForKind(node.size, node.kind);
+    const meta = NODE_META[node.kind];
+    const elementMeta = node.kind === 'element' ? ELEMENT_ICON_META[node.icon] : null;
+    const Icon = elementMeta?.icon ?? meta.icon;
+    const iconToneClassName =
+      node.icon === 'lightbulb'
+        ? 'border-amber-200/80 bg-amber-50/85 text-amber-600'
+        : node.icon === 'message-square'
+          ? 'border-sky-200/80 bg-sky-50/85 text-sky-600'
+          : node.icon === 'target'
+            ? 'border-rose-200/80 bg-rose-50/85 text-rose-600'
+            : node.icon === 'shapes'
+              ? 'border-violet-200/80 bg-violet-50/85 text-violet-600'
+              : 'border-emerald-200/80 bg-emerald-50/85 text-emerald-600';
+
+    return {
+      Icon,
+      bounds,
+      dimensions,
+      iconToneClassName,
+      node,
+    };
+  }, [buildCanvasPaletteNode, draggedPaletteTemplateId, paletteDragPreviewPoint, resolveInsertionPosition]);
 
   function handleAddBasicElement() {
     addNodeAtContext(buildBasicElementNode());
@@ -4733,6 +4799,72 @@ export function FileCanvasView({
                 />
               ))}
               {groupNodes.map((node) => renderCanvasNode(node))}
+              {paletteDragPreview ? (
+                <div
+                  aria-hidden="true"
+                  className={cn(
+                    NODE_CARD_CLASS,
+                    'pointer-events-none z-30 border-slate-300/90 shadow-[0_24px_60px_-34px_rgba(15,23,42,0.34)] opacity-95',
+                    NODE_META[paletteDragPreview.node.kind].className,
+                    paletteDragPreview.node.kind === 'group' && 'overflow-hidden',
+                  )}
+                  style={{
+                    width: paletteDragPreview.dimensions.width,
+                    height: paletteDragPreview.dimensions.height,
+                    transform: `translate3d(${paletteDragPreview.bounds.left}px, ${paletteDragPreview.bounds.top}px, 0)`,
+                  }}
+                >
+                  {paletteDragPreview.node.kind === 'group' ? (
+                    <>
+                      <div className="pointer-events-none absolute inset-px rounded-[15px] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(241,245,249,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.92),inset_0_0_0_1px_rgba(148,163,184,0.08)]" />
+                      <div className="absolute left-4 right-4 top-4">
+                        <div className="truncate text-sm font-medium text-slate-950">
+                          {paletteDragPreview.node.label}
+                        </div>
+                        <div className="mt-3 h-px bg-slate-300/90" />
+                      </div>
+                    </>
+                  ) : paletteDragPreview.node.size.widthUnits === 1 ? (
+                    <div className="flex h-full items-center justify-center p-0">
+                      <span
+                        className={cn(
+                          'flex size-12 items-center justify-center rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
+                          paletteDragPreview.node.kind === 'worker'
+                            ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600'
+                            : paletteDragPreview.iconToneClassName,
+                        )}
+                      >
+                        <paletteDragPreview.Icon className="size-7" />
+                      </span>
+                    </div>
+                  ) : (
+                    <div className="flex h-full flex-col gap-3.5">
+                      <div className="flex min-w-0 items-start gap-3">
+                        <span
+                          className={cn(
+                            'mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[20px] border shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)]',
+                            paletteDragPreview.node.kind === 'worker'
+                              ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600'
+                              : paletteDragPreview.iconToneClassName,
+                          )}
+                        >
+                          <paletteDragPreview.Icon className="size-5" />
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                            {paletteDragPreview.node.label}
+                          </div>
+                          {paletteDragPreview.node.description.trim().length > 0 ? (
+                            <div className="mt-1 text-[12px] leading-5 text-slate-500">
+                              {paletteDragPreview.node.description}
+                            </div>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ) : null}
               {groupCanvasFields.map((field) => (
                 <div
                   key={field.id}
