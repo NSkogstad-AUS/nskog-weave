@@ -115,7 +115,12 @@ export function FileCanvasFloatingToolbar({
   }, [items.length]);
 
   return (
-    <div className="pointer-events-none absolute inset-x-0 top-5 z-30 flex justify-center px-4">
+    <div
+      className={cn(
+        'pointer-events-none absolute inset-x-0 z-30 flex justify-center px-4 transition-[top] duration-300 ease-out',
+        isCollapsed ? 'top-0' : 'top-5',
+      )}
+    >
       <div
         data-canvas-chrome="true"
         onContextMenuCapture={(event) => {
@@ -161,8 +166,10 @@ export function FileCanvasFloatingToolbar({
           aria-expanded={!isCollapsed}
           aria-controls="canvas-insert-toolbar"
           className={cn(
-            'flex h-11 items-center justify-center rounded-[1.05rem] border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow] duration-300 ease-out',
-            isCollapsed ? 'mt-0.5 w-56 -translate-y-1' : 'mt-2 w-24 translate-y-0',
+            'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-300 ease-out',
+            isCollapsed
+              ? 'mt-0 w-56 translate-y-0 rounded-b-[1.05rem] rounded-t-none border-t-transparent before:absolute before:-left-5 before:-top-[2px] before:block before:h-[8px] before:w-5 before:rounded-tr-[1.15rem] before:border-r before:border-t before:border-slate-200/85 before:bg-white/92 before:content-[\"\"] after:absolute after:-right-5 after:-top-[2px] after:block after:h-[8px] after:w-5 after:rounded-tl-[1.15rem] after:border-l after:border-t after:border-slate-200/85 after:bg-white/92 after:content-[\"\"]'
+              : 'mt-2 w-24 translate-y-0 rounded-[1.05rem]',
             'hover:-translate-y-px hover:border-slate-300/85 hover:bg-white',
           )}
           aria-label={isCollapsed ? 'Show header tools' : 'Hide header tools'}
