@@ -41,6 +41,7 @@ interface FileCanvasFloatingInspectorProps {
   target: CanvasFloatingInspectorTarget;
   isMinimized: boolean;
   isMaximized: boolean;
+  phase: 'opening' | 'open' | 'closing';
   onClose: () => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizeHandlePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
@@ -80,6 +81,7 @@ export function FileCanvasFloatingInspector({
   target,
   isMinimized,
   isMaximized,
+  phase,
   onClose,
   onHeaderPointerDown,
   onResizeHandlePointerDown,
@@ -99,10 +101,17 @@ export function FileCanvasFloatingInspector({
       : [
           `${target.items.length} item${target.items.length === 1 ? '' : 's'}`,
         ];
+  const contentMaxHeight = Math.max(rect.height - 60, 0);
+  const isClosedLike = phase !== 'open';
 
   return (
     <section
-      className="absolute z-50 overflow-hidden rounded-[1.45rem] border border-slate-200/85 bg-white/96 shadow-[0_38px_90px_-52px_rgba(15,23,42,0.38)] backdrop-blur-md"
+      className={cn(
+        'absolute z-20 overflow-hidden rounded-[1.45rem] border border-slate-200/85 bg-white/96 backdrop-blur-md transition-[left,top,width,height,opacity,transform,box-shadow] duration-300 ease-out',
+        isClosedLike
+          ? 'opacity-0 scale-[0.985] shadow-[0_20px_55px_-40px_rgba(15,23,42,0.22)]'
+          : 'opacity-100 scale-100 shadow-[0_38px_90px_-52px_rgba(15,23,42,0.38)]',
+      )}
       style={{
         left: rect.x,
         top: rect.y,
@@ -162,8 +171,17 @@ export function FileCanvasFloatingInspector({
         </div>
       </div>
 
-      {!isMinimized ? (
-        <div className="flex h-[calc(100%-60px)] min-h-0 flex-col">
+      <div
+        className={cn(
+          'flex min-h-0 flex-col overflow-hidden transition-[max-height,opacity] duration-300 ease-out',
+          isMinimized && 'pointer-events-none opacity-0',
+          !isMinimized && 'opacity-100',
+        )}
+        style={{
+          maxHeight: isMinimized ? 0 : contentMaxHeight,
+        }}
+      >
+        <div className="flex min-h-0 flex-1 flex-col">
           {target.description.trim().length > 0 ? (
             <div className="border-b border-slate-200/70 px-4 py-3 text-sm leading-6 text-slate-500">
               {target.description}
@@ -230,7 +248,7 @@ export function FileCanvasFloatingInspector({
             )}
           </div>
         </div>
-      ) : null}
+      </div>
 
       {!isMinimized ? (
         <div

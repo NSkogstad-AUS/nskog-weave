@@ -164,6 +164,7 @@ type FloatingInspectorState = {
   target: CanvasFloatingInspectorTarget;
   window: FloatingInspectorWindowState;
   fileId: string | null;
+  phase: 'opening' | 'open' | 'closing';
 };
 
 type FloatingInspectorDragState = {
@@ -183,6 +184,7 @@ const WORKER_CONNECTION_THRESHOLD_Y = SLOT_STEP_Y * 1.25;
 const FLOATING_INSPECTOR_MIN_WIDTH = 360;
 const FLOATING_INSPECTOR_MIN_HEIGHT = 240;
 const FLOATING_INSPECTOR_HEADER_HEIGHT = 60;
+const FLOATING_INSPECTOR_TRANSITION_MS = 280;
 const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-template';
 const CANVAS_PALETTE_TEXT_PREFIX = 'weave-canvas-palette-template:';
 
@@ -490,6 +492,9 @@ export function FileCanvasView({
   const workerConnectionDragStateRef = useRef<WorkerConnectionDragState | null>(null);
   const floatingInspectorDragStateRef = useRef<FloatingInspectorDragState | null>(null);
   const floatingInspectorResizeStateRef = useRef<FloatingInspectorResizeState | null>(null);
+  const floatingInspectorCloseTimerRef = useRef<number | null>(null);
+  const nodeDragMovedRef = useRef(false);
+  const suppressPreviewOpenUntilRef = useRef(0);
   const paletteDragDepthRef = useRef(0);
   const rawDragPositionsRef = useRef<Record<string, Point>>({});
   const draftPositionsRef = useRef<Record<string, Point>>({});
@@ -538,6 +543,49 @@ export function FileCanvasView({
   const [paletteDragPreviewPoint, setPaletteDragPreviewPoint] = useState<Point | null>(null);
   const [isPaletteDragOverCanvas, setIsPaletteDragOverCanvas] = useState(false);
   const [floatingInspector, setFloatingInspector] = useState<FloatingInspectorState | null>(null);
+
+  useEffect(() => {
+    if (!floatingInspector || floatingInspector.phase !== 'opening') {
+      return undefined;
+    }
+
+    const frameId = window.requestAnimationFrame(() => {
+      setFloatingInspector((current) =>
+        current && current.phase === 'opening'
+          ? {
+              ...current,
+              phase: 'open',
+            }
+          : current,
+      );
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frameId);
+    };
+  }, [floatingInspector]);
+
+  useEffect(() => {
+    if (!floatingInspector || floatingInspector.phase !== 'closing') {
+      if (floatingInspectorCloseTimerRef.current !== null) {
+        window.clearTimeout(floatingInspectorCloseTimerRef.current);
+        floatingInspectorCloseTimerRef.current = null;
+      }
+      return undefined;
+    }
+
+    floatingInspectorCloseTimerRef.current = window.setTimeout(() => {
+      setFloatingInspector((current) => (current?.phase === 'closing' ? null : current));
+      floatingInspectorCloseTimerRef.current = null;
+    }, FLOATING_INSPECTOR_TRANSITION_MS);
+
+    return () => {
+      if (floatingInspectorCloseTimerRef.current !== null) {
+        window.clearTimeout(floatingInspectorCloseTimerRef.current);
+        floatingInspectorCloseTimerRef.current = null;
+      }
+    };
+  }, [floatingInspector]);
   const renderedNodes = useMemo(
     () =>
       [...nodes].sort((left, right) => {
@@ -1060,6 +1108,14 @@ export function FileCanvasView({
       }
 
       if (liveDragState) {
+        if (
+          !nodeDragMovedRef.current &&
+          (Math.abs(localPoint.x - liveDragState.origin.x) > 3 ||
+            Math.abs(localPoint.y - liveDragState.origin.y) > 3)
+        ) {
+          nodeDragMovedRef.current = true;
+        }
+
         let rawNextPositions = liveDragState.nodeIds.reduce<Record<string, Point>>(
           (positions, nodeId) => {
             const basePosition = liveDragState.basePositions[nodeId];
@@ -1562,6 +1618,10 @@ export function FileCanvasView({
         });
       }
 
+      if (liveDragState && nodeDragMovedRef.current) {
+        suppressPreviewOpenUntilRef.current = Date.now() + 180;
+      }
+
       if (liveResizeState) {
         const nextSize = draftSizesRef.current[liveResizeState.nodeId] ?? liveResizeState.baseSize;
         const nextPosition =
@@ -1594,6 +1654,7 @@ export function FileCanvasView({
       setResizeState(null);
       setWorkerConnectionDragState(null);
       dragStateRef.current = null;
+      nodeDragMovedRef.current = false;
       marqueeStateRef.current = null;
       draftSelectedNodeIdsRef.current = null;
       setDragState(null);
@@ -1629,7 +1690,14 @@ export function FileCanvasView({
   const closeFloatingInspector = useCallback(() => {
     floatingInspectorDragStateRef.current = null;
     floatingInspectorResizeStateRef.current = null;
-    setFloatingInspector(null);
+    setFloatingInspector((current) =>
+      current
+        ? {
+            ...current,
+            phase: 'closing',
+          }
+        : null,
+    );
   }, []);
 
   const toggleFloatingInspectorMinimize = useCallback(() => {
@@ -2051,6 +2119,7 @@ export function FileCanvasView({
         return positions;
       }, {}),
     };
+    nodeDragMovedRef.current = false;
     dragStateRef.current = nextDragState;
     setDragState(nextDragState);
   }, [beginMarqueeSelection, getLocalPoint, getNodeById]);
@@ -3166,6 +3235,7 @@ export function FileCanvasView({
       return {
         fileId,
         target: nextTarget,
+        phase: current ? 'open' : 'opening',
         window: {
           rect: nextRect,
           minimized: false,
@@ -3177,6 +3247,10 @@ export function FileCanvasView({
   }, [clampFloatingInspectorRect, getDefaultFloatingInspectorRect]);
 
   const openFloatingInspectorForNode = useCallback((node: FilePageNode) => {
+    if (Date.now() < suppressPreviewOpenUntilRef.current) {
+      return;
+    }
+
     const previewTarget = buildFloatingInspectorTargetFromNode(node);
 
     if (!previewTarget) {
@@ -3187,6 +3261,10 @@ export function FileCanvasView({
   }, [buildFloatingInspectorTargetFromNode, openFloatingInspector]);
 
   const openFloatingInspectorForItem = useCallback((item: FilePageContentItem) => {
+    if (Date.now() < suppressPreviewOpenUntilRef.current) {
+      return;
+    }
+
     const nodeMatch = getNodeById(item.id);
 
     if (nodeMatch && (nodeMatch.kind === 'file' || nodeMatch.kind === 'folder')) {
@@ -5190,6 +5268,7 @@ export function FileCanvasView({
                 target={floatingInspector.target}
                 isMinimized={floatingInspector.window.minimized}
                 isMaximized={floatingInspector.window.maximized}
+                phase={floatingInspector.phase}
                 onClose={closeFloatingInspector}
                 onHeaderPointerDown={handleFloatingInspectorHeaderPointerDown}
                 onResizeHandlePointerDown={handleFloatingInspectorResizePointerDown}
