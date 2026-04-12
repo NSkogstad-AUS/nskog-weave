@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
 import {
   ArrowUpDownIcon,
@@ -94,7 +94,33 @@ export function FileCanvasFloatingToolbar({
   onInsertItem,
 }: FileCanvasFloatingToolbarProps) {
   const [isCollapsed, setIsCollapsed] = useState(false);
+  const [toolbarHeight, setToolbarHeight] = useState(0);
+  const toolbarRef = useRef<HTMLElement | null>(null);
   const items = [...structureItems, ...workerItems];
+
+  useLayoutEffect(() => {
+    const toolbarElement = toolbarRef.current;
+
+    if (!toolbarElement) {
+      return;
+    }
+
+    const updateToolbarHeight = () => {
+      setToolbarHeight(toolbarElement.getBoundingClientRect().height);
+    };
+
+    updateToolbarHeight();
+
+    const resizeObserver = new ResizeObserver(() => {
+      updateToolbarHeight();
+    });
+
+    resizeObserver.observe(toolbarElement);
+
+    return () => {
+      resizeObserver.disconnect();
+    };
+  }, [items.length]);
 
   return (
     <div className="pointer-events-none absolute inset-x-0 top-5 z-30 flex justify-center px-4">
@@ -108,17 +134,21 @@ export function FileCanvasFloatingToolbar({
       >
         <div
           className={cn(
-            'w-full max-w-[min(100%,72rem)] overflow-hidden transition-[max-height,opacity,transform] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[max-height,opacity,transform]',
-            isCollapsed ? 'max-h-0 -translate-y-1 opacity-0' : 'max-h-28 translate-y-0 opacity-100',
+            'w-full max-w-[min(100%,72rem)] overflow-hidden transition-[height,opacity,transform] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[height,opacity,transform]',
+            isCollapsed ? '-translate-y-0.5 opacity-0' : 'translate-y-0 opacity-100',
           )}
+          style={{
+            height: isCollapsed ? 0 : toolbarHeight,
+          }}
         >
           <nav
             id="canvas-insert-toolbar"
+            ref={toolbarRef}
             className={cn(
               'panel-surface flex max-w-full items-center gap-2 overflow-x-auto rounded-[1.6rem] p-2 soft-scrollbar',
-              'transition-[transform,opacity] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[transform,opacity]',
+              'transition-[transform,opacity] duration-450 ease-[cubic-bezier(0.22,1,0.36,1)] will-change-[transform,opacity]',
               isCollapsed
-                ? '-translate-y-4 opacity-0 pointer-events-none'
+                ? '-translate-y-2 opacity-0 pointer-events-none'
                 : 'translate-y-0 opacity-100',
             )}
             aria-label="Canvas insert toolbar"
@@ -143,7 +173,7 @@ export function FileCanvasFloatingToolbar({
           aria-controls="canvas-insert-toolbar"
           className={cn(
             'flex h-11 items-center justify-center rounded-[1.05rem] border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow] duration-500 ease-[cubic-bezier(0.22,1,0.36,1)]',
-            isCollapsed ? 'mt-0.5 w-36 -translate-y-1' : 'mt-2 w-24 translate-y-0',
+            isCollapsed ? 'mt-0.5 w-44 -translate-y-1' : 'mt-2 w-24 translate-y-0',
             'hover:-translate-y-px hover:border-slate-300/85 hover:bg-white',
           )}
           aria-label={isCollapsed ? 'Show header tools' : 'Hide header tools'}
