@@ -183,6 +183,7 @@ const WORKER_CONNECTION_THRESHOLD_X = SLOT_STEP_X * 1.25;
 const WORKER_CONNECTION_THRESHOLD_Y = SLOT_STEP_Y * 1.25;
 const FLOATING_INSPECTOR_MIN_WIDTH = 360;
 const FLOATING_INSPECTOR_MIN_HEIGHT = 240;
+const FLOATING_INSPECTOR_MIN_FILE_HEIGHT = 168;
 const FLOATING_INSPECTOR_HEADER_HEIGHT = 60;
 const FLOATING_INSPECTOR_TRANSITION_MS = 280;
 const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-template';
@@ -1828,19 +1829,20 @@ export function FileCanvasView({
       }
 
       if (liveDragState) {
-        const nextRect = clampFloatingInspectorRect({
-          ...liveDragState.baseRect,
-          x: liveDragState.baseRect.x + (event.clientX - liveDragState.origin.x),
-          y: liveDragState.baseRect.y + (event.clientY - liveDragState.origin.y),
-        });
-
         setFloatingInspector((current) =>
           current
             ? {
                 ...current,
                 window: {
                   ...current.window,
-                  rect: nextRect,
+                  rect: clampFloatingInspectorRect(
+                    {
+                      ...liveDragState.baseRect,
+                      x: liveDragState.baseRect.x + (event.clientX - liveDragState.origin.x),
+                      y: liveDragState.baseRect.y + (event.clientY - liveDragState.origin.y),
+                    },
+                    current.target.type,
+                  ),
                 },
               }
             : current,
@@ -1852,19 +1854,20 @@ export function FileCanvasView({
         return;
       }
 
-      const nextRect = clampFloatingInspectorRect({
-        ...liveResizeState.baseRect,
-        width: liveResizeState.baseRect.width + (event.clientX - liveResizeState.origin.x),
-        height: liveResizeState.baseRect.height + (event.clientY - liveResizeState.origin.y),
-      });
-
       setFloatingInspector((current) =>
         current
           ? {
               ...current,
               window: {
                 ...current.window,
-                rect: nextRect,
+                rect: clampFloatingInspectorRect(
+                  {
+                    ...liveResizeState.baseRect,
+                    width: liveResizeState.baseRect.width + (event.clientX - liveResizeState.origin.x),
+                    height: liveResizeState.baseRect.height + (event.clientY - liveResizeState.origin.y),
+                  },
+                  current.target.type,
+                ),
               },
             }
           : current,
@@ -3087,6 +3090,7 @@ export function FileCanvasView({
 
   function clampFloatingInspectorRect(
     rect: CanvasFloatingInspectorRect,
+    targetType: CanvasFloatingInspectorTarget['type'] = 'folder',
     minimized = false,
   ) {
     const canvasRect = canvasRef.current?.getBoundingClientRect();
@@ -3099,10 +3103,12 @@ export function FileCanvasView({
       FLOATING_INSPECTOR_MIN_WIDTH,
       Math.min(rect.width, canvasRect.width - 24),
     );
+    const minimumHeight =
+      targetType === 'file' ? FLOATING_INSPECTOR_MIN_FILE_HEIGHT : FLOATING_INSPECTOR_MIN_HEIGHT;
     const height = minimized
       ? FLOATING_INSPECTOR_HEADER_HEIGHT
       : Math.max(
-          FLOATING_INSPECTOR_MIN_HEIGHT,
+          minimumHeight,
           Math.min(rect.height, canvasRect.height - 24),
         );
     const maxX = Math.max(12, canvasRect.width - width - 12);
@@ -3116,25 +3122,67 @@ export function FileCanvasView({
     };
   }
 
-  function getDefaultFloatingInspectorRect() {
+  function estimateFloatingInspectorHeight(target: CanvasFloatingInspectorTarget) {
+    const descriptionHeight = target.description.trim().length > 0 ? 54 : 0;
+
+    if (target.type === 'folder') {
+      const folderBodyHeight =
+        target.items.length === 0
+          ? 132
+          : 28 + Math.min(6, Math.max(2, target.items.length)) * 72;
+
+      return FLOATING_INSPECTOR_HEADER_HEIGHT + descriptionHeight + folderBodyHeight;
+    }
+
+    const wrappedLineEstimate = target.textContent
+      .split(/\r?\n/g)
+      .slice(0, 12)
+      .reduce((count, line) => count + Math.max(1, Math.ceil(line.length / 78)), 0);
+    const visibleLineCount = Math.min(6, Math.max(3, wrappedLineEstimate || 1));
+    const fileBodyHeight = 32 + visibleLineCount * 24;
+
+    return FLOATING_INSPECTOR_HEADER_HEIGHT + descriptionHeight + fileBodyHeight;
+  }
+
+  function getDefaultFloatingInspectorRectForTarget(target: CanvasFloatingInspectorTarget) {
     const canvasRect = canvasRef.current?.getBoundingClientRect();
     const defaultRect = {
       x: 72,
       y: 88,
       width: 620,
-      height: 460,
+      height: estimateFloatingInspectorHeight(target),
     };
 
     if (!canvasRect) {
       return defaultRect;
     }
 
-    return clampFloatingInspectorRect({
-      x: Math.max(24, Math.round((canvasRect.width - defaultRect.width) / 2)),
-      y: Math.max(32, Math.round((canvasRect.height - defaultRect.height) / 4)),
-      width: Math.min(defaultRect.width, canvasRect.width - 24),
-      height: Math.min(defaultRect.height, canvasRect.height - 24),
-    });
+    return clampFloatingInspectorRect(
+      {
+        x: Math.max(24, Math.round((canvasRect.width - defaultRect.width) / 2)),
+        y: Math.max(32, Math.round((canvasRect.height - defaultRect.height) / 4)),
+        width: Math.min(defaultRect.width, canvasRect.width - 24),
+        height: Math.min(defaultRect.height, canvasRect.height - 24),
+      },
+      target.type,
+    );
+  }
+
+  function getFloatingInspectorRectForTarget(
+    target: CanvasFloatingInspectorTarget,
+    baseRect?: CanvasFloatingInspectorRect | null,
+  ) {
+    if (!baseRect) {
+      return getDefaultFloatingInspectorRectForTarget(target);
+    }
+
+    return clampFloatingInspectorRect(
+      {
+        ...baseRect,
+        height: estimateFloatingInspectorHeight(target),
+      },
+      target.type,
+    );
   }
 
   const resolveNodeFolderContents = useCallback((node: FilePageNode) => {
@@ -3224,13 +3272,12 @@ export function FileCanvasView({
     fileId: string | null = null,
   ) => {
     setFloatingInspector((current) => {
-      const nextRect = current
-        ? clampFloatingInspectorRect(
-            current.window.maximized
-              ? current.window.restoreRect ?? current.window.rect
-              : current.window.rect,
-          )
-        : getDefaultFloatingInspectorRect();
+      const baseRect = current
+        ? current.window.maximized
+          ? current.window.restoreRect ?? current.window.rect
+          : current.window.rect
+        : null;
+      const nextRect = getFloatingInspectorRectForTarget(nextTarget, baseRect);
 
       return {
         fileId,
@@ -3244,7 +3291,7 @@ export function FileCanvasView({
         },
       };
     });
-  }, [clampFloatingInspectorRect, getDefaultFloatingInspectorRect]);
+  }, []);
 
   const openFloatingInspectorForNode = useCallback((node: FilePageNode) => {
     if (Date.now() < suppressPreviewOpenUntilRef.current) {
