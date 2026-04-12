@@ -7,6 +7,7 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
   GripVerticalIcon,
+  SparklesIcon,
   ShapesIcon,
   type LucideIcon,
 } from 'lucide-react';
@@ -14,7 +15,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type CanvasPaletteTemplateId = 'ai-worker' | 'sort-worker' | 'group';
+export type CanvasPaletteTemplateId = 'ai-worker' | 'sort-worker' | 'group' | 'element';
 
 export interface CanvasPaletteSidebarItem {
   id: CanvasPaletteTemplateId;
@@ -33,7 +34,7 @@ interface CanvasPaletteSidebarProps {
   onDragEndItem: () => void;
   onDragStartItem: (
     itemId: CanvasPaletteTemplateId,
-    event: ReactDragEvent<HTMLButtonElement>,
+    event: ReactDragEvent<HTMLElement>,
   ) => void;
   onInsertItem: (itemId: CanvasPaletteTemplateId) => void;
   onOpenChange: (open: boolean) => void;
@@ -45,6 +46,7 @@ const ITEM_ICON_MAP: Record<CanvasPaletteTemplateId, LucideIcon> = {
   'ai-worker': BotIcon,
   'sort-worker': ArrowUpDownIcon,
   group: ShapesIcon,
+  element: SparklesIcon,
 };
 
 export function CanvasPaletteSidebar({

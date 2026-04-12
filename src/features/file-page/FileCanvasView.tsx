@@ -152,7 +152,12 @@ const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-te
 const CANVAS_PALETTE_TEXT_PREFIX = 'weave-canvas-palette-template:';
 
 function isCanvasPaletteTemplateId(value: string): value is CanvasPaletteTemplateId {
-  return value === 'ai-worker' || value === 'sort-worker' || value === 'group';
+  return (
+    value === 'ai-worker' ||
+    value === 'sort-worker' ||
+    value === 'group' ||
+    value === 'element'
+  );
 }
 
 function hasCanvasPaletteTemplate(dataTransfer: DataTransfer) {
@@ -3813,10 +3818,12 @@ export function FileCanvasView({
       case 'sort-worker':
         return buildWorkerNode('sort-data');
       case 'group':
-      default:
         return buildGroupNode();
+      case 'element':
+      default:
+        return buildBasicElementNode();
     }
-  }, [buildGroupNode, buildWorkerNode]);
+  }, [buildBasicElementNode, buildGroupNode, buildWorkerNode]);
 
   const canvasPaletteItems = useMemo<CanvasPaletteSidebarItem[]>(() => {
     const aiWorkerMeta = getWorkerModeMeta('ai-ready');
@@ -3834,6 +3841,12 @@ export function FileCanvasView({
         label: sortWorkerMeta.defaultNodeLabel,
         description: sortWorkerMeta.defaultNodeDescription,
         section: 'Workers',
+      },
+      {
+        id: 'element',
+        label: 'Basic element',
+        description: 'Freeform canvas object for quick thinking and placement.',
+        section: 'Structure',
       },
       {
         id: 'group',
@@ -3864,7 +3877,7 @@ export function FileCanvasView({
 
   const handlePaletteItemDragStart = useCallback((
     templateId: CanvasPaletteTemplateId,
-    event: ReactDragEvent<HTMLButtonElement>,
+    event: ReactDragEvent<HTMLElement>,
   ) => {
     setDraggedPaletteTemplateId(templateId);
     event.dataTransfer.effectAllowed = 'copy';
@@ -4671,8 +4684,11 @@ export function FileCanvasView({
             )}
           >
             <FileCanvasFloatingToolbar
+              draggedItemId={draggedPaletteTemplateId}
               structureItems={structurePaletteItems}
               workerItems={workerPaletteItems}
+              onDragEndItem={clearPaletteDragState}
+              onDragStartItem={handlePaletteItemDragStart}
               onInsertItem={handleInsertPaletteNode}
             />
 
