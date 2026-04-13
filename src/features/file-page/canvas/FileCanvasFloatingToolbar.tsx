@@ -164,7 +164,7 @@ export function FileCanvasFloatingToolbar({
           type="button"
           onClick={() => setIsCollapsed((current) => !current)}
           aria-expanded={!isCollapsed}
-          aria-controls="canvas-insert-toolbar"
+          aria-controls="canvas-insert-toolbar "
           className={cn(
             'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-300 ease-out',
             isCollapsed
