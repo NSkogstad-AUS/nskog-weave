@@ -68,7 +68,7 @@ function WindowButton({
         event.stopPropagation();
         onClick();
       }}
-      className="flex size-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white/90 text-slate-500 transition hover:border-slate-300/85 hover:bg-white hover:text-slate-700"
+      className="flex size-8 items-center justify-center rounded-xl border border-slate-200/80 bg-white/90 text-slate-500 transition hover:border-slate-300/85 hover:bg-white hover:text-slate-700 dark:border-slate-700/80 dark:bg-slate-900/90 dark:text-slate-400 dark:hover:border-slate-600/80 dark:hover:bg-slate-900 dark:hover:text-slate-200"
       aria-label={label}
     >
       {children}
@@ -107,10 +107,10 @@ export function FileCanvasFloatingInspector({
   return (
     <section
       className={cn(
-        'absolute z-20 overflow-hidden rounded-[1.45rem] border border-slate-200/85 bg-white/96 backdrop-blur-md transition-[left,top,width,height,opacity,transform,box-shadow] duration-300 ease-out',
+        'absolute z-20 overflow-hidden rounded-[1.45rem] border border-slate-200/85 bg-white/96 backdrop-blur-md transition-[left,top,width,height,opacity,transform,box-shadow] duration-300 ease-out dark:border-slate-700/80 dark:bg-slate-950/96',
         isClosedLike
-          ? 'opacity-0 scale-[0.985] shadow-[0_20px_55px_-40px_rgba(15,23,42,0.22)]'
-          : 'opacity-100 scale-100 shadow-[0_38px_90px_-52px_rgba(15,23,42,0.38)]',
+          ? 'opacity-0 scale-[0.985] shadow-[0_20px_55px_-40px_rgba(15,23,42,0.22)] dark:shadow-[0_20px_55px_-40px_rgba(2,6,23,0.65)]'
+          : 'opacity-100 scale-100 shadow-[0_38px_90px_-52px_rgba(15,23,42,0.38)] dark:shadow-[0_38px_90px_-52px_rgba(2,6,23,0.82)]',
       )}
       style={{
         left: rect.x,
@@ -124,7 +124,7 @@ export function FileCanvasFloatingInspector({
     >
       <div
         className={cn(
-          'flex h-[60px] items-center justify-between gap-3 border-b border-slate-200/80 px-4',
+          'flex h-[60px] items-center justify-between gap-3 border-b border-slate-200/80 px-4 dark:border-slate-700/80',
           isMinimized && 'border-b-transparent',
         )}
       >
@@ -132,7 +132,7 @@ export function FileCanvasFloatingInspector({
           className="flex min-w-0 flex-1 items-center gap-3 cursor-grab active:cursor-grabbing"
           onPointerDown={onHeaderPointerDown}
         >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 text-slate-600 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.3)]">
+          <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 text-slate-600 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.3)] dark:border-slate-700/80 dark:bg-slate-900/90 dark:text-slate-300 dark:shadow-[0_12px_30px_-26px_rgba(2,6,23,0.65)]">
             {target.type === 'file' ? (
               <FileTextIcon className="size-4" />
             ) : (
@@ -140,12 +140,12 @@ export function FileCanvasFloatingInspector({
             )}
           </span>
           <div className="min-w-0">
-            <div className="truncate text-sm font-semibold text-slate-950">{target.label}</div>
-            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-400">
+            <div className="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">{target.label}</div>
+            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-400 dark:text-slate-500">
               {metaBadges.map((badge) => (
                 <span
                   key={badge}
-                  className="rounded-full border border-slate-200/80 bg-white/90 px-2 py-0.5"
+                  className="rounded-full border border-slate-200/80 bg-white/90 px-2 py-0.5 dark:border-slate-700/80 dark:bg-slate-900/90"
                 >
                   {badge}
                 </span>
@@ -183,7 +183,7 @@ export function FileCanvasFloatingInspector({
       >
         <div className="flex min-h-0 flex-1 flex-col">
           {target.description.trim().length > 0 ? (
-            <div className="border-b border-slate-200/70 px-4 py-3 text-sm leading-6 text-slate-500">
+            <div className="border-b border-slate-200/70 px-4 py-3 text-sm leading-6 text-slate-500 dark:border-slate-700/70 dark:text-slate-400">
               {target.description}
             </div>
           ) : null}
@@ -196,8 +196,8 @@ export function FileCanvasFloatingInspector({
                 onChange={(event) => onTextChange(event.target.value)}
                 spellCheck={false}
                 className={cn(
-                  'h-full w-full resize-none border-0 bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-slate-700 outline-none',
-                  !target.editable && 'cursor-default text-slate-600',
+                  'h-full w-full resize-none border-0 bg-transparent px-4 py-4 font-mono text-[13px] leading-6 text-slate-700 outline-none dark:text-slate-300',
+                  !target.editable && 'cursor-default text-slate-600 dark:text-slate-400',
                 )}
                 placeholder={
                   target.editable
@@ -215,11 +215,11 @@ export function FileCanvasFloatingInspector({
                         type="button"
                         onClick={() => onOpenItem?.(item)}
                         className={cn(
-                          'flex w-full items-start gap-3 rounded-[1rem] border border-slate-200/75 bg-white/88 px-3 py-3 text-left transition hover:border-slate-300/80 hover:bg-slate-50/90',
-                          !onOpenItem && 'cursor-default hover:border-slate-200/75 hover:bg-white/88',
+                          'flex w-full items-start gap-3 rounded-[1rem] border border-slate-200/75 bg-white/88 px-3 py-3 text-left transition hover:border-slate-300/80 hover:bg-slate-50/90 dark:border-slate-700/75 dark:bg-slate-900/88 dark:hover:border-slate-600/80 dark:hover:bg-slate-800/75',
+                          !onOpenItem && 'cursor-default hover:border-slate-200/75 hover:bg-white/88 dark:hover:border-slate-700/75 dark:hover:bg-slate-900/88',
                         )}
                       >
-                        <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200/75 bg-slate-50/90 text-slate-500">
+                        <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200/75 bg-slate-50/90 text-slate-500 dark:border-slate-700/75 dark:bg-slate-800/85 dark:text-slate-400">
                           {item.kind === 'file' ? (
                             <FileTextIcon className="size-4" />
                           ) : (
@@ -227,11 +227,11 @@ export function FileCanvasFloatingInspector({
                           )}
                         </span>
                         <span className="min-w-0">
-                          <span className="block truncate text-sm font-medium text-slate-900">
+                          <span className="block truncate text-sm font-medium text-slate-900 dark:text-slate-100">
                             {item.label}
                           </span>
                           {item.description ? (
-                            <span className="mt-1 line-clamp-2 block text-xs leading-5 text-slate-500">
+                            <span className="mt-1 line-clamp-2 block text-xs leading-5 text-slate-500 dark:text-slate-400">
                               {item.description}
                             </span>
                           ) : null}
@@ -240,7 +240,7 @@ export function FileCanvasFloatingInspector({
                     ))}
                   </div>
                 ) : (
-                  <div className="rounded-[1.2rem] border border-dashed border-slate-200/90 bg-slate-50/70 px-4 py-5 text-sm leading-6 text-slate-500">
+                  <div className="rounded-[1.2rem] border border-dashed border-slate-200/90 bg-slate-50/70 px-4 py-5 text-sm leading-6 text-slate-500 dark:border-slate-700/80 dark:bg-slate-950/60 dark:text-slate-400">
                     This folder does not have previewable items yet.
                   </div>
                 )}

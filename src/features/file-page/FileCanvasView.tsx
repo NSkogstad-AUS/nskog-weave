@@ -5238,7 +5238,7 @@ export function FileCanvasView({
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)]',
+            'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:border-slate-700/80 dark:bg-slate-900/60 dark:shadow-[0_36px_90px_-58px_rgba(2,6,23,0.72)]',
           )}
         >
           <div
@@ -5289,7 +5289,7 @@ export function FileCanvasView({
               setPanState(nextPanState);
             }}
             className={cn(
-              'relative min-w-0 flex-1 overflow-hidden bg-[#fffdf7]/92 touch-none',
+              'relative min-w-0 flex-1 overflow-hidden bg-[#fffdf7]/92 touch-none dark:bg-slate-950/80',
               panState ? 'cursor-grabbing' : 'cursor-grab',
             )}
           >

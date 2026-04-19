@@ -193,15 +193,15 @@ export function FileWorkspace({
 
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
-      <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)]">
+      <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)] dark:border-slate-700/80 dark:bg-slate-900/55 dark:shadow-[0_32px_90px_-62px_rgba(2,6,23,0.6)]">
         <div className="max-w-sm">
-          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm">
-            <FileTextIcon className="size-6 text-slate-500" />
+          <div className="mx-auto flex size-14 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 shadow-sm dark:border-slate-700/80 dark:bg-slate-900/90">
+            <FileTextIcon className="size-6 text-slate-500 dark:text-slate-300" />
           </div>
-          <h2 className="mt-5 text-xl font-semibold tracking-tight text-slate-950">
+          <h2 className="mt-5 text-xl font-semibold tracking-tight text-slate-950 dark:text-slate-50">
             Select a file
           </h2>
-          <p className="mt-2 text-sm leading-6 text-slate-500">
+          <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
             Every file opens its own page. Once a file is selected, you can switch between a minimal canvas and a traditional explorer layout.
           </p>
         </div>

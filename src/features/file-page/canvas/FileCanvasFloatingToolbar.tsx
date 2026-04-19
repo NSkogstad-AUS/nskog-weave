@@ -62,16 +62,16 @@ function ToolbarItemButton({
       onDragStart={(event) => onDragStartItem(item.id, event)}
       onDragEnd={onDragEndItem}
       className={cn(
-        'group flex min-w-0 items-center gap-1 rounded-[1.1rem] border border-slate-200/80 bg-white/88 px-3 py-2 text-left shadow-[0_12px_30px_-28px_rgba(15,23,42,0.34)] transition',
-        'cursor-grab active:cursor-grabbing hover:-translate-y-px hover:border-slate-300/80 hover:bg-white',
-        isDragging && 'border-sky-300/80 bg-sky-50/90 shadow-[0_18px_34px_-28px_rgba(14,165,233,0.85)]',
+        'group flex min-w-0 items-center gap-1 rounded-[1.1rem] border border-slate-200/80 bg-white/88 px-3 py-2 text-left shadow-[0_12px_30px_-28px_rgba(15,23,42,0.34)] transition dark:border-slate-700/80 dark:bg-slate-900/88 dark:shadow-[0_12px_30px_-28px_rgba(2,6,23,0.65)]',
+        'cursor-grab active:cursor-grabbing hover:-translate-y-px hover:border-slate-300/80 hover:bg-white dark:hover:border-slate-600/80 dark:hover:bg-slate-900',
+        isDragging && 'border-sky-300/80 bg-sky-50/90 shadow-[0_18px_34px_-28px_rgba(14,165,233,0.85)] dark:bg-sky-950/45',
       )}
     >
-      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] text-slate-600">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-[0.95rem] text-slate-600 dark:text-slate-300">
         <Icon className="size-4" />
       </span>
       <span className="-ml-0.5 min-w-0">
-        <span className="block truncate text-sm font-semibold text-slate-950">{item.label}</span>
+        <span className="block truncate text-sm font-semibold text-slate-950 dark:text-slate-100">{item.label}</span>
       </span>
     </button>
   );
@@ -166,18 +166,18 @@ export function FileCanvasFloatingToolbar({
           aria-expanded={!isCollapsed}
           aria-controls="canvas-insert-toolbar "
           className={cn(
-            'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-300 ease-out',
+            'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-300 ease-out dark:border-slate-700/80 dark:bg-slate-900/92 dark:shadow-[0_20px_40px_-30px_rgba(2,6,23,0.65)]',
             isCollapsed
               ? 'mt-0 w-56 translate-y-0 rounded-b-[1.05rem] rounded-t-none border-t-transparent'
               : 'mt-2 w-24 translate-y-0 rounded-[1.05rem]',
-            'hover:-translate-y-px hover:border-slate-300/85 hover:bg-white',
+            'hover:-translate-y-px hover:border-slate-300/85 hover:bg-white dark:hover:border-slate-600/80 dark:hover:bg-slate-900',
           )}
           aria-label={isCollapsed ? 'Show header tools' : 'Hide header tools'}
         >
           {isCollapsed ? (
-            <ChevronDownIcon className="size-4 shrink-0 text-slate-500" />
+            <ChevronDownIcon className="size-4 shrink-0 text-slate-500 dark:text-slate-400" />
           ) : (
-            <ChevronUpIcon className="size-4 shrink-0 text-slate-500" />
+            <ChevronUpIcon className="size-4 shrink-0 text-slate-500 dark:text-slate-400" />
           )}
         </button>
       </div>

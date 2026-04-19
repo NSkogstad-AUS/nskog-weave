@@ -40,6 +40,7 @@ import { downloadFile, downloadFiles, type DownloadableFile } from '@/lib/fileDo
 import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import { useFilePages } from './hooks/useFilePages';
+import { useSystemTheme } from './hooks/use-system-theme';
 import type { FilePageNode, FilePageState } from '@/types/filePage';
 
 const WORKSPACE_FOLDERS_STORAGE_KEY = 'weave:workspace-folders:v1';
@@ -504,6 +505,7 @@ function hasFileDrag(types: readonly string[]) {
 }
 
 function App() {
+  useSystemTheme();
   const [folders, setFolders] = useState<WorkspaceFolder[]>(hydrateWorkspaceFolders);
   const [folderCanvasPages, setFolderCanvasPages] = useState<FolderCanvasStore>(
     readStoredFolderCanvasNodes,
@@ -853,7 +855,7 @@ function App() {
             '--sidebar-width-icon': '4.25rem',
           } as React.CSSProperties
         }
-        className="min-h-screen w-full bg-[radial-gradient(circle_at_top,_rgba(99,102,241,0.10),_transparent_30%),radial-gradient(circle_at_bottom_right,_rgba(14,165,233,0.08),_transparent_28%),linear-gradient(180deg,_#f8fbff_0%,_#f3f6fb_100%)]"
+        className="min-h-screen w-full bg-transparent"
       >
         <WorkspaceSidebar
           folders={displayFolders}
@@ -901,16 +903,16 @@ function App() {
       </SidebarProvider>
 
       {isFileDropActive ? (
-        <div className="pointer-events-none fixed inset-5 z-50 rounded-[2rem] border border-slate-300/75 bg-white/58 p-6 shadow-[0_32px_90px_-52px_rgba(15,23,42,0.35)] backdrop-blur-xl">
-          <div className="flex h-full items-center justify-center rounded-[1.6rem] border border-slate-300/70 border-dashed bg-white/72">
+        <div className="pointer-events-none fixed inset-5 z-50 rounded-[2rem] border border-slate-300/75 bg-white/58 p-6 shadow-[0_32px_90px_-52px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-950/55 dark:shadow-[0_32px_90px_-52px_rgba(2,6,23,0.7)]">
+          <div className="flex h-full items-center justify-center rounded-[1.6rem] border border-slate-300/70 border-dashed bg-white/72 dark:border-slate-700/80 dark:bg-slate-900/66">
             <div className="max-w-md text-center">
-              <div className="mx-auto flex size-16 items-center justify-center rounded-[1.4rem] border border-slate-200/85 bg-white/92 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.28)]">
-                <UploadIcon className="size-7 text-slate-600" />
+              <div className="mx-auto flex size-16 items-center justify-center rounded-[1.4rem] border border-slate-200/85 bg-white/92 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.28)] dark:border-slate-700/80 dark:bg-slate-900/90 dark:shadow-[0_18px_40px_-28px_rgba(2,6,23,0.6)]">
+                <UploadIcon className="size-7 text-slate-600 dark:text-slate-300" />
               </div>
-              <div className="mt-5 text-[1.35rem] font-semibold tracking-[-0.02em] text-slate-950">
+              <div className="mt-5 text-[1.35rem] font-semibold tracking-[-0.02em] text-slate-950 dark:text-slate-50">
                 Drop Files To Upload
               </div>
-              <div className="mt-2 text-sm leading-6 text-slate-500">
+              <div className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
                 {uploadTargetFolder
                   ? `Files will be added to ${uploadTargetFolder.label}.`
                   : 'Files will be added to the current workspace.'}

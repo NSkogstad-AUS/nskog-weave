@@ -98,13 +98,13 @@ export function CanvasPaletteSidebar({
     >
       <div className={cn('min-w-0 flex-1 flex-col', isOpen ? 'flex' : 'hidden')}>
         <div className="border-b border-sidebar-border/80 px-4 py-4">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400">
+          <div className="text-[10px] font-semibold uppercase tracking-[0.24em] text-slate-400 dark:text-slate-500">
             Canvas Tools
           </div>
-          <div className="mt-1 text-sm font-semibold text-slate-950">
+          <div className="mt-1 text-sm font-semibold text-slate-950 dark:text-slate-100">
             Drag blocks into the workflow
           </div>
-          <div className="mt-2 text-xs leading-5 text-slate-500">
+          <div className="mt-2 text-xs leading-5 text-slate-500 dark:text-slate-400">
             Add workers and groups from a docked sidebar instead of the canvas context menu.
           </div>
         </div>
@@ -114,8 +114,8 @@ export function CanvasPaletteSidebar({
             className={cn(
               'rounded-[1.1rem] border px-3.5 py-3 text-xs leading-5 transition',
               isCanvasDropActive
-                ? 'border-sky-300/80 bg-sky-50/90 text-sky-700'
-                : 'border-slate-200/80 bg-slate-50/80 text-slate-500',
+                ? 'border-sky-300/80 bg-sky-50/90 text-sky-700 dark:bg-sky-950/40 dark:text-sky-300'
+                : 'border-slate-200/80 bg-slate-50/80 text-slate-500 dark:border-slate-700/80 dark:bg-slate-900/70 dark:text-slate-400',
             )}
           >
             {isCanvasDropActive
@@ -130,7 +130,7 @@ export function CanvasPaletteSidebar({
               return (
                 <div
                   key={section}
-                  className="overflow-hidden rounded-[1.2rem] border border-slate-200/80 bg-white/76"
+                  className="overflow-hidden rounded-[1.2rem] border border-slate-200/80 bg-white/76 dark:border-slate-700/80 dark:bg-slate-900/76"
                 >
                   <button
                     type="button"
@@ -142,29 +142,29 @@ export function CanvasPaletteSidebar({
                       }));
                     }}
                     className={cn(
-                      'flex w-full items-center justify-between px-3.5 py-3 text-left transition hover:bg-slate-50/90',
-                      activeSection === section && 'bg-slate-50/95',
+                      'flex w-full items-center justify-between px-3.5 py-3 text-left transition hover:bg-slate-50/90 dark:hover:bg-slate-800/75',
+                      activeSection === section && 'bg-slate-50/95 dark:bg-slate-800/80',
                     )}
                   >
                     <span
                       className={cn(
-                        'text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500',
-                        activeSection === section && 'text-slate-700',
+                        'text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500 dark:text-slate-400',
+                        activeSection === section && 'text-slate-700 dark:text-slate-200',
                       )}
                     >
                       {section}
                     </span>
                     <ChevronDownIcon
                       className={cn(
-                        'size-4 text-slate-400 transition-transform duration-200',
-                        activeSection === section && 'text-slate-600',
+                        'size-4 text-slate-400 transition-transform duration-200 dark:text-slate-500',
+                        activeSection === section && 'text-slate-600 dark:text-slate-300',
                         sectionOpen ? 'rotate-0' : '-rotate-90',
                       )}
                     />
                   </button>
 
                   {sectionOpen ? (
-                    <div className="space-y-2 border-t border-slate-200/70 px-2.5 py-2.5">
+                    <div className="space-y-2 border-t border-slate-200/70 px-2.5 py-2.5 dark:border-slate-700/70">
                       {sectionItems.map((item) => {
                         const Icon = ITEM_ICON_MAP[item.id];
                         const isDragging = draggedItemId === item.id;
@@ -181,29 +181,29 @@ export function CanvasPaletteSidebar({
                             onDragStart={(event) => onDragStartItem(item.id, event)}
                             onDragEnd={onDragEndItem}
                             className={cn(
-                              'group flex w-full items-start gap-3 rounded-[1rem] border border-slate-200/80 bg-white px-3 py-3 text-left transition',
+                              'group flex w-full items-start gap-3 rounded-[1rem] border border-slate-200/80 bg-white px-3 py-3 text-left transition dark:border-slate-700/80 dark:bg-slate-900/90',
                               isDragging
-                                ? 'border-sky-300/80 bg-sky-50/90 shadow-[0_14px_28px_-24px_rgba(14,165,233,0.9)]'
-                                : 'hover:-translate-y-px hover:border-slate-300/80 hover:bg-slate-50/95',
+                                ? 'border-sky-300/80 bg-sky-50/90 shadow-[0_14px_28px_-24px_rgba(14,165,233,0.9)] dark:bg-sky-950/40'
+                                : 'hover:-translate-y-px hover:border-slate-300/80 hover:bg-slate-50/95 dark:hover:border-slate-600/80 dark:hover:bg-slate-800/78',
                             )}
                           >
-                            <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/95 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white">
+                            <span className="mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[0.95rem] border border-slate-200/80 bg-slate-50/95 text-slate-600 transition group-hover:border-slate-300/80 group-hover:bg-white dark:border-slate-700/80 dark:bg-slate-800/85 dark:text-slate-300 dark:group-hover:border-slate-600/80 dark:group-hover:bg-slate-900">
                               <Icon className="size-4" />
                             </span>
                             <span className="min-w-0 flex-1">
                               <span className="flex items-center gap-2">
-                                <span className="truncate text-sm font-semibold text-slate-950">
+                                <span className="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">
                                   {item.label}
                                 </span>
-                                <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">
+                                <span className="rounded-full border border-slate-200/80 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400 dark:border-slate-700/80 dark:bg-slate-800/75 dark:text-slate-500">
                                   Drag
                                 </span>
                               </span>
-                              <span className="mt-1 block text-xs leading-5 text-slate-500">
+                              <span className="mt-1 block text-xs leading-5 text-slate-500 dark:text-slate-400">
                                 {item.description}
                               </span>
                             </span>
-                            <GripVerticalIcon className="mt-1 size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400" />
+                            <GripVerticalIcon className="mt-1 size-4 shrink-0 text-slate-300 transition group-hover:text-slate-400 dark:text-slate-600 dark:group-hover:text-slate-500" />
                           </button>
                         );
                       })}
@@ -252,8 +252,8 @@ export function CanvasPaletteSidebar({
                 className={cn(
                   'flex w-full flex-col items-center gap-2 rounded-[1.2rem] border px-2 py-3 transition',
                   activeSection === section
-                    ? 'border-slate-300/85 bg-slate-100/95 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)]'
-                    : 'border-slate-200/75 bg-white/80 hover:border-slate-300/80 hover:bg-slate-50/90',
+                    ? 'border-slate-300/85 bg-slate-100/95 shadow-[0_16px_30px_-24px_rgba(15,23,42,0.45)] dark:border-slate-600/85 dark:bg-slate-800/90 dark:shadow-[0_16px_30px_-24px_rgba(2,6,23,0.65)]'
+                    : 'border-slate-200/75 bg-white/80 hover:border-slate-300/80 hover:bg-slate-50/90 dark:border-slate-700/80 dark:bg-slate-900/85 dark:hover:border-slate-600/80 dark:hover:bg-slate-800/80',
                 )}
                 aria-pressed={activeSection === section}
                 title={section}
@@ -261,13 +261,13 @@ export function CanvasPaletteSidebar({
                 <Icon
                   className={cn(
                     'size-4',
-                    activeSection === section ? 'text-slate-700' : 'text-slate-500',
+                    activeSection === section ? 'text-slate-700 dark:text-slate-200' : 'text-slate-500 dark:text-slate-400',
                   )}
                 />
                 <span
                   className={cn(
                     'text-[10px] font-semibold uppercase tracking-[0.22em] [writing-mode:vertical-rl]',
-                    activeSection === section ? 'text-slate-600' : 'text-slate-400',
+                    activeSection === section ? 'text-slate-600 dark:text-slate-300' : 'text-slate-400 dark:text-slate-500',
                   )}
                 >
                   {section}

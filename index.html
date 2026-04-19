@@ -12,6 +12,13 @@
     />
     <link rel="icon" type="image/svg+xml" href="/weave2.svg" />
     <link rel="shortcut icon" href="/weave2.svg" />
+    <script>
+      (() => {
+        const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+        document.documentElement.classList.toggle('dark', isDark);
+        document.documentElement.style.colorScheme = isDark ? 'dark' : 'light';
+      })();
+    </script>
     <title>Weave</title>
   </head>
   <body>

@@ -52,6 +52,10 @@ body {
   margin: 0;
   font-family: "Avenir Next", "Neue Haas Grotesk Text Pro", "Segoe UI", sans-serif;
   color: #0f172a;
+  background:
+    radial-gradient(circle at top, rgba(99, 102, 241, 0.1), transparent 30%),
+    radial-gradient(circle at bottom right, rgba(14, 165, 233, 0.08), transparent 28%),
+    linear-gradient(180deg, #f8fbff 0%, #f3f6fb 100%);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -82,6 +86,26 @@ button {
     0 36px 90px -52px rgba(15, 23, 42, 0.24),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
   backdrop-filter: blur(24px);
+}
+
+.dark {
+  color-scheme: dark;
+}
+
+.dark body {
+  color: #e5edf7;
+  background:
+    radial-gradient(circle at top, rgba(56, 189, 248, 0.12), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(15, 23, 42, 0.2), transparent 35%),
+    linear-gradient(180deg, #020617 0%, #0f172a 100%);
+}
+
+.dark .panel-surface {
+  border-color: rgba(71, 85, 105, 0.72);
+  background: linear-gradient(180deg, rgba(15, 23, 42, 0.88), rgba(15, 23, 42, 0.72));
+  box-shadow:
+    0 36px 90px -52px rgba(2, 6, 23, 0.72),
+    inset 0 1px 0 rgba(148, 163, 184, 0.1);
 }
 
 .soft-scrollbar {
