@@ -903,16 +903,16 @@ function App() {
       </SidebarProvider>
 
       {isFileDropActive ? (
-        <div className="pointer-events-none fixed inset-5 z-50 rounded-[2rem] border border-slate-300/75 bg-white/58 p-6 shadow-[0_32px_90px_-52px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-700/80 dark:bg-slate-950/55 dark:shadow-[0_32px_90px_-52px_rgba(2,6,23,0.7)]">
-          <div className="flex h-full items-center justify-center rounded-[1.6rem] border border-slate-300/70 border-dashed bg-white/72 dark:border-slate-700/80 dark:bg-slate-900/66">
+        <div className="pointer-events-none fixed inset-5 z-50 rounded-[2rem] border border-slate-300/75 bg-white/58 p-6 shadow-[0_32px_90px_-52px_rgba(15,23,42,0.35)] backdrop-blur-xl dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.5)] dark:shadow-[0_32px_90px_-52px_rgba(15,23,42,0.46)]">
+          <div className="flex h-full items-center justify-center rounded-[1.6rem] border border-slate-300/70 border-dashed bg-white/72 dark:border-slate-600/40 dark:bg-[rgba(51,65,85,0.36)]">
             <div className="max-w-md text-center">
-              <div className="mx-auto flex size-16 items-center justify-center rounded-[1.4rem] border border-slate-200/85 bg-white/92 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.28)] dark:border-slate-700/80 dark:bg-slate-900/90 dark:shadow-[0_18px_40px_-28px_rgba(2,6,23,0.6)]">
-                <UploadIcon className="size-7 text-slate-600 dark:text-slate-300" />
+              <div className="mx-auto flex size-16 items-center justify-center rounded-[1.4rem] border border-slate-200/85 bg-white/92 shadow-[0_18px_40px_-28px_rgba(15,23,42,0.28)] dark:border-slate-600/40 dark:bg-slate-800/74 dark:shadow-[0_18px_40px_-28px_rgba(15,23,42,0.38)]">
+                <UploadIcon className="size-7 text-slate-600 dark:text-slate-200" />
               </div>
               <div className="mt-5 text-[1.35rem] font-semibold tracking-[-0.02em] text-slate-950 dark:text-slate-50">
                 Drop Files To Upload
               </div>
-              <div className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-400">
+              <div className="mt-2 text-sm leading-6 text-slate-500 dark:text-slate-300">
                 {uploadTargetFolder
                   ? `Files will be added to ${uploadTargetFolder.label}.`
                   : 'Files will be added to the current workspace.'}

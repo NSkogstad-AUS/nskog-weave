@@ -5238,7 +5238,7 @@ export function FileCanvasView({
       <ContextMenuTrigger asChild>
         <div
           className={cn(
-            'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:border-slate-700/80 dark:bg-slate-900/60 dark:shadow-[0_36px_90px_-58px_rgba(2,6,23,0.72)]',
+            'flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]',
           )}
         >
           <div
@@ -5289,7 +5289,7 @@ export function FileCanvasView({
               setPanState(nextPanState);
             }}
             className={cn(
-              'relative min-w-0 flex-1 overflow-hidden bg-[#fffdf7]/92 touch-none dark:bg-slate-950/80',
+              'canvas-surface relative min-w-0 flex-1 overflow-hidden touch-none',
               panState ? 'cursor-grabbing' : 'cursor-grab',
             )}
           >
@@ -5330,35 +5330,6 @@ export function FileCanvasView({
               className="absolute inset-0"
               style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
             >
-              {outerCanvasFields.map((field) => (
-                <div
-                  key={field.id}
-                  aria-hidden="true"
-                  className={cn(
-                    'pointer-events-none absolute rounded-[2.5rem] transition-[opacity,width,height,left,top] duration-150',
-                    field.isActive ? 'opacity-100' : 'opacity-85',
-                  )}
-                  style={{
-                    left: field.left,
-                    top: field.top,
-                    width: field.width,
-                    height: field.height,
-                    backgroundImage:
-                      field.isActive
-                        ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
-                        : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
-                    backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-                    maskImage:
-                      field.isActive
-                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                    WebkitMaskImage:
-                      field.isActive
-                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                  }}
-                />
-              ))}
               {groupNodes.map((node) => renderCanvasNode(node))}
               {paletteDragPreview ? (
                 <div
@@ -5379,7 +5350,7 @@ export function FileCanvasView({
                     <>
                       <div className="pointer-events-none absolute inset-px rounded-[15px] bg-[linear-gradient(180deg,rgba(255,255,255,0.94),rgba(241,245,249,0.96))] shadow-[inset_0_1px_0_rgba(255,255,255,0.92),inset_0_0_0_1px_rgba(148,163,184,0.08)]" />
                       <div className="absolute left-4 right-4 top-4">
-                        <div className="truncate text-sm font-medium text-slate-950">
+                        <div className="truncate text-sm font-medium text-slate-950 dark:text-white">
                           {paletteDragPreview.node.label}
                         </div>
                         <div className="mt-3 h-px bg-slate-300/90" />
@@ -5391,7 +5362,7 @@ export function FileCanvasView({
                         className={cn(
                           'flex size-12 items-center justify-center rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
                           paletteDragPreview.node.kind === 'worker'
-                            ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600'
+                            ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600 dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
                             : paletteDragPreview.iconToneClassName,
                         )}
                       >
@@ -5405,18 +5376,18 @@ export function FileCanvasView({
                           className={cn(
                             'mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[20px] border shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)]',
                             paletteDragPreview.node.kind === 'worker'
-                              ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600'
+                              ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
                               : paletteDragPreview.iconToneClassName,
                           )}
                         >
                           <paletteDragPreview.Icon className="size-5" />
                         </span>
                         <div className="min-w-0 flex-1">
-                          <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                          <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950 dark:text-white">
                             {paletteDragPreview.node.label}
                           </div>
                           {paletteDragPreview.node.description.trim().length > 0 ? (
-                            <div className="mt-1 text-[12px] leading-5 text-slate-500">
+                            <div className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-white">
                               {paletteDragPreview.node.description}
                             </div>
                           ) : null}
@@ -5426,35 +5397,6 @@ export function FileCanvasView({
                   )}
                 </div>
               ) : null}
-              {groupCanvasFields.map((field) => (
-                <div
-                  key={field.id}
-                  aria-hidden="true"
-                  className={cn(
-                    'pointer-events-none absolute rounded-[2rem] transition-[opacity,width,height,left,top] duration-150',
-                    field.isActive ? 'opacity-100' : 'opacity-85',
-                  )}
-                  style={{
-                    left: field.left,
-                    top: field.top,
-                    width: field.width,
-                    height: field.height,
-                    backgroundImage:
-                      field.isActive
-                        ? 'radial-gradient(circle, rgba(100,116,139,0.34) 1.45px, transparent 1.55px)'
-                        : 'radial-gradient(circle, rgba(100,116,139,0.28) 1.35px, transparent 1.5px)',
-                    backgroundSize: `${GRID_SIZE}px ${GRID_SIZE}px`,
-                    maskImage:
-                      field.isActive
-                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                    WebkitMaskImage:
-                      field.isActive
-                        ? 'radial-gradient(circle at center, rgba(0,0,0,0.98) 46%, rgba(0,0,0,0.52) 76%, transparent 100%)'
-                        : 'radial-gradient(circle at center, rgba(0,0,0,0.94) 42%, rgba(0,0,0,0.38) 72%, transparent 100%)',
-                  }}
-                />
-              ))}
               {belowGroupConnectorPaths.length > 0 ? (
                 <svg
                   aria-hidden="true"

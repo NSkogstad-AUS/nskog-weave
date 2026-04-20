@@ -350,12 +350,12 @@ function FileCanvasNodeComponent({
                   'rounded-[18px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.12)]',
               )}
             >
-              <Icon
-                className={cn(
-                  'size-7',
-                  isFilesystemNode ? 'text-slate-500' : 'text-current',
-                )}
-              />
+                  <Icon
+                    className={cn(
+                      'size-7',
+                      isFilesystemNode ? 'text-slate-500 dark:text-white' : 'text-current',
+                    )}
+                  />
             </span>
           ) : (
             <>
@@ -364,9 +364,9 @@ function FileCanvasNodeComponent({
                   className={cn(
                     'mt-0.5 flex shrink-0 items-center justify-center',
                     isFilesystemNode
-                      ? 'size-5 text-slate-500'
+                      ? 'size-5 text-slate-500 dark:text-white'
                       : isWorkerNode
-                        ? 'size-10 rounded-[20px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)]'
+                        ? 'size-10 rounded-[20px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)] dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
                       : 'size-9 rounded-2xl border shadow-[0_10px_24px_-22px_rgba(15,23,42,0.14)]',
                     node.kind === 'element' && elementIconToneClassName,
                   )}
@@ -374,7 +374,7 @@ function FileCanvasNodeComponent({
                   <Icon
                     className={cn(
                       'size-5',
-                      isFilesystemNode ? 'text-slate-500' : 'text-current',
+                      isFilesystemNode ? 'text-slate-500 dark:text-white' : 'text-current',
                     )}
                   />
                 </span>
@@ -394,16 +394,16 @@ function FileCanvasNodeComponent({
                         }
                       }}
                       onPointerDown={(event) => event.stopPropagation()}
-                      className="w-full rounded-xl border border-slate-200/90 bg-white/94 px-2.5 py-1.5 text-sm font-semibold text-slate-950 outline-none ring-0"
+                      className="w-full rounded-xl border border-slate-200/90 bg-white/94 px-2.5 py-1.5 text-sm font-semibold text-slate-950 outline-none ring-0 dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white"
                     />
                   ) : showNodeLabel ? (
-                    <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950">
+                    <div className="truncate text-[15px] font-semibold tracking-[-0.01em] text-slate-950 dark:text-white">
                       {node.label}
                     </div>
                   ) : null}
 
                   {secondaryText ? (
-                    <div className="mt-1 text-[12px] leading-5 text-slate-500">
+                    <div className="mt-1 text-[12px] leading-5 text-slate-500 dark:text-white">
                       {secondaryText}
                     </div>
                   ) : null}
@@ -411,25 +411,25 @@ function FileCanvasNodeComponent({
               </div>
 
               {isWorkerNode ? (
-                <div className="space-y-2.5 border-t border-slate-200/75 pt-3.5">
-                  <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500">
+                <div className="space-y-2.5 border-t border-slate-200/75 pt-3.5 dark:border-slate-600/35">
+                  <div className="flex items-center justify-between gap-2 text-[11px] font-medium text-slate-500 dark:text-white">
                     <span className="flex items-center gap-2">
                       {workerStatus === 'processing' ? (
-                        <LoaderCircleIcon className="size-3.5 animate-spin text-slate-500" />
+                        <LoaderCircleIcon className="size-3.5 animate-spin text-slate-500 dark:text-white" />
                       ) : workerStatus === 'error' ? (
                         <AlertTriangleIcon className="size-3.5 text-rose-500" />
                       ) : workerStatus === 'complete' ? (
-                        <SparklesIcon className="size-3.5 text-slate-500" />
+                        <SparklesIcon className="size-3.5 text-slate-500 dark:text-white" />
                       ) : (
                         <span className="size-2 rounded-full bg-slate-300" />
                       )}
                       <span>{workerStatusMessage}</span>
                     </span>
-                    <span className="shrink-0 text-slate-400">{workerModeMeta.badgeLabel}</span>
+                    <span className="shrink-0 text-slate-400 dark:text-white">{workerModeMeta.badgeLabel}</span>
                   </div>
                   {node.workerMode === 'ai-ready' && onChangeWorkerFocus ? (
                     <div className="grid gap-2">
-                      <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                      <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-white">
                         <span className="shrink-0">Focus</span>
                         <select
                           value={workerFocus}
@@ -442,7 +442,7 @@ function FileCanvasNodeComponent({
                           onChange={(event) =>
                             onChangeWorkerFocus(node, event.target.value as FilePageWorkerFocus)
                           }
-                          className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                          className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white"
                         >
                           {workerFocusOptions.map((option) => (
                             <option key={option.value} value={option.value}>
@@ -452,7 +452,7 @@ function FileCanvasNodeComponent({
                         </select>
                       </label>
                       {onChangeWorkerRunMode ? (
-                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-white">
                           <span className="shrink-0">Mode</span>
                           <select
                             value={workerRunMode}
@@ -465,7 +465,7 @@ function FileCanvasNodeComponent({
                             onChange={(event) =>
                               onChangeWorkerRunMode(node, event.target.value as FilePageWorkerRunMode)
                             }
-                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white"
                           >
                             {workerRunModeOptions.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -476,7 +476,7 @@ function FileCanvasNodeComponent({
                         </label>
                       ) : null}
                       {onChangeWorkerOutputMode ? (
-                        <label className="flex items-center gap-2 text-[11px] text-slate-500">
+                        <label className="flex items-center gap-2 text-[11px] text-slate-500 dark:text-white">
                           <span className="shrink-0">Output</span>
                           <select
                             value={workerOutputMode}
@@ -489,7 +489,7 @@ function FileCanvasNodeComponent({
                             onChange={(event) =>
                               onChangeWorkerOutputMode(node, event.target.value as FilePageWorkerOutputMode)
                             }
-                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none"
+                            className="min-w-0 flex-1 rounded-lg border border-slate-200/90 bg-white/95 px-2 py-1 text-[11px] font-medium text-slate-600 outline-none dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white"
                           >
                             {workerOutputModeOptions.map((option) => (
                               <option key={option.value} value={option.value}>
@@ -518,7 +518,7 @@ function FileCanvasNodeComponent({
                         'flex h-8 w-full items-center justify-center gap-1.5 rounded-xl border text-[11px] font-semibold transition-colors',
                         canRunWorker
                           ? 'border-slate-200/90 bg-slate-900 text-white hover:bg-slate-800'
-                          : 'border-slate-200/80 bg-slate-100 text-slate-400',
+                          : 'border-slate-200/80 bg-slate-100 text-slate-400 dark:border-slate-600/35 dark:bg-slate-800/60 dark:text-white',
                       )}
                     >
                       <PlayIcon className="size-3.5" />
@@ -546,7 +546,7 @@ function FileCanvasNodeComponent({
                       }}
                     />
                   </div>
-                  <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400">
+                  <div className="flex items-center justify-between gap-3 text-[11px] text-slate-400 dark:text-white">
                     <span>{workerInputCount} input{workerInputCount === 1 ? '' : 's'}</span>
                     <span>
                       {node.workerMode === 'ai-ready'
@@ -558,8 +558,8 @@ function FileCanvasNodeComponent({
               ) : null}
 
               {canShowFolderSection && showFolderContents ? (
-                <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/75 pt-4">
-                  <div className="mb-2 text-[11px] font-medium text-slate-400">Contents</div>
+                <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/75 pt-4 dark:border-slate-600/35">
+                  <div className="mb-2 text-[11px] font-medium text-slate-400 dark:text-white">Contents</div>
                   <div className="min-h-0 overflow-y-auto pr-1">
                     {visibleFolderContents.map((childNode) => {
                       const ChildIcon = NODE_META[childNode.kind].icon;
@@ -573,20 +573,20 @@ function FileCanvasNodeComponent({
                             onSelectFolderContentItem?.(childNode);
                           }}
                           className={cn(
-                            'flex cursor-pointer items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-50',
+                            'flex cursor-pointer items-start gap-2.5 rounded-xl px-2.5 py-2 text-left transition-colors hover:bg-slate-50 dark:hover:bg-slate-700/25',
                             childNode.id !== visibleFolderContents.at(-1)?.id &&
-                              'border-b border-slate-100',
+                              'border-b border-slate-100 dark:border-slate-700/35',
                           )}
                         >
                           <span className="flex size-4 shrink-0 items-center justify-center">
-                            <ChildIcon className="size-3.5 text-slate-400" />
+                            <ChildIcon className="size-3.5 text-slate-400 dark:text-white" />
                           </span>
                           <span className="min-w-0">
-                            <span className="block truncate text-[12px] font-medium text-slate-600">
+                            <span className="block truncate text-[12px] font-medium text-slate-600 dark:text-white">
                               {childNode.label}
                             </span>
                             {childNode.description ? (
-                              <span className="mt-0.5 line-clamp-2 block text-[11px] leading-4 text-slate-400">
+                              <span className="mt-0.5 line-clamp-2 block text-[11px] leading-4 text-slate-400 dark:text-white">
                                 {childNode.description}
                               </span>
                             ) : null}

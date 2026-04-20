@@ -17,12 +17,12 @@ export const NODE_META = {
   folder: {
     icon: FolderIcon,
     eyebrow: 'Folder',
-    className: 'border-slate-200/85 bg-white/98 dark:border-slate-700/80 dark:bg-slate-900/96',
+    className: 'border-slate-200/85 bg-white/98 dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)]',
   },
   file: {
     icon: FileTextIcon,
     eyebrow: 'File',
-    className: 'border-slate-200/85 bg-white/98 dark:border-slate-700/80 dark:bg-slate-900/96',
+    className: 'border-slate-200/85 bg-white/98 dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)]',
   },
   group: {
     icon: ShapesIcon,
@@ -32,12 +32,12 @@ export const NODE_META = {
   worker: {
     icon: BotIcon,
     eyebrow: 'Worker',
-    className: 'border-slate-200/85 bg-white/98 dark:border-slate-700/80 dark:bg-slate-900/96',
+    className: 'border-slate-200/85 bg-white/98 dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)]',
   },
   element: {
     icon: SparklesIcon,
     eyebrow: 'Element',
-    className: 'border-slate-200/85 bg-white/98 dark:border-slate-700/80 dark:bg-slate-900/96',
+    className: 'border-slate-200/85 bg-white/98 dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)]',
   },
 } satisfies Record<
   FilePageNode['kind'],
@@ -104,7 +104,7 @@ export function ResizeOptionSwatch({ size }: { size: FilePageNode['size'] }) {
               'size-2 rounded-[3px] border transition-colors',
               isActive
                 ? 'border-sky-300/80 bg-sky-300/75'
-                : 'border-slate-200/80 bg-slate-100/90 dark:border-slate-700/80 dark:bg-slate-800/85',
+                : 'border-slate-200/80 bg-slate-100/90 dark:border-slate-600/35 dark:bg-slate-700/54',
             )}
           />
         );
