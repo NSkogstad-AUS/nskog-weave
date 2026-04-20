@@ -346,8 +346,7 @@ function FileCanvasNodeComponent({
                 node.kind === 'element' &&
                   'rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
                 node.kind === 'element' && elementIconToneClassName,
-                isWorkerNode &&
-                  'rounded-[18px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.12)]',
+                isWorkerNode && 'text-slate-600 dark:text-white',
               )}
             >
                   <Icon
@@ -366,7 +365,7 @@ function FileCanvasNodeComponent({
                     isFilesystemNode
                       ? 'size-5 text-slate-500 dark:text-white'
                       : isWorkerNode
-                        ? 'size-10 rounded-[20px] border border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)] dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
+                        ? 'size-10 text-slate-600 dark:text-white'
                       : 'size-9 rounded-2xl border shadow-[0_10px_24px_-22px_rgba(15,23,42,0.14)]',
                     node.kind === 'element' && elementIconToneClassName,
                   )}

@@ -5360,9 +5360,9 @@ export function FileCanvasView({
                     <div className="flex h-full items-center justify-center p-0">
                       <span
                         className={cn(
-                          'flex size-12 items-center justify-center rounded-[18px] border shadow-[0_10px_24px_-20px_rgba(15,23,42,0.16)]',
+                          'flex size-12 items-center justify-center',
                           paletteDragPreview.node.kind === 'worker'
-                            ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.96),rgba(246,248,252,0.94))] text-slate-600 dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
+                            ? 'text-slate-600 dark:text-white'
                             : paletteDragPreview.iconToneClassName,
                         )}
                       >
@@ -5374,9 +5374,9 @@ export function FileCanvasView({
                       <div className="flex min-w-0 items-start gap-3">
                         <span
                           className={cn(
-                            'mt-0.5 flex size-10 shrink-0 items-center justify-center rounded-[20px] border shadow-[0_12px_26px_-24px_rgba(15,23,42,0.22)]',
+                            'mt-0.5 flex size-10 shrink-0 items-center justify-center',
                             paletteDragPreview.node.kind === 'worker'
-                              ? 'border-slate-200/90 bg-[linear-gradient(180deg,rgba(255,255,255,0.95),rgba(246,248,252,0.94))] text-slate-600 dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-white'
+                              ? 'text-slate-600 dark:text-white'
                               : paletteDragPreview.iconToneClassName,
                           )}
                         >
