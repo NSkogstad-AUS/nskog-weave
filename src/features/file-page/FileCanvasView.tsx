@@ -5371,10 +5371,16 @@ export function FileCanvasView({
                     </div>
                   ) : (
                     <div className="flex h-full flex-col gap-3.5">
-                      <div className="flex min-w-0 items-start gap-3">
+                      <div
+                        className={cn(
+                          'flex min-w-0 gap-3',
+                          paletteDragPreview.node.kind === 'worker' ? 'items-center' : 'items-start',
+                        )}
+                      >
                         <span
                           className={cn(
-                            'mt-0.5 flex size-10 shrink-0 items-center justify-center',
+                            'flex size-10 shrink-0 items-center justify-center',
+                            paletteDragPreview.node.kind !== 'worker' && 'mt-0.5',
                             paletteDragPreview.node.kind === 'worker'
                               ? 'text-slate-600 dark:text-white'
                               : paletteDragPreview.iconToneClassName,

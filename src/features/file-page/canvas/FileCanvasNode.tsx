@@ -358,10 +358,11 @@ function FileCanvasNodeComponent({
             </span>
           ) : (
             <>
-              <div className="flex min-w-0 items-start gap-3">
+              <div className={cn('flex min-w-0 gap-3', isWorkerNode ? 'items-center' : 'items-start')}>
                 <span
                   className={cn(
-                    'mt-0.5 flex shrink-0 items-center justify-center',
+                    'flex shrink-0 items-center justify-center',
+                    !isWorkerNode && 'mt-0.5',
                     isFilesystemNode
                       ? 'size-5 text-slate-500 dark:text-white'
                       : isWorkerNode
