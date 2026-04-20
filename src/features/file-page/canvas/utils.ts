@@ -65,9 +65,17 @@ export function getNodeDimensionsForKind(
   size: FilePageNodeSize,
   kind: FilePageNode['kind'] = 'element',
 ) {
+  const normalizedSize =
+    kind === 'worker'
+      ? {
+          widthUnits: 3,
+          heightUnits: 3,
+        }
+      : size;
+
   return {
-    width: NODE_UNIT + (size.widthUnits - 1) * SLOT_STEP_X,
-    height: NODE_UNIT + (size.heightUnits - 1) * SLOT_STEP_Y,
+    width: NODE_UNIT + (normalizedSize.widthUnits - 1) * SLOT_STEP_X,
+    height: NODE_UNIT + (normalizedSize.heightUnits - 1) * SLOT_STEP_Y,
   };
 }
 

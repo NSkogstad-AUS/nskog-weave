@@ -343,10 +343,18 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
       ...page,
       nodes: page.nodes.map((node) =>
         node.id === nodeId
-          ? {
-              ...node,
-              size,
-            }
+          ? node.kind === 'worker'
+            ? {
+                ...node,
+                size: {
+                  widthUnits: 3,
+                  heightUnits: 3,
+                },
+              }
+            : {
+                ...node,
+                size,
+              }
           : node,
       ),
     }));

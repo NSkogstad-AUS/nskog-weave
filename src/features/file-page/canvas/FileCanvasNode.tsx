@@ -166,7 +166,7 @@ function FileCanvasNodeComponent({
   const isFolderNode = node.kind === 'folder';
   const isWorkerNode = node.kind === 'worker';
   const isFilesystemNode = node.kind === 'folder' || node.kind === 'file';
-  const canEdgeResize = node.kind === 'file' || node.kind === 'folder' || node.kind === 'worker';
+  const canEdgeResize = node.kind === 'file' || node.kind === 'folder';
   const isCompactNode = displaySize.widthUnits === 1;
   const canShowFolderSection =
     isFolderNode && displaySize.widthUnits >= 3 && folderContents.length > 0;
@@ -761,7 +761,7 @@ function FileCanvasNodeComponent({
               </ContextMenuSubContent>
             </ContextMenuSub>
           ) : null}
-          {node.kind !== 'group' ? (
+          {node.kind !== 'group' && node.kind !== 'worker' ? (
             <ContextMenuSub>
               <ContextMenuSubTrigger>
                 <ExpandIcon className="size-4" />

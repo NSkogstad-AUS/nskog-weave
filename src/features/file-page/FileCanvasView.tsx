@@ -4359,7 +4359,7 @@ export function FileCanvasView({
       icon: 'target',
       size: {
         widthUnits: 3,
-        heightUnits: 2,
+        heightUnits: 3,
       },
       contentItems: [],
       generatedByWorkerId: null,

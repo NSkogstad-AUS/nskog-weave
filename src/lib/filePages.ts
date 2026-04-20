@@ -88,8 +88,8 @@ function createNode(
     generatedByWorkerId: null,
     position: { x, y },
     size: {
-      widthUnits: 1,
-      heightUnits: 1,
+      widthUnits: kind === 'worker' ? 3 : 1,
+      heightUnits: kind === 'worker' ? 3 : 1,
     },
     workerMode: kind === 'worker' ? 'ai-ready' : null,
     workerFocus: kind === 'worker' ? DEFAULT_FILE_PAGE_WORKER_FOCUS : null,

@@ -196,6 +196,17 @@ function normalizeStoredFolderCanvasNodes(raw: string | null): FolderCanvasStore
             return [];
           }
 
+          const normalizedSize =
+            kind === 'worker'
+              ? {
+                  widthUnits: 3,
+                  heightUnits: 3,
+                }
+              : {
+                  widthUnits: normalizeUnit(node?.size?.widthUnits),
+                  heightUnits: normalizeUnit(node?.size?.heightUnits),
+                };
+
           return [
             {
               id: node.id,
@@ -211,10 +222,7 @@ function normalizeStoredFolderCanvasNodes(raw: string | null): FolderCanvasStore
                 x: position!.x,
                 y: position!.y,
               },
-              size: {
-                widthUnits: normalizeUnit(node?.size?.widthUnits),
-                heightUnits: normalizeUnit(node?.size?.heightUnits),
-              },
+              size: normalizedSize,
               workerMode: normalizeWorkerMode(node?.workerMode),
               workerFocus: normalizeWorkerFocus(node?.workerFocus),
               workerRunMode: normalizeWorkerRunMode(node?.workerRunMode),
@@ -635,10 +643,18 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
       ...current,
       [activeFolder.id]: (current[activeFolder.id] ?? baseNodes).map((node) =>
         node.id === nodeId
-          ? {
-              ...node,
-              size,
-            }
+          ? node.kind === 'worker'
+            ? {
+                ...node,
+                size: {
+                  widthUnits: 3,
+                  heightUnits: 3,
+                },
+              }
+            : {
+                ...node,
+                size,
+              }
           : node,
       ),
     }));
