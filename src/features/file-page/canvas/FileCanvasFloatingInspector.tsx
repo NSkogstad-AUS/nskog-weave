@@ -106,6 +106,7 @@ export function FileCanvasFloatingInspector({
 
   return (
     <section
+      data-canvas-chrome="true"
       className={cn(
         'absolute z-20 overflow-hidden rounded-[1.45rem] border border-slate-200/85 bg-white/96 backdrop-blur-md transition-[left,top,width,height,opacity,transform,box-shadow] duration-300 ease-out dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.9)]',
         isClosedLike

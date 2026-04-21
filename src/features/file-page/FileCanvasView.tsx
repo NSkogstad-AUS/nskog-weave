@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DragEvent as ReactDragEvent,
   PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
 } from 'react';
 import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
 
@@ -1975,6 +1976,50 @@ export function FileCanvasView({
       x: clientX - rect.left - viewportRef.current.x,
       y: clientY - rect.top - viewportRef.current.y,
     };
+  }, []);
+
+  const handleCanvasWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
+    if (event.ctrlKey) {
+      return;
+    }
+
+    if (
+      dragStateRef.current ||
+      marqueeStateRef.current ||
+      panStateRef.current ||
+      resizeStateRef.current ||
+      workerConnectionDragStateRef.current
+    ) {
+      return;
+    }
+
+    if ((event.target as HTMLElement).closest('[data-canvas-chrome="true"]')) {
+      return;
+    }
+
+    let deltaX = event.deltaX;
+    let deltaY = event.deltaY;
+
+    if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+      deltaX *= 16;
+      deltaY *= 16;
+    } else if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+      const canvasHeight = canvasRef.current?.clientHeight ?? 1;
+      deltaX *= canvasHeight;
+      deltaY *= canvasHeight;
+    }
+
+    if (deltaX === 0 && deltaY === 0) {
+      return;
+    }
+
+    event.preventDefault();
+    event.stopPropagation();
+
+    setViewport((current) => ({
+      x: current.x - deltaX,
+      y: current.y - deltaY,
+    }));
   }, []);
 
   const getWorkerInputHandlePoint = useCallback((workerId: string) => {
@@ -5248,6 +5293,7 @@ export function FileCanvasView({
             onDragOver={handleCanvasPaletteDragOver}
             onDragLeave={handleCanvasPaletteDragLeave}
             onDrop={handleCanvasPaletteDrop}
+            onWheel={handleCanvasWheel}
             onPointerLeave={() => {
               if (!contextMenuNodeId) {
                 onHoverNodeChange(null);
