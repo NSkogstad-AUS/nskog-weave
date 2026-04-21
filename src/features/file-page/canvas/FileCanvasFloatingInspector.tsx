@@ -8,7 +8,6 @@ import {
   XIcon,
 } from 'lucide-react';
 
-import { formatUploadedFileSize } from '@/lib/workspaceFiles';
 import { cn } from '@/lib/utils';
 import type { FilePageContentItem } from '@/types/filePage';
 
@@ -36,13 +35,25 @@ export interface CanvasFloatingInspectorRect {
   height: number;
 }
 
+export interface CanvasFloatingInspectorTab {
+  id: string;
+  label: string;
+  type: CanvasFloatingInspectorTarget['type'];
+}
+
 interface FileCanvasFloatingInspectorProps {
   rect: CanvasFloatingInspectorRect;
+  tabs: CanvasFloatingInspectorTab[];
+  activeTabId: string;
   target: CanvasFloatingInspectorTarget;
   isMinimized: boolean;
   isMaximized: boolean;
   phase: 'opening' | 'open' | 'closing';
+  zIndex?: number;
+  onActivate?: () => void;
   onClose: () => void;
+  onCloseTab: (tabId: string) => void;
+  onSelectTab: (tabId: string) => void;
   onHeaderPointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onResizeHandlePointerDown: (event: ReactPointerEvent<HTMLDivElement>) => void;
   onTextChange: (value: string) => void;
@@ -78,11 +89,17 @@ function WindowButton({
 
 export function FileCanvasFloatingInspector({
   rect,
+  tabs,
+  activeTabId,
   target,
   isMinimized,
   isMaximized,
   phase,
+  zIndex,
+  onActivate,
   onClose,
+  onCloseTab,
+  onSelectTab,
   onHeaderPointerDown,
   onResizeHandlePointerDown,
   onTextChange,
@@ -90,17 +107,6 @@ export function FileCanvasFloatingInspector({
   onToggleMinimize,
   onOpenItem,
 }: FileCanvasFloatingInspectorProps) {
-  const metaBadges =
-    target.type === 'file'
-      ? [
-          target.mimeType,
-          typeof target.sizeBytes === 'number' ? formatUploadedFileSize(target.sizeBytes) : null,
-          `${target.textContent.length.toLocaleString()} chars`,
-          target.editable ? 'Editable' : 'Read only',
-        ].filter((value): value is string => Boolean(value))
-      : [
-          `${target.items.length} item${target.items.length === 1 ? '' : 's'}`,
-        ];
   const contentMaxHeight = Math.max(rect.height - 60, 0);
   const isClosedLike = phase !== 'open';
 
@@ -118,9 +124,11 @@ export function FileCanvasFloatingInspector({
         top: rect.y,
         width: rect.width,
         height: isMinimized ? 60 : rect.height,
+        zIndex,
       }}
       onPointerDown={(event) => {
         event.stopPropagation();
+        onActivate?.();
       }}
     >
       <div
@@ -133,25 +141,21 @@ export function FileCanvasFloatingInspector({
           className="flex min-w-0 flex-1 items-center gap-3 cursor-grab active:cursor-grabbing"
           onPointerDown={onHeaderPointerDown}
         >
-          <span className="flex size-9 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 text-slate-600 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.3)] dark:border-slate-600/40 dark:bg-slate-800/72 dark:text-slate-200 dark:shadow-[0_12px_30px_-26px_rgba(15,23,42,0.4)]">
+          <span
+            className={cn(
+              'flex size-9 shrink-0 items-center justify-center text-slate-600 dark:text-slate-200',
+              target.type === 'folder' &&
+                'rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_12px_30px_-26px_rgba(15,23,42,0.3)] dark:border-slate-600/40 dark:bg-slate-800/72 dark:shadow-[0_12px_30px_-26px_rgba(15,23,42,0.4)]',
+            )}
+          >
             {target.type === 'file' ? (
               <FileTextIcon className="size-4" />
             ) : (
               <FolderIcon className="size-4" />
             )}
           </span>
-          <div className="min-w-0">
+          <div className="flex min-w-0 flex-1 items-center">
             <div className="truncate text-sm font-semibold text-slate-950 dark:text-slate-100">{target.label}</div>
-            <div className="mt-1 flex flex-wrap gap-2 text-[11px] text-slate-400 dark:text-slate-400">
-              {metaBadges.map((badge) => (
-                <span
-                  key={badge}
-                  className="rounded-full border border-slate-200/80 bg-white/90 px-2 py-0.5 dark:border-slate-600/35 dark:bg-slate-800/72"
-                >
-                  {badge}
-                </span>
-              ))}
-            </div>
           </div>
         </div>
 
@@ -183,6 +187,51 @@ export function FileCanvasFloatingInspector({
         }}
       >
         <div className="flex min-h-0 flex-1 flex-col">
+          {tabs.length > 1 ? (
+            <div className="border-b border-slate-200/70 px-3 py-2 dark:border-slate-600/30">
+              <div className="flex gap-2 overflow-x-auto pb-1 soft-scrollbar">
+                {tabs.map((tab) => {
+                  const isActive = tab.id === activeTabId;
+                  const TabIcon = tab.type === 'file' ? FileTextIcon : FolderIcon;
+
+                  return (
+                    <div
+                      key={tab.id}
+                      className={cn(
+                        'group flex min-w-0 max-w-56 shrink-0 items-center gap-2 rounded-2xl border pr-1 transition',
+                        isActive
+                          ? 'border-slate-300/90 bg-white text-slate-950 shadow-[0_10px_24px_-20px_rgba(15,23,42,0.3)] dark:border-slate-500/55 dark:bg-slate-800/84 dark:text-slate-100'
+                          : 'border-slate-200/75 bg-slate-50/72 text-slate-500 hover:border-slate-300/85 hover:bg-white hover:text-slate-700 dark:border-slate-600/35 dark:bg-slate-800/55 dark:text-slate-300 dark:hover:border-slate-500/55 dark:hover:bg-slate-700/24 dark:hover:text-slate-100',
+                      )}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => onSelectTab(tab.id)}
+                        className="flex min-w-0 flex-1 items-center gap-2 px-3 py-2 text-left"
+                      >
+                        <TabIcon className="size-4 shrink-0" />
+                        <span className="truncate text-xs font-medium">{tab.label}</span>
+                      </button>
+                      <button
+                        type="button"
+                        aria-label={`Close ${tab.label}`}
+                        onClick={() => onCloseTab(tab.id)}
+                        className={cn(
+                          'flex size-5 shrink-0 items-center justify-center rounded-full transition',
+                          isActive
+                            ? 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:hover:bg-slate-700/55 dark:hover:text-slate-100'
+                            : 'text-slate-300 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700/45 dark:hover:text-slate-200',
+                        )}
+                      >
+                        <XIcon className="size-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ) : null}
+
           {target.description.trim().length > 0 ? (
             <div className="border-b border-slate-200/70 px-4 py-3 text-sm leading-6 text-slate-500 dark:border-slate-600/30 dark:text-slate-300">
               {target.description}
