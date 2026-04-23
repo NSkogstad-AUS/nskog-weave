@@ -350,6 +350,16 @@ export function FileCanvasView({
     [renderedNodes],
   );
 
+  const filePreviewTextById = useMemo(() => {
+    if (!resolveCanvasFileItem) return {} as Record<string, string | null>;
+    return renderedNodes.reduce<Record<string, string | null>>((acc, node) => {
+      if (node.kind === 'file') {
+        acc[node.id] = resolveCanvasFileItem(node)?.textContent ?? null;
+      }
+      return acc;
+    }, {});
+  }, [renderedNodes, resolveCanvasFileItem]);
+
   /** Resolves the content items displayed for a given canvas node. */
   const resolveNodeFolderContents = useCallback(
     (node: FilePageNode): FilePageContentItem[] => {
@@ -1078,7 +1088,7 @@ export function FileCanvasView({
 
         const nextActiveSnapPreviewIds = liveDrag.nodeIds.reduce<Record<string, boolean>>(
           (acc, nodeId) => {
-            acc[nodeId] = Boolean(sharedGroupSnapOrigin || sharedOuterSnapTarget);
+            acc[nodeId] = true;
             return acc;
           },
           {},
@@ -1158,7 +1168,35 @@ export function FileCanvasView({
                       getNodeKind: (nodeId) => getNodeById(nodeId)?.kind,
                     },
                   )
-                : desiredSnapPositions;
+                : resolveSnapPositions(
+                    desiredSnapPositions,
+                    liveDrag.nodeIds,
+                    nodesRef.current.filter((n) => !liveDrag.nodeIds.includes(n.id)),
+                    liveDrag.basePositions,
+                    Object.fromEntries(
+                      nodesRef.current.map((n) => [n.id, draftSizesRef.current[n.id] ?? n.size]),
+                    ),
+                    canShare,
+                    {
+                      toSnapPosition: (position, nodeId) => {
+                        const n = getNodeById(nodeId);
+                        return n?.kind === 'group'
+                          ? { x: position.x - GROUP_CONTENT_INSET_LEFT, y: position.y - GROUP_CONTENT_INSET_TOP }
+                          : position;
+                      },
+                      fromSnapPosition: (position, nodeId) => {
+                        const n = getNodeById(nodeId);
+                        return n?.kind === 'group'
+                          ? { x: position.x + GROUP_CONTENT_INSET_LEFT, y: position.y + GROUP_CONTENT_INSET_TOP }
+                          : position;
+                      },
+                      constrainPosition: (position) => ({
+                        x: clampToCanvas(position.x),
+                        y: clampToCanvas(position.y),
+                      }),
+                      getNodeKind: (nodeId) => getNodeById(nodeId)?.kind,
+                    },
+                  );
 
         const predictiveLandingPositions = layout.pushDraggedLayoutsOutsideGroups(
           nextSnapPositions,
@@ -1936,6 +1974,7 @@ export function FileCanvasView({
         displaySize={draftSizes[node.id] ?? node.size}
         draftIcon={draftIcons[node.id]}
         editingLabel={editingLabel}
+        filePreviewText={node.kind === 'file' ? (filePreviewTextById[node.id] ?? null) : null}
         folderContents={folderContents}
         folderExpandState={folderExpandState}
         isContextMenuOpen={contextMenuNodeId === node.id}

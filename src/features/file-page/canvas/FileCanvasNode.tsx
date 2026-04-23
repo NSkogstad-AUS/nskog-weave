@@ -60,6 +60,7 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
+  filePreviewText?: string | null;
   folderContents?: FilePageContentItem[];
   folderExpandState?: 'hidden' | 'expand' | 'collapse';
   isContextMenuOpen: boolean;
@@ -113,6 +114,7 @@ function FileCanvasNodeComponent({
   displayPosition,
   displaySize,
   editingLabel,
+  filePreviewText,
   folderContents = [],
   folderExpandState = 'hidden',
   isContextMenuOpen,
@@ -409,6 +411,14 @@ function FileCanvasNodeComponent({
                   ) : null}
                 </div>
               </div>
+
+              {node.kind === 'file' && filePreviewText && displaySize.heightUnits >= 2 ? (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-200/60 pt-2 dark:border-slate-600/30">
+                  <pre className="min-h-0 overflow-hidden break-words whitespace-pre-wrap font-mono text-[9.5px] leading-[1.55] text-slate-400/85 dark:text-slate-500 select-none pointer-events-none">
+                    {filePreviewText.slice(0, 3000)}
+                  </pre>
+                </div>
+              ) : null}
 
               {isWorkerNode ? (
                 <div className="space-y-2.5 border-t border-slate-200/75 pt-3.5 dark:border-slate-600/35">
@@ -843,6 +853,10 @@ function areFileCanvasNodePropsEqual(
   }
 
   if (!areSizesEqual(previous.displaySize, next.displaySize)) {
+    return false;
+  }
+
+  if (previous.filePreviewText !== next.filePreviewText) {
     return false;
   }
 
