@@ -230,7 +230,12 @@ function hydrateFilePages(): FilePagesStore {
           [
             fileId,
             {
-              view: page.view === 'explorer' ? 'explorer' : 'canvas',
+              view:
+                page.view === 'explorer'
+                  ? 'explorer'
+                  : page.view === 'document'
+                    ? 'document'
+                    : 'canvas',
               nodes,
             },
           ],
@@ -319,6 +324,20 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
       ...page,
       view,
     }));
+  }
+
+  function setViewForFile(file: WorkspaceFile, view: FilePageView) {
+    setPages((current) => {
+      const currentPage = current[file.id] ?? createDefaultFilePage(file);
+
+      return {
+        ...current,
+        [file.id]: {
+          ...currentPage,
+          view,
+        },
+      };
+    });
   }
 
   function moveNodes(positions: Record<string, Point>) {
@@ -413,6 +432,7 @@ export function useFilePages(activeFile: WorkspaceFile | null) {
     selectedNodeIds,
     setSelectedNodeIds,
     setView,
+    setViewForFile,
     moveNodes,
     resizeNode,
     addNode,

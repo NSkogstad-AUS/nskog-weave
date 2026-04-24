@@ -338,7 +338,7 @@ export function resolveSnapPositions(
   }
 
   return dragNodeIds.reduce<Record<string, Point>>((positions, nodeId) => {
-    positions[nodeId] = basePositions[nodeId] ?? desiredPositions[nodeId];
+    positions[nodeId] = desiredPositions[nodeId] ?? basePositions[nodeId];
     return positions;
   }, {});
 }

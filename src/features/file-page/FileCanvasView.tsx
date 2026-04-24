@@ -17,12 +17,13 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon } from 'lucide-react';
+import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
 
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
+  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { getWorkerModeMeta, resolveWorkerMode } from '@/lib/filePageWorkers';
@@ -166,6 +167,7 @@ export function FileCanvasView({
   const resizeStateRef = useRef<ResizeState | null>(null);
   const workerConnectionDragStateRef = useRef<WorkerConnectionDragState | null>(null);
   const nodeDragMovedRef = useRef(false);
+  const marqueeMovedRef = useRef(false);
   const suppressPreviewOpenUntilRef = useRef(0);
 
   // ── Draft position / selection refs ───────────────────────────────────────
@@ -718,6 +720,7 @@ export function FileCanvasView({
     setWorkerConnectionDragState(null);
     marqueeStateRef.current = nextMarquee;
     setMarqueeState(nextMarquee);
+    marqueeMovedRef.current = false;
     draftSelectedNodeIdsRef.current = initialSelection;
     setDraftSelectedNodeIds(initialSelection);
   }, []);
@@ -1177,35 +1180,7 @@ export function FileCanvasView({
                       getNodeKind: (nodeId) => getNodeById(nodeId)?.kind,
                     },
                   )
-                : resolveSnapPositions(
-                    desiredSnapPositions,
-                    liveDrag.nodeIds,
-                    nodesRef.current.filter((n) => !liveDrag.nodeIds.includes(n.id)),
-                    liveDrag.basePositions,
-                    Object.fromEntries(
-                      nodesRef.current.map((n) => [n.id, draftSizesRef.current[n.id] ?? n.size]),
-                    ),
-                    canShare,
-                    {
-                      toSnapPosition: (position, nodeId) => {
-                        const n = getNodeById(nodeId);
-                        return n?.kind === 'group'
-                          ? { x: position.x - GROUP_CONTENT_INSET_LEFT, y: position.y - GROUP_CONTENT_INSET_TOP }
-                          : position;
-                      },
-                      fromSnapPosition: (position, nodeId) => {
-                        const n = getNodeById(nodeId);
-                        return n?.kind === 'group'
-                          ? { x: position.x + GROUP_CONTENT_INSET_LEFT, y: position.y + GROUP_CONTENT_INSET_TOP }
-                          : position;
-                      },
-                      constrainPosition: (position) => ({
-                        x: clampToCanvas(position.x),
-                        y: clampToCanvas(position.y),
-                      }),
-                      getNodeKind: (nodeId) => getNodeById(nodeId)?.kind,
-                    },
-                  );
+                : desiredSnapPositions;
 
         const predictiveLandingPositions = layout.pushDraggedLayoutsOutsideGroups(
           nextSnapPositions,
@@ -1234,6 +1209,13 @@ export function FileCanvasView({
       if (!liveMarquee) return;
 
       const nextMarquee = { ...liveMarquee, current: localPoint };
+      if (
+        !marqueeMovedRef.current &&
+        (Math.abs(localPoint.x - liveMarquee.origin.x) > 3 ||
+          Math.abs(localPoint.y - liveMarquee.origin.y) > 3)
+      ) {
+        marqueeMovedRef.current = true;
+      }
       const marqueeRect = normalizeRectangle(liveMarquee.origin, localPoint);
       const intersectingIds = nodesRef.current
         .filter((node) => {
@@ -1362,6 +1344,10 @@ export function FileCanvasView({
         suppressPreviewOpenUntilRef.current = Date.now() + 180;
       }
 
+      if (liveMarquee && marqueeMovedRef.current) {
+        suppressPreviewOpenUntilRef.current = Date.now() + 180;
+      }
+
       // Commit resize
       if (liveResize) {
         const nextSize = draftSizesRef.current[liveResize.nodeId] ?? liveResize.baseSize;
@@ -1395,6 +1381,7 @@ export function FileCanvasView({
       setWorkerConnectionDragState(null);
       dragStateRef.current = null;
       nodeDragMovedRef.current = false;
+      marqueeMovedRef.current = false;
       marqueeStateRef.current = null;
       draftSelectedNodeIdsRef.current = null;
       setDragState(null);
@@ -1757,6 +1744,74 @@ export function FileCanvasView({
     },
     [workerEngine],
   );
+
+  const deleteSelectedNodes = useCallback(() => {
+    const selectedIds = Array.from(
+      new Set(draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current),
+    );
+
+    if (selectedIds.length === 0) {
+      return;
+    }
+
+    onPreviewContentItemChange?.(null);
+
+    selectedIds.forEach((nodeId) => {
+      const node = getNodeById(nodeId);
+
+      if (node) {
+        deleteCanvasNode(node);
+      }
+    });
+
+    draftSelectedNodeIdsRef.current = null;
+    setDraftSelectedNodeIds(null);
+    onSelectNodesRef.current([]);
+  }, [deleteCanvasNode, getNodeById, onPreviewContentItemChange]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (editingNodeIdRef.current) {
+        return;
+      }
+
+      if (
+        dragStateRef.current ||
+        marqueeStateRef.current ||
+        panStateRef.current ||
+        resizeStateRef.current ||
+        workerConnectionDragStateRef.current
+      ) {
+        return;
+      }
+
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        (target.isContentEditable ||
+          target.tagName === 'INPUT' ||
+          target.tagName === 'TEXTAREA' ||
+          target.tagName === 'SELECT')
+      ) {
+        return;
+      }
+
+      if (event.key !== 'Delete' && event.key !== 'Backspace') {
+        return;
+      }
+
+      const selectedIds = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
+      if (selectedIds.length === 0) {
+        return;
+      }
+
+      event.preventDefault();
+      deleteSelectedNodes();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [deleteSelectedNodes]);
 
   // ── Hovered connector cleanup ──────────────────────────────────────────────
 
@@ -2373,6 +2428,15 @@ export function FileCanvasView({
       </ContextMenuTrigger>
 
       <ContextMenuContent className="ml-2 w-52">
+        {displaySelectedNodeIds.length > 0 ? (
+          <>
+            <ContextMenuItem onSelect={deleteSelectedNodes}>
+              <Trash2Icon className="size-4" />
+              Delete selected
+            </ContextMenuItem>
+            <ContextMenuSeparator />
+          </>
+        ) : null}
         <ContextMenuItem onSelect={handleAddAiWorker}>
           <BotIcon className="size-4" />
           Add AI worker

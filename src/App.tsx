@@ -543,7 +543,7 @@ function App() {
     deleteNode,
     selectedNodeIds,
     setSelectedNodeIds,
-    setView,
+    setViewForFile,
   } = useFilePages(activeFileSeed);
   useEffect(() => {
     const syncFolderCanvasPages = () => {
@@ -784,6 +784,17 @@ function App() {
     }
   }, [uploadTargetFolder]);
 
+  const handleOpenFile = useCallback((fileId: string) => {
+    const fileMatch = findFileById(displayFolders, fileId);
+
+    if (fileMatch) {
+      setViewForFile(fileMatch.file, 'document');
+    }
+
+    setOpenFileId(fileId);
+    setOpenFolderId(null);
+  }, [displayFolders, setViewForFile]);
+
   const handleAppDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!hasFileDrag(Array.from(event.dataTransfer.types))) {
       return;
@@ -882,10 +893,7 @@ function App() {
           onImportFiles={(files) => {
             void handleUploadFiles(files);
           }}
-          onOpenFile={(fileId) => {
-            setOpenFileId(fileId);
-            setOpenFolderId(null);
-          }}
+          onOpenFile={handleOpenFile}
           onOpenFolder={(folderId) => {
             setOpenFolderId(folderId);
             setOpenFileId(null);

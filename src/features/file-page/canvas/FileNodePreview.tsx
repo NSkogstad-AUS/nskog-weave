@@ -316,7 +316,7 @@ function PdfContent({ fileId }: { fileId: string }) {
           canvas.height = Math.floor(viewport.height);
           const ctx = canvas.getContext('2d');
           if (!ctx) continue;
-          await page.render({ canvasContext: ctx, viewport }).promise;
+          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
           urls.push(canvas.toDataURL('image/jpeg', 0.82));
         }
 
