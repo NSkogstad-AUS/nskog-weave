@@ -1236,19 +1236,14 @@ export function FileCanvasView({
           return rectanglesIntersect(marqueeRect, getNodeBoundsWithSize(position, size, node.kind));
         })
         .map((n) => n.id);
-
-      marqueeStateRef.current = nextMarquee;
-      draftSelectedNodeIdsRef.current = liveMarquee.additive
+      const nextSelectedIds = liveMarquee.additive
         ? Array.from(new Set([...liveMarquee.initialSelection, ...intersectingIds]))
         : intersectingIds;
 
-      if (frameRef.current === null) {
-        frameRef.current = window.requestAnimationFrame(() => {
-          frameRef.current = null;
-          setMarqueeState(marqueeStateRef.current);
-          setDraftSelectedNodeIds(draftSelectedNodeIdsRef.current);
-        });
-      }
+      marqueeStateRef.current = nextMarquee;
+      draftSelectedNodeIdsRef.current = nextSelectedIds;
+      setMarqueeState(nextMarquee);
+      setDraftSelectedNodeIds(nextSelectedIds);
     };
 
     // ── Pointer up ────────────────────────────────────────────────────────────

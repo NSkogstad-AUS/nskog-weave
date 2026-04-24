@@ -1,4 +1,4 @@
-import { memo, useEffect, useMemo, useState } from 'react';
+import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { ArrowUpDownIcon, ListFilterIcon, SearchIcon } from 'lucide-react';
 
 import {
@@ -118,15 +118,12 @@ function sortSidebarFolders(
   folders: WorkspaceFolder[],
   sortMode: SidebarSortMode,
 ): WorkspaceFolder[] {
+  if (sortMode === 'custom') {
+    return folders;
+  }
+
   const sortedFolders = folders.map((folder) => {
     const children = sortSidebarFolders(folder.children, sortMode);
-
-    if (sortMode === 'custom') {
-      return {
-        ...folder,
-        children,
-      };
-    }
 
     const nextFolder = {
       ...folder,
@@ -193,10 +190,6 @@ function sortSidebarFolders(
     };
   });
 
-  if (sortMode === 'custom') {
-    return sortedFolders;
-  }
-
   return [...sortedFolders].sort((left, right) =>
     sortMode === 'name-desc'
       ? compareSidebarLabels(left, right, 'desc')
@@ -246,14 +239,26 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterMode, setFilterMode] = useState<SidebarFilterMode>('all');
   const [sortMode, setSortMode] = useState<SidebarSortMode>('custom');
-  const searchActive = searchQuery.trim().length > 0;
+  const deferredSearchQuery = useDeferredValue(searchQuery);
+  const deferredFilterMode = useDeferredValue(filterMode);
+  const deferredSortMode = useDeferredValue(sortMode);
+  const searchActive = deferredSearchQuery.trim().length > 0;
   const searchableFolders = useMemo(
-    () => filterWorkspaceFolders(folders, searchQuery),
-    [folders, searchQuery],
+    () => filterWorkspaceFolders(folders, deferredSearchQuery),
+    [deferredSearchQuery, folders],
   );
   const visibleFolders = useMemo(
-    () => sortSidebarFolders(filterFoldersBySidebarMode(searchableFolders, filterMode), sortMode),
-    [filterMode, searchableFolders, sortMode],
+    () => {
+      const filteredFolders =
+        deferredFilterMode === 'all'
+          ? searchableFolders
+          : filterFoldersBySidebarMode(searchableFolders, deferredFilterMode);
+
+      return deferredSortMode === 'custom'
+        ? filteredFolders
+        : sortSidebarFolders(filteredFolders, deferredSortMode);
+    },
+    [deferredFilterMode, deferredSortMode, searchableFolders],
   );
   const allSelectableItems = useMemo(
     () => collectVisibleSidebarItems(folders, new Set(getAllFolderIds(folders)), true),
