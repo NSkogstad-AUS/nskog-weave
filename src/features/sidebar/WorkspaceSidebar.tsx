@@ -1,4 +1,4 @@
-import { memo, useMemo, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 
 import {
   AlertDialog,
@@ -34,7 +34,15 @@ import {
   type WorkspaceFolder,
   type WorkspaceSeparator,
 } from '@/data/sidebarNavigation';
-import { SidebarTree, type ActiveItem, type EditingItem } from './sidebar-tree';
+import {
+  SidebarTree,
+  areSidebarItemsEqual,
+  collectVisibleSidebarItems,
+  getSidebarItemKey,
+  type ActiveItem,
+  type EditingItem,
+  type SidebarSelectableItem,
+} from './sidebar-tree';
 
 type PendingFolderDelete =
   | {
@@ -78,6 +86,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   );
   const folders = controlledFolders ?? uncontrolledFolders;
   const [activeItem, setActiveItem] = useState<ActiveItem>(null);
+  const [selectedItems, setSelectedItems] = useState<SidebarSelectableItem[]>([]);
+  const [selectionAnchor, setSelectionAnchor] = useState<ActiveItem>(null);
   const [editingItem, setEditingItem] = useState<EditingItem>(null);
   const [pendingFolderDelete, setPendingFolderDelete] =
     useState<PendingFolderDelete>(null);
@@ -89,6 +99,14 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     () => filterWorkspaceFolders(folders, ''),
     [folders],
   );
+  const visibleSelectableItems = useMemo(
+    () => collectVisibleSidebarItems(visibleFolders, expandedFolderIds, searchActive),
+    [expandedFolderIds, searchActive, visibleFolders],
+  );
+  const selectedItemKeys = useMemo(
+    () => new Set(selectedItems.map((item) => getSidebarItemKey(item))),
+    [selectedItems],
+  );
 
   function updateFolders(recipe: (current: WorkspaceFolder[]) => WorkspaceFolder[]) {
     const nextFolders = recipe(folders);
@@ -98,6 +116,63 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     }
 
     onFoldersChange?.(nextFolders);
+  }
+
+  useEffect(() => {
+    const validKeys = new Set(visibleSelectableItems.map((item) => getSidebarItemKey(item)));
+
+    setSelectedItems((current) =>
+      current.filter((item) => validKeys.has(getSidebarItemKey(item))),
+    );
+    setActiveItem((current) =>
+      current && validKeys.has(getSidebarItemKey(current)) ? current : null,
+    );
+    setSelectionAnchor((current) =>
+      current && validKeys.has(getSidebarItemKey(current)) ? current : null,
+    );
+  }, [visibleSelectableItems]);
+
+  function openSidebarItem(item: SidebarSelectableItem) {
+    setActiveItem(item);
+
+    if (item.type === 'file') {
+      onOpenFile?.(item.id);
+      return;
+    }
+
+    onOpenFolder?.(item.id);
+  }
+
+  function selectSidebarItem(
+    item: SidebarSelectableItem,
+    options?: {
+      open?: boolean;
+      shiftKey?: boolean;
+    },
+  ) {
+    if (options?.shiftKey) {
+      const anchorItem = selectionAnchor ?? activeItem ?? item;
+      const anchorIndex = visibleSelectableItems.findIndex((entry) =>
+        areSidebarItemsEqual(entry, anchorItem),
+      );
+      const targetIndex = visibleSelectableItems.findIndex((entry) =>
+        areSidebarItemsEqual(entry, item),
+      );
+
+      if (anchorIndex >= 0 && targetIndex >= 0) {
+        const startIndex = Math.min(anchorIndex, targetIndex);
+        const endIndex = Math.max(anchorIndex, targetIndex);
+        setSelectedItems(visibleSelectableItems.slice(startIndex, endIndex + 1));
+        return;
+      }
+    }
+
+    setSelectedItems([item]);
+    setSelectionAnchor(item);
+
+    if (options?.open) {
+      openSidebarItem(item);
+    }
   }
 
   function commitRename() {
@@ -158,8 +233,10 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
 
     updateFolders((current) => addFileToFolderById(current, folderId, nextFile));
     setExpandedFolderIds((current) => new Set(current).add(folderId));
-    setActiveItem({ type: 'file', id: fileId });
-    onOpenFile?.(fileId);
+    selectSidebarItem(
+      { type: 'file', id: fileId },
+      { open: true },
+    );
     queueAfterMenuClose(() =>
       setEditingItem({
         type: 'file',
@@ -209,12 +286,12 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
             <SidebarContent className="soft-scrollbar gap-0">
               <SidebarGroup className="px-4 py-4">
                 <SidebarGroupContent>
-                  <SidebarTree
-                    activeItem={activeItem}
+                <SidebarTree
                     editingItem={editingItem}
                     expandedFolderIds={expandedFolderIds}
                     folders={visibleFolders}
                     highlightedItem={highlightedItem}
+                    selectedItemKeys={selectedItemKeys}
                     onBeginRename={setEditingItem}
                     onCancelRename={() => setEditingItem(null)}
                     onChangeRename={(value) =>
@@ -242,14 +319,24 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                         label: folderToDelete.label,
                       })
                     }
-                    onSelectFile={(fileId) => {
-                      setActiveItem({ type: 'file', id: fileId });
-                      onOpenFile?.(fileId);
-                    }}
-                    onSelectFolder={(folderId) => {
-                      setActiveItem({ type: 'folder', id: folderId });
-                      onOpenFolder?.(folderId);
-                    }}
+                    onSelectFile={(fileId, event) =>
+                      selectSidebarItem(
+                        { type: 'file', id: fileId },
+                        { open: !event.shiftKey, shiftKey: event.shiftKey },
+                      )
+                    }
+                    onSelectFileForContextMenu={(fileId) =>
+                      selectSidebarItem({ type: 'file', id: fileId })
+                    }
+                    onSelectFolder={(folderId, event) =>
+                      selectSidebarItem(
+                        { type: 'folder', id: folderId },
+                        { open: !event.shiftKey, shiftKey: event.shiftKey },
+                      )
+                    }
+                    onSelectFolderForContextMenu={(folderId) =>
+                      selectSidebarItem({ type: 'folder', id: folderId })
+                    }
                     onToggleExpanded={(folderId) =>
                       setExpandedFolderIds((current) => {
                         const next = new Set(current);

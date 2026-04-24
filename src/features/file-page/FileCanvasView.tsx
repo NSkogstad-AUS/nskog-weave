@@ -737,6 +737,12 @@ export function FileCanvasView({
       if (!localPoint) return;
 
       if (event.shiftKey) {
+        const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
+        const nextSelection = currentSelection.includes(node.id)
+          ? currentSelection
+          : [...currentSelection, node.id];
+        draftSelectedNodeIdsRef.current = nextSelection;
+        setDraftSelectedNodeIds(nextSelection);
         beginMarqueeSelection(localPoint, true);
         return;
       }

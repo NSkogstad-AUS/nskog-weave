@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -44,6 +45,8 @@ export type ActiveItem =
   | { type: 'file'; id: string }
   | null;
 
+export type SidebarSelectableItem = Exclude<ActiveItem, null>;
+
 export type EditingItem =
   | { type: 'folder'; id: string; value: string }
   | { type: 'file'; id: string; value: string }
@@ -61,6 +64,16 @@ type SeparatorDropTarget = {
 
 const SIDEBAR_HIGHLIGHT_CLASS =
   'bg-sidebar-accent/30 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
+const SIDEBAR_SELECTED_CLASS =
+  'bg-sidebar-accent/45 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
+
+export function getSidebarItemKey(item: ActiveItem) {
+  return item ? `${item.type}:${item.id}` : '';
+}
+
+export function areSidebarItemsEqual(left: ActiveItem, right: ActiveItem) {
+  return getSidebarItemKey(left) === getSidebarItemKey(right);
+}
 
 function formatCountLabel(count: number, singular: string, plural: string) {
   return `${count} ${count === 1 ? singular : plural}`;
@@ -78,6 +91,44 @@ function getRowPaddingLeft(level: number) {
 
 function getDropTargetKey(dropTarget: SeparatorDropTarget | null) {
   return dropTarget ? `${dropTarget.folderId}:${dropTarget.index}` : '';
+}
+
+function collectVisibleSidebarItemsFromFolder(
+  folder: WorkspaceFolder,
+  expandedFolderIds: Set<string>,
+  searchActive: boolean,
+): SidebarSelectableItem[] {
+  const items: SidebarSelectableItem[] = [{ type: 'folder', id: folder.id }];
+  const isExpanded = searchActive || expandedFolderIds.has(folder.id);
+
+  if (!isExpanded) {
+    return items;
+  }
+
+  getOrderedWorkspaceFolderItems(folder).forEach((item) => {
+    if (item.type === 'folder') {
+      items.push(
+        ...collectVisibleSidebarItemsFromFolder(item.folder, expandedFolderIds, searchActive),
+      );
+      return;
+    }
+
+    if (item.type === 'file') {
+      items.push({ type: 'file', id: item.file.id });
+    }
+  });
+
+  return items;
+}
+
+export function collectVisibleSidebarItems(
+  folders: WorkspaceFolder[],
+  expandedFolderIds: Set<string>,
+  searchActive: boolean,
+): SidebarSelectableItem[] {
+  return folders.flatMap((folder) =>
+    collectVisibleSidebarItemsFromFolder(folder, expandedFolderIds, searchActive),
+  );
 }
 
 function TreeElbow({ level }: { level: number }) {
@@ -181,7 +232,7 @@ function SeparatorDropZone({
 function FileRow({
   editValue,
   file,
-  isActive,
+  isSelected,
   isEditing,
   isHighlighted,
   level,
@@ -192,10 +243,11 @@ function FileRow({
   onDownload,
   onDelete,
   onSelect,
+  onSelectForContextMenu,
 }: {
   editValue: string;
   file: WorkspaceFile;
-  isActive: boolean;
+  isSelected: boolean;
   isEditing: boolean;
   isHighlighted: boolean;
   level: number;
@@ -205,7 +257,8 @@ function FileRow({
   onCommitRename: () => void;
   onDownload?: () => void;
   onDelete: () => void;
-  onSelect: () => void;
+  onSelect: (event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onSelectForContextMenu: () => void;
 }) {
   return (
     <SidebarMenuItem className="relative w-full">
@@ -223,13 +276,14 @@ function FileRow({
         <ContextMenu>
           <ContextMenuTrigger asChild>
             <SidebarMenuButton
-              isActive={isActive}
+              isActive={isSelected}
               onClick={onSelect}
               onDoubleClick={onBeginRename}
-              onContextMenu={onSelect}
+              onContextMenu={onSelectForContextMenu}
               className={cn(
                 'w-full pr-10 data-[active=true]:bg-sidebar-accent/45',
-                isHighlighted && !isActive && SIDEBAR_HIGHLIGHT_CLASS,
+                isSelected && SIDEBAR_SELECTED_CLASS,
+                isHighlighted && !isSelected && SIDEBAR_HIGHLIGHT_CLASS,
               )}
               style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
             >
@@ -247,7 +301,7 @@ function FileRow({
             <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() => {
-                onSelect();
+                onSelectForContextMenu();
                 queueAfterMenuClose(onBeginRename);
               }}
             >
@@ -257,7 +311,7 @@ function FileRow({
             {onDownload ? (
               <ContextMenuItem
                 onSelect={() => {
-                  onSelect();
+                  onSelectForContextMenu();
                   onDownload();
                 }}
               >
@@ -350,7 +404,6 @@ function SeparatorRow({
 
 function FolderRow({
   activeDropTarget,
-  activeItem,
   draggingSeparator,
   editingItem,
   expandedFolderIds,
@@ -359,6 +412,7 @@ function FolderRow({
   highlightedItem,
   level,
   rootIndex,
+  selectedItemKeys,
   onBeginRename,
   onCancelRename,
   onChangeRename,
@@ -377,11 +431,12 @@ function FolderRow({
   onRequestDownloadFolder,
   onSelectFile,
   onSelectFolder,
+  onSelectFileForContextMenu,
+  onSelectFolderForContextMenu,
   onToggleExpanded,
   searchActive,
 }: {
   activeDropTarget: SeparatorDropTarget | null;
-  activeItem: ActiveItem;
   draggingSeparator: DraggedSeparator | null;
   editingItem: EditingItem;
   expandedFolderIds: Set<string>;
@@ -390,6 +445,7 @@ function FolderRow({
   highlightedItem: ActiveItem;
   level: number;
   rootIndex?: number;
+  selectedItemKeys: Set<string>;
   onBeginRename: (item: EditingItem) => void;
   onCancelRename: () => void;
   onChangeRename: (value: string) => void;
@@ -406,8 +462,10 @@ function FolderRow({
   onHoverDropTarget: (target: SeparatorDropTarget) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
   onRequestDownloadFolder?: (folderId: string) => void;
-  onSelectFile: (fileId: string) => void;
-  onSelectFolder: (folderId: string) => void;
+  onSelectFile: (fileId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onSelectFileForContextMenu: (fileId: string) => void;
+  onSelectFolder: (folderId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onSelectFolderForContextMenu: (folderId: string) => void;
   onToggleExpanded: (folderId: string) => void;
   searchActive: boolean;
 }) {
@@ -415,7 +473,7 @@ function FolderRow({
   const orderedItems = getOrderedWorkspaceFolderItems(folder);
   const hasChildren = orderedItems.length > 0;
   const isEditing = editingItem?.type === 'folder' && editingItem.id === folder.id;
-  const isActive = activeItem?.type === 'folder' && activeItem.id === folder.id;
+  const isSelected = selectedItemKeys.has(getSidebarItemKey({ type: 'folder', id: folder.id }));
   const isHighlighted = highlightedItem?.type === 'folder' && highlightedItem.id === folder.id;
   const descendantCounts = getFolderDescendantCounts(folder);
   const totalDescendants = descendantCounts.folders + descendantCounts.files;
@@ -443,8 +501,8 @@ function FolderRow({
           <ContextMenuTrigger asChild>
             <div className="relative w-full">
               <SidebarMenuButton
-                isActive={isActive}
-                onClick={() => onSelectFolder(folder.id)}
+                isActive={isSelected}
+                onClick={(event) => onSelectFolder(folder.id, event)}
                 onDoubleClick={() =>
                   onBeginRename({
                     type: 'folder',
@@ -452,7 +510,7 @@ function FolderRow({
                     value: folder.label,
                   })
                 }
-                onContextMenu={() => onSelectFolder(folder.id)}
+                onContextMenu={() => onSelectFolderForContextMenu(folder.id)}
                 onDragEnter={(event) => {
                   if (!draggingSeparator) {
                     return;
@@ -480,7 +538,8 @@ function FolderRow({
                 }}
                 className={cn(
                   'w-full overflow-visible pr-14 data-[active=true]:bg-sidebar-accent/45',
-                  isHighlighted && !isActive && SIDEBAR_HIGHLIGHT_CLASS,
+                  isSelected && SIDEBAR_SELECTED_CLASS,
+                  isHighlighted && !isSelected && SIDEBAR_HIGHLIGHT_CLASS,
                   activeDropTargetKey === rowDropTargetKey && 'shadow-[inset_0_-2px_0_0_rgba(125,211,252,0.8)]',
                 )}
                 style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
@@ -532,7 +591,7 @@ function FolderRow({
             <ContextMenuSeparator />
             <ContextMenuItem
               onSelect={() => {
-                onSelectFolder(folder.id);
+                onSelectFolderForContextMenu(folder.id);
                 onCreateFile(folder.id);
               }}
             >
@@ -541,7 +600,7 @@ function FolderRow({
             </ContextMenuItem>
             <ContextMenuItem
               onSelect={() => {
-                onSelectFolder(folder.id);
+                onSelectFolderForContextMenu(folder.id);
                 onCreateSeparator(folder.id);
               }}
             >
@@ -550,7 +609,7 @@ function FolderRow({
             </ContextMenuItem>
             <ContextMenuItem
               onSelect={() => {
-                onSelectFolder(folder.id);
+                onSelectFolderForContextMenu(folder.id);
                 queueAfterMenuClose(() =>
                   onBeginRename({
                     type: 'folder',
@@ -566,7 +625,7 @@ function FolderRow({
             {onRequestDownloadFolder ? (
               <ContextMenuItem
                 onSelect={() => {
-                  onSelectFolder(folder.id);
+                  onSelectFolderForContextMenu(folder.id);
                   onRequestDownloadFolder(folder.id);
                 }}
               >
@@ -583,7 +642,7 @@ function FolderRow({
             <ContextMenuItem
               variant="destructive"
               onSelect={() => {
-                onSelectFolder(folder.id);
+                onSelectFolderForContextMenu(folder.id);
 
                 if (folderHasContents(folder)) {
                   onRequestDeleteFolder(folder);
@@ -627,7 +686,6 @@ function FolderRow({
                   {item.type === 'folder' ? (
                     <FolderRow
                       activeDropTarget={activeDropTarget}
-                      activeItem={activeItem}
                       draggingSeparator={draggingSeparator}
                       editingItem={editingItem}
                       expandedFolderIds={expandedFolderIds}
@@ -635,6 +693,7 @@ function FolderRow({
                       hasDraggedSeparator={hasDraggedSeparator}
                       highlightedItem={highlightedItem}
                       level={level + 1}
+                      selectedItemKeys={selectedItemKeys}
                       onBeginRename={onBeginRename}
                       onCancelRename={onCancelRename}
                       onChangeRename={onChangeRename}
@@ -652,7 +711,9 @@ function FolderRow({
                       onRequestDeleteFolder={onRequestDeleteFolder}
                       onRequestDownloadFolder={onRequestDownloadFolder}
                       onSelectFile={onSelectFile}
+                      onSelectFileForContextMenu={onSelectFileForContextMenu}
                       onSelectFolder={onSelectFolder}
+                      onSelectFolderForContextMenu={onSelectFolderForContextMenu}
                       onToggleExpanded={onToggleExpanded}
                       searchActive={searchActive}
                     />
@@ -664,7 +725,9 @@ function FolderRow({
                           : item.file.label
                       }
                       file={item.file}
-                      isActive={activeItem?.type === 'file' && activeItem.id === item.file.id}
+                      isSelected={selectedItemKeys.has(
+                        getSidebarItemKey({ type: 'file', id: item.file.id }),
+                      )}
                       isEditing={editingItem?.type === 'file' && editingItem.id === item.file.id}
                       isHighlighted={highlightedItem?.type === 'file' && highlightedItem.id === item.file.id}
                       level={level + 1}
@@ -682,7 +745,8 @@ function FolderRow({
                         onDownloadFile ? () => onDownloadFile(item.file.id) : undefined
                       }
                       onDelete={() => onDeleteFile(item.file.id)}
-                      onSelect={() => onSelectFile(item.file.id)}
+                      onSelect={(event) => onSelectFile(item.file.id, event)}
+                      onSelectForContextMenu={() => onSelectFileForContextMenu(item.file.id)}
                     />
                   ) : (
                     <SeparatorRow
@@ -714,11 +778,11 @@ function FolderRow({
 }
 
 interface SidebarTreeProps {
-  activeItem: ActiveItem;
   editingItem: EditingItem;
   expandedFolderIds: Set<string>;
   folders: WorkspaceFolder[];
   highlightedItem: ActiveItem;
+  selectedItemKeys: Set<string>;
   onBeginRename: (item: EditingItem) => void;
   onCancelRename: () => void;
   onChangeRename: (value: string) => void;
@@ -732,18 +796,20 @@ interface SidebarTreeProps {
   onMoveSeparator: (separatorId: string, targetFolderId: string, targetIndex: number) => void;
   onRequestDeleteFolder: (folder: WorkspaceFolder) => void;
   onRequestDownloadFolder?: (folderId: string) => void;
-  onSelectFile: (fileId: string) => void;
-  onSelectFolder: (folderId: string) => void;
+  onSelectFile: (fileId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onSelectFileForContextMenu: (fileId: string) => void;
+  onSelectFolder: (folderId: string, event: ReactMouseEvent<HTMLButtonElement>) => void;
+  onSelectFolderForContextMenu: (folderId: string) => void;
   onToggleExpanded: (folderId: string) => void;
   searchActive: boolean;
 }
 
 export function SidebarTree({
-  activeItem,
   editingItem,
   expandedFolderIds,
   folders,
   highlightedItem,
+  selectedItemKeys,
   onBeginRename,
   onCancelRename,
   onChangeRename,
@@ -758,7 +824,9 @@ export function SidebarTree({
   onRequestDeleteFolder,
   onRequestDownloadFolder,
   onSelectFile,
+  onSelectFileForContextMenu,
   onSelectFolder,
+  onSelectFolderForContextMenu,
   onToggleExpanded,
   searchActive,
 }: SidebarTreeProps) {
@@ -771,7 +839,6 @@ export function SidebarTree({
         <FolderRow
           key={folder.id}
           activeDropTarget={activeDropTarget}
-          activeItem={activeItem}
           draggingSeparator={draggingSeparator}
           editingItem={editingItem}
           expandedFolderIds={expandedFolderIds}
@@ -780,6 +847,7 @@ export function SidebarTree({
           highlightedItem={highlightedItem}
           level={0}
           rootIndex={index}
+          selectedItemKeys={selectedItemKeys}
           onBeginRename={onBeginRename}
           onCancelRename={onCancelRename}
           onChangeRename={onChangeRename}
@@ -811,7 +879,9 @@ export function SidebarTree({
           onRequestDeleteFolder={onRequestDeleteFolder}
           onRequestDownloadFolder={onRequestDownloadFolder}
           onSelectFile={onSelectFile}
+          onSelectFileForContextMenu={onSelectFileForContextMenu}
           onSelectFolder={onSelectFolder}
+          onSelectFolderForContextMenu={onSelectFolderForContextMenu}
           onToggleExpanded={onToggleExpanded}
           searchActive={searchActive}
         />

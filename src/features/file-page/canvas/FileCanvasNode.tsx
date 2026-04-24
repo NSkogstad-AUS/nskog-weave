@@ -238,6 +238,12 @@ function FileCanvasNodeComponent({
       data-canvas-node="true"
       onPointerDown={(event) => onPointerDown(event, node)}
       onClick={(event) => {
+        if (event.shiftKey) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+
         if (!onOpenPreview || isDragging || (node.kind !== 'file' && node.kind !== 'folder')) {
           return;
         }
@@ -261,6 +267,9 @@ function FileCanvasNodeComponent({
         'cursor-grab shadow-[0_18px_40px_-30px_rgba(15,23,42,0.28)] active:cursor-grabbing will-change-transform',
         meta.className,
         nodeClassName,
+        !isGroupNode &&
+          isSelected &&
+          'border-sky-300/95 shadow-[0_0_0_4px_rgba(125,211,252,0.18),0_18px_40px_-30px_rgba(15,23,42,0.28)]',
         isGroupNode && 'overflow-hidden',
         isDragging && 'z-40 transition-none',
         isDragging && isGroupNode && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
