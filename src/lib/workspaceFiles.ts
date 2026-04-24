@@ -2,6 +2,7 @@ import type { WorkspaceFile } from '@/data/sidebarNavigation';
 import type { FilePageContentItem } from '@/types/filePage';
 import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
 import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import { storePdfBinary } from './pdfBinaryStore';
 
 export interface PreviewDocument {
   id: string;
@@ -160,15 +161,23 @@ function truncateTextContent(text: string) {
   return `${text.slice(0, MAX_IMPORTED_FILE_TEXT_CHARACTERS)}\n\n[truncated for local preview]`;
 }
 
-async function extractPdfText(file: File) {
+async function extractPdfText(file: File): Promise<{
+  textContent: string | null;
+  extractionState: string;
+  arrayBuffer: ArrayBuffer | null;
+}> {
   if (file.size > MAX_IMPORTED_PDF_BYTES) {
     return {
       textContent: null,
       extractionState: 'PDF preview unavailable over 20 MB',
-    } as const;
+      arrayBuffer: null,
+    };
   }
 
   const arrayBuffer = await file.arrayBuffer();
+  // pdfjs transfers the underlying buffer to its worker thread, detaching the
+  // original. Slice a copy for storage before handing the original to pdfjs.
+  const storageBuffer = arrayBuffer.slice(0);
   const pdfDocument = await getDocument({
     data: new Uint8Array(arrayBuffer),
     useWorkerFetch: false,
@@ -206,7 +215,8 @@ async function extractPdfText(file: File) {
           ? `Text extracted from first ${MAX_IMPORTED_PDF_PAGES} pages`
           : 'Text extracted'
         : 'No readable text found',
-  } as const;
+    arrayBuffer: storageBuffer,
+  };
 }
 
 export function buildContentSnippet(text: string | null | undefined, fallbackDescription = '') {
@@ -220,6 +230,7 @@ export function buildContentSnippet(text: string | null | undefined, fallbackDes
 }
 
 export async function buildUploadedWorkspaceFile(file: File, index: number): Promise<WorkspaceFile> {
+  const fileId = `uploaded-file-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`;
   let contentText: string | null = null;
   let extractionState = 'Binary preview unavailable';
 
@@ -227,6 +238,9 @@ export async function buildUploadedWorkspaceFile(file: File, index: number): Pro
     const pdfExtraction = await extractPdfText(file);
     contentText = pdfExtraction.textContent;
     extractionState = pdfExtraction.extractionState;
+    if (pdfExtraction.arrayBuffer) {
+      void storePdfBinary(fileId, pdfExtraction.arrayBuffer);
+    }
   } else if (isTextLikeFile(file)) {
     if (file.size <= MAX_IMPORTED_FILE_TEXT_BYTES) {
       contentText = truncateTextContent(await file.text());
@@ -244,7 +258,7 @@ export async function buildUploadedWorkspaceFile(file: File, index: number): Pro
   ];
 
   return {
-    id: `uploaded-file-${Date.now()}-${index}-${Math.random().toString(36).slice(2, 8)}`,
+    id: fileId,
     label: file.name,
     description: descriptionTokens.join(' · '),
     kind: inferUploadedFileKind(file.name),

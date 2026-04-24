@@ -19,6 +19,8 @@ import {
   addFileToFolderById,
   collectFilesInFolder,
   createWorkspaceFolders,
+  deleteFileById,
+  deleteFolderById,
   findFileById,
   findFilePathById,
   findFolderById,
@@ -37,6 +39,7 @@ import {
   type FolderCanvasStore,
 } from '@/features/file-page/useFolderCanvasState';
 import { downloadFile, downloadFiles, type DownloadableFile } from '@/lib/fileDownloads';
+import { deletePdfBinary } from '@/lib/pdfBinaryStore';
 import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import { useFilePages } from './hooks/useFilePages';
@@ -687,6 +690,21 @@ function App() {
     setOpenFolderId((current) => (current === folderId ? null : current));
   }, [updatePageByFileId]);
 
+  // Called when a file node is deleted directly from the canvas (folder-canvas context).
+  // Removes from workspace folders, file pages, and PDF binary store.
+  const handleDeleteWorkspaceFile = useCallback((fileId: string) => {
+    removeFilePage(fileId);
+    setOpenFileId((current) => (current === fileId ? null : current));
+    setFolders((current) => deleteFileById(current, fileId));
+    void deletePdfBinary(fileId);
+  }, [removeFilePage]);
+
+  // Called when a folder node is deleted directly from the canvas.
+  const handleDeleteWorkspaceFolder = useCallback((folderId: string) => {
+    setOpenFolderId((current) => (current === folderId ? null : current));
+    setFolders((current) => deleteFolderById(current, folderId));
+  }, []);
+
   const handleDownloadFile = useCallback((fileId: string) => {
     const fileMatch = findFileById(displayFolders, fileId);
 
@@ -848,7 +866,7 @@ function App() {
       onDrop={handleAppDrop}
     >
       <SidebarProvider
-        defaultOpen={false}
+        defaultOpen={true}
         style={
           {
             '--sidebar-width': '24rem',
@@ -896,6 +914,8 @@ function App() {
                 onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
                 onHoveredSidebarItemChange={setHoveredSidebarItem}
                 onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
+                onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
+                onDeleteWorkspaceFolder={handleDeleteWorkspaceFolder}
               />
             </div>
           </div>

@@ -1,6 +1,6 @@
 import type { Point } from './geometry';
 
-export const FILE_PAGE_VIEWS = ['canvas', 'explorer'] as const;
+export const FILE_PAGE_VIEWS = ['canvas', 'explorer', 'document'] as const;
 export type FilePageView = (typeof FILE_PAGE_VIEWS)[number];
 
 export const FILE_PAGE_NODE_KINDS = ['folder', 'file', 'element', 'group', 'worker'] as const;

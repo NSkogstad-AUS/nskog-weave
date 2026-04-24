@@ -37,7 +37,7 @@ export function createDefaultFilePage(file: WorkspaceFile): FilePageState {
   elementNode.description = ELEMENT_DESCRIPTIONS[file.kind];
 
   return {
-    view: 'canvas',
+    view: file.contentText ? 'document' : 'canvas',
     nodes: [
       createNode(`${file.id}-folder-context`, 'Context', 'folder', 72, 72),
       createNode(`${file.id}-folder-assets`, 'Assets', 'folder', 332, 104),

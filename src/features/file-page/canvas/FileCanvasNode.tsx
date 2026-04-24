@@ -29,6 +29,7 @@ import {
 } from '@/components/animate-ui/components/animate/tooltip';
 import { NODE_CARD_CLASS } from './constants';
 import { FileCanvasGroupChrome } from './FileCanvasGroupChrome';
+import { FileNodePreview } from './FileNodePreview';
 import { getGroupFrameStateClassName, type GroupResizeAxis } from './groupChrome';
 import { ELEMENT_ICON_META, NODE_META, RESIZE_OPTIONS, ResizeOptionSwatch } from './meta';
 import { getNodeBoundsWithSize, getNodeDimensionsForKind } from './utils';
@@ -60,7 +61,7 @@ interface FileCanvasNodeProps {
   displayPosition: Point;
   displaySize: FilePageNode['size'];
   editingLabel: string;
-  filePreviewText?: string | null;
+  filePreview?: { text: string | null; mimeType: string | null; fileId: string | null } | null;
   folderContents?: FilePageContentItem[];
   folderExpandState?: 'hidden' | 'expand' | 'collapse';
   isContextMenuOpen: boolean;
@@ -114,7 +115,7 @@ function FileCanvasNodeComponent({
   displayPosition,
   displaySize,
   editingLabel,
-  filePreviewText,
+  filePreview,
   folderContents = [],
   folderExpandState = 'hidden',
   isContextMenuOpen,
@@ -412,11 +413,20 @@ function FileCanvasNodeComponent({
                 </div>
               </div>
 
-              {node.kind === 'file' && filePreviewText && displaySize.heightUnits >= 2 ? (
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-slate-200/60 pt-2 dark:border-slate-600/30">
-                  <pre className="min-h-0 overflow-hidden break-words whitespace-pre-wrap font-mono text-[9.5px] leading-[1.55] text-slate-400/85 dark:text-slate-500 select-none pointer-events-none">
-                    {filePreviewText.slice(0, 3000)}
-                  </pre>
+              {node.kind === 'file' && filePreview && (filePreview.text || filePreview.fileId) && displaySize.heightUnits >= 2 ? (
+                <div className="flex min-h-0 flex-1 flex-col border-t border-slate-200/60 dark:border-slate-600/30">
+                  <div
+                    className="min-h-0 flex-1 overflow-y-auto pt-2"
+                    onPointerDown={(e) => e.stopPropagation()}
+                    onWheel={(e) => e.stopPropagation()}
+                  >
+                    <FileNodePreview
+                      textContent={filePreview.text}
+                      label={node.label}
+                      mimeType={filePreview.mimeType}
+                      fileId={filePreview.fileId}
+                    />
+                  </div>
                 </div>
               ) : null}
 
@@ -856,7 +866,10 @@ function areFileCanvasNodePropsEqual(
     return false;
   }
 
-  if (previous.filePreviewText !== next.filePreviewText) {
+  if (
+    previous.filePreview?.text !== next.filePreview?.text ||
+    previous.filePreview?.mimeType !== next.filePreview?.mimeType
+  ) {
     return false;
   }
 

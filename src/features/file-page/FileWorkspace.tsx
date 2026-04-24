@@ -18,6 +18,7 @@ import type {
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 import { FileCanvasView } from './FileCanvasView';
+import { FileDocumentView } from './FileDocumentView';
 import { FileExplorerView } from './FileExplorerView';
 import { useFolderCanvasState } from './useFolderCanvasState';
 
@@ -44,6 +45,8 @@ interface FileWorkspaceProps {
       | null,
   ) => void;
   onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
+  onDeleteWorkspaceFile?: (fileId: string) => void;
+  onDeleteWorkspaceFolder?: (folderId: string) => void;
 }
 
 export function FileWorkspace({
@@ -62,6 +65,8 @@ export function FileWorkspace({
   onRequestDownloadFolder,
   onHoveredSidebarItemChange,
   onUpdateWorkspaceFileContent,
+  onDeleteWorkspaceFile,
+  onDeleteWorkspaceFolder,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
   const displayNodes = activeFile ? nodes : folderCanvasState.activeNodes;
@@ -213,7 +218,9 @@ export function FileWorkspace({
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex flex-1">
         <div className="min-h-0 flex-1">
-          {activeView === 'canvas' ? (
+          {activeView === 'document' && activeFile ? (
+            <FileDocumentView file={activeFile} />
+          ) : activeView === 'canvas' ? (
             <FileCanvasView
               nodes={displayNodes}
               selectedNodeIds={displaySelectedNodeIds}
@@ -221,7 +228,14 @@ export function FileWorkspace({
               onResizeNode={activeFile ? onResizeNode : folderCanvasState.resizeNode}
               onAddNode={activeFile ? onAddNode : folderCanvasState.addNode}
               onUpdateNode={activeFile ? onUpdateNode : folderCanvasState.updateNode}
-              onDeleteNode={activeFile ? onDeleteNode : folderCanvasState.deleteNode}
+              onDeleteNode={activeFile ? onDeleteNode : (nodeId) => {
+                folderCanvasState.deleteNode(nodeId);
+                if (nodeId.startsWith('file:')) {
+                  onDeleteWorkspaceFile?.(nodeId.slice('file:'.length));
+                } else if (nodeId.startsWith('folder:')) {
+                  onDeleteWorkspaceFolder?.(nodeId.slice('folder:'.length));
+                }
+              }}
               onHoverNodeChange={handleHoverNodeChange}
               onSelectNodes={activeFile ? onSelectNodes : folderCanvasState.selectNodes}
               onDownloadFileNode={(node) => {

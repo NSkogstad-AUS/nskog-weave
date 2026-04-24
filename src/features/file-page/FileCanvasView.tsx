@@ -350,15 +350,24 @@ export function FileCanvasView({
     [renderedNodes],
   );
 
-  const filePreviewTextById = useMemo(() => {
-    if (!resolveCanvasFileItem) return {} as Record<string, string | null>;
-    return renderedNodes.reduce<Record<string, string | null>>((acc, node) => {
+  const filePreviewById = useMemo(() => {
+    type FilePreview = { text: string | null; mimeType: string | null; fileId: string | null };
+    if (!resolveCanvasFileItem && !resolveCanvasFileId) return {} as Record<string, FilePreview>;
+    return renderedNodes.reduce<Record<string, FilePreview>>((acc, node) => {
       if (node.kind === 'file') {
-        acc[node.id] = resolveCanvasFileItem(node)?.textContent ?? null;
+        const item = resolveCanvasFileItem?.(node);
+        const fileId = resolveCanvasFileId?.(node) ?? null;
+        if (item?.textContent || fileId) {
+          acc[node.id] = {
+            text: item?.textContent ?? null,
+            mimeType: item?.mimeType ?? null,
+            fileId,
+          };
+        }
       }
       return acc;
     }, {});
-  }, [renderedNodes, resolveCanvasFileItem]);
+  }, [renderedNodes, resolveCanvasFileId, resolveCanvasFileItem]);
 
   /** Resolves the content items displayed for a given canvas node. */
   const resolveNodeFolderContents = useCallback(
@@ -1974,7 +1983,7 @@ export function FileCanvasView({
         displaySize={draftSizes[node.id] ?? node.size}
         draftIcon={draftIcons[node.id]}
         editingLabel={editingLabel}
-        filePreviewText={node.kind === 'file' ? (filePreviewTextById[node.id] ?? null) : null}
+        filePreview={node.kind === 'file' ? (filePreviewById[node.id] ?? null) : null}
         folderContents={folderContents}
         folderExpandState={folderExpandState}
         isContextMenuOpen={contextMenuNodeId === node.id}
