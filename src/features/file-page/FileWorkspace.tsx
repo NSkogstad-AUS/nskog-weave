@@ -1,4 +1,4 @@
-import { useCallback } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { FileTextIcon } from 'lucide-react';
 
 import {
@@ -10,6 +10,7 @@ import {
 } from '@/data/sidebarNavigation';
 import { workspaceFileToContentItem } from '@/lib/workspaceFiles';
 import type { DownloadableFile } from '@/lib/fileDownloads';
+import type { SidebarSelectableItem } from '@/features/sidebar/sidebar-tree';
 import type {
   FilePageNode,
   FilePageNodeSize,
@@ -36,14 +37,8 @@ interface FileWorkspaceProps {
   onSelectNodes: (nodeIds: string[]) => void;
   onDownloadFiles: (files: DownloadableFile[]) => void;
   onRequestDownloadFolder: (label: string, files: DownloadableFile[]) => void;
-  onHoveredSidebarItemChange: (
-    item:
-      | {
-          type: 'folder' | 'file';
-          id: string;
-        }
-      | null,
-  ) => void;
+  selectedSidebarItems: SidebarSelectableItem[];
+  onHighlightedSidebarItemsChange: (items: SidebarSelectableItem[]) => void;
   onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
   onDeleteWorkspaceFile?: (fileId: string) => void;
   onDeleteWorkspaceFolder?: (folderId: string) => void;
@@ -63,7 +58,8 @@ export function FileWorkspace({
   onSelectNodes,
   onDownloadFiles,
   onRequestDownloadFolder,
-  onHoveredSidebarItemChange,
+  selectedSidebarItems,
+  onHighlightedSidebarItemsChange,
   onUpdateWorkspaceFileContent,
   onDeleteWorkspaceFile,
   onDeleteWorkspaceFolder,
@@ -73,32 +69,13 @@ export function FileWorkspace({
   const displaySelectedNodeIds = activeFile
     ? selectedNodeIds
     : folderCanvasState.activeSelectedNodeIds;
-  const handleHoverNodeChange = useCallback(
-    (node: FilePageNode | null) => {
-      if (!node) {
-        onHoveredSidebarItemChange(null);
-        return;
-      }
-
-      if (node.id.startsWith('folder:')) {
-        onHoveredSidebarItemChange({
-          type: 'folder',
-          id: node.id.slice('folder:'.length),
-        });
-        return;
-      }
-
-      if (node.id.startsWith('file:')) {
-        onHoveredSidebarItemChange({
-          type: 'file',
-          id: node.id.slice('file:'.length),
-        });
-        return;
-      }
-
-      onHoveredSidebarItemChange(null);
-    },
-    [onHoveredSidebarItemChange],
+  const displayNodeMap = useMemo(
+    () => new Map(displayNodes.map((node) => [node.id, node])),
+    [displayNodes],
+  );
+  const selectedSidebarItemKeys = useMemo(
+    () => new Set(selectedSidebarItems.map((item) => `${item.type}:${item.id}`)),
+    [selectedSidebarItems],
   );
   const resolveCanvasFileItem = useCallback((node: FilePageNode) => {
     if (node.kind !== 'file') {
@@ -131,6 +108,25 @@ export function FileWorkspace({
 
     return null;
   }, [activeFile]);
+  const resolveSidebarItemFromNode = useCallback((node: FilePageNode): SidebarSelectableItem | null => {
+    if (node.id.startsWith('folder:')) {
+      return {
+        type: 'folder',
+        id: node.id.slice('folder:'.length),
+      };
+    }
+
+    const fileId = resolveCanvasFileId(node);
+
+    if (fileId) {
+      return {
+        type: 'file',
+        id: fileId,
+      };
+    }
+
+    return null;
+  }, [resolveCanvasFileId]);
   const resolveCanvasFolderSourceFiles = useCallback((node: FilePageNode) => {
     if (!activeFolder || node.kind !== 'folder' || !node.id.startsWith('folder:')) {
       return [];
@@ -195,6 +191,58 @@ export function FileWorkspace({
 
     return [];
   }, [activeFile, activeFolder, buildDownloadableFile, resolveCanvasFileItem]);
+  const highlightedNodeIds = useMemo(() => {
+    if (selectedSidebarItemKeys.size === 0) {
+      return [];
+    }
+
+    return displayNodes.flatMap((node) => {
+      const sidebarItem = resolveSidebarItemFromNode(node);
+
+      return sidebarItem && selectedSidebarItemKeys.has(`${sidebarItem.type}:${sidebarItem.id}`)
+        ? [node.id]
+        : [];
+    });
+  }, [displayNodes, resolveSidebarItemFromNode, selectedSidebarItemKeys]);
+
+  useEffect(() => {
+    if (activeView !== 'canvas' && activeView !== 'explorer') {
+      onHighlightedSidebarItemsChange([]);
+      return;
+    }
+
+    const nextHighlightedItems = displaySelectedNodeIds.reduce<SidebarSelectableItem[]>(
+      (items, nodeId) => {
+        const node = displayNodeMap.get(nodeId);
+
+        if (!node) {
+          return items;
+        }
+
+        const sidebarItem = resolveSidebarItemFromNode(node);
+
+        if (!sidebarItem) {
+          return items;
+        }
+
+        if (items.some((item) => item.type === sidebarItem.type && item.id === sidebarItem.id)) {
+          return items;
+        }
+
+        items.push(sidebarItem);
+        return items;
+      },
+      [],
+    );
+
+    onHighlightedSidebarItemsChange(nextHighlightedItems);
+  }, [
+    activeView,
+    displayNodeMap,
+    displaySelectedNodeIds,
+    onHighlightedSidebarItemsChange,
+    resolveSidebarItemFromNode,
+  ]);
 
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
@@ -223,6 +271,7 @@ export function FileWorkspace({
           ) : activeView === 'canvas' ? (
             <FileCanvasView
               nodes={displayNodes}
+              highlightedNodeIds={highlightedNodeIds}
               selectedNodeIds={displaySelectedNodeIds}
               onMoveNodes={activeFile ? onMoveNodes : folderCanvasState.moveNodes}
               onResizeNode={activeFile ? onResizeNode : folderCanvasState.resizeNode}
@@ -236,7 +285,7 @@ export function FileWorkspace({
                   onDeleteWorkspaceFolder?.(nodeId.slice('folder:'.length));
                 }
               }}
-              onHoverNodeChange={handleHoverNodeChange}
+              onHoverNodeChange={() => {}}
               onSelectNodes={activeFile ? onSelectNodes : folderCanvasState.selectNodes}
               onDownloadFileNode={(node) => {
                 const files = resolveCanvasDownloadFiles(node);
@@ -271,6 +320,7 @@ export function FileWorkspace({
             />
           ) : (
             <FileExplorerView
+              highlightedNodeIds={highlightedNodeIds}
               nodes={displayNodes}
               selectedNodeIds={displaySelectedNodeIds}
               onSelectNode={(nodeId) =>

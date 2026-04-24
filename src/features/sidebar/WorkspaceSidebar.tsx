@@ -1,4 +1,5 @@
 import { memo, useEffect, useMemo, useState } from 'react';
+import { ArrowUpDownIcon, ListFilterIcon, SearchIcon } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -27,13 +28,16 @@ import {
   deleteSeparatorById,
   filterWorkspaceFolders,
   getAllFolderIds,
-  moveSeparatorById,
+  getOrderedWorkspaceFolderItems,
+  moveWorkspaceItemById,
   renameFileById,
   renameFolderById,
   type WorkspaceFile,
   type WorkspaceFolder,
+  type WorkspaceFolderOrderEntry,
   type WorkspaceSeparator,
 } from '@/data/sidebarNavigation';
+import { Input } from '@/components/ui/input';
 import {
   SidebarTree,
   areSidebarItemsEqual,
@@ -51,35 +55,180 @@ type PendingFolderDelete =
     }
   | null;
 
+type SidebarFilterMode = 'all' | 'files' | 'folders';
+type SidebarSortMode = 'custom' | 'name-asc' | 'name-desc' | 'type';
+
 function queueAfterMenuClose(callback: () => void) {
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(callback);
   });
 }
 
+function compareSidebarLabels(
+  left: { label: string },
+  right: { label: string },
+  direction: 'asc' | 'desc',
+) {
+  return direction === 'asc'
+    ? left.label.localeCompare(right.label, undefined, { sensitivity: 'base' })
+    : right.label.localeCompare(left.label, undefined, { sensitivity: 'base' });
+}
+
+function filterFoldersBySidebarMode(
+  folders: WorkspaceFolder[],
+  filterMode: SidebarFilterMode,
+): WorkspaceFolder[] {
+  if (filterMode === 'all') {
+    return folders;
+  }
+
+  return folders.flatMap((folder) => {
+    const filteredChildren = filterFoldersBySidebarMode(folder.children, filterMode);
+
+    if (filterMode === 'folders') {
+      return [
+        {
+          ...folder,
+          children: filteredChildren,
+          files: [],
+          separators: [],
+          itemOrder: undefined,
+        },
+      ];
+    }
+
+    const hasVisibleFiles = folder.files.length > 0 || filteredChildren.length > 0;
+
+    if (!hasVisibleFiles) {
+      return [];
+    }
+
+    return [
+      {
+        ...folder,
+        children: filteredChildren,
+        separators: [],
+        itemOrder: undefined,
+      },
+    ];
+  });
+}
+
+function sortSidebarFolders(
+  folders: WorkspaceFolder[],
+  sortMode: SidebarSortMode,
+): WorkspaceFolder[] {
+  const sortedFolders = folders.map((folder) => {
+    const children = sortSidebarFolders(folder.children, sortMode);
+
+    if (sortMode === 'custom') {
+      return {
+        ...folder,
+        children,
+      };
+    }
+
+    const nextFolder = {
+      ...folder,
+      children,
+    };
+    const orderedItems = getOrderedWorkspaceFolderItems(nextFolder);
+    const orderWeight = {
+      folder: 0,
+      file: 1,
+      separator: 2,
+    } satisfies Record<WorkspaceFolderOrderEntry['type'], number>;
+    const sortedItems = [...orderedItems].sort((left, right) => {
+      const weightDifference = orderWeight[left.type] - orderWeight[right.type];
+
+      if (weightDifference !== 0 && (sortMode === 'type' || left.type === 'separator' || right.type === 'separator')) {
+        return weightDifference;
+      }
+
+      if (left.type === 'separator' || right.type === 'separator') {
+        return 0;
+      }
+
+      if (sortMode === 'name-asc') {
+        return compareSidebarLabels(
+          left.type === 'folder' ? left.folder : left.file,
+          right.type === 'folder' ? right.folder : right.file,
+          'asc',
+        );
+      }
+
+      if (sortMode === 'name-desc') {
+        return compareSidebarLabels(
+          left.type === 'folder' ? left.folder : left.file,
+          right.type === 'folder' ? right.folder : right.file,
+          'desc',
+        );
+      }
+
+      return compareSidebarLabels(
+        left.type === 'folder' ? left.folder : left.file,
+        right.type === 'folder' ? right.folder : right.file,
+        'asc',
+      );
+    });
+
+    return {
+      ...nextFolder,
+      itemOrder: sortedItems.map((item) =>
+        item.type === 'folder'
+          ? {
+              type: 'folder',
+              id: item.folder.id,
+            } satisfies WorkspaceFolderOrderEntry
+          : item.type === 'file'
+            ? {
+                type: 'file',
+                id: item.file.id,
+              } satisfies WorkspaceFolderOrderEntry
+            : {
+                type: 'separator',
+                id: item.separator.id,
+              } satisfies WorkspaceFolderOrderEntry,
+      ),
+    };
+  });
+
+  if (sortMode === 'custom') {
+    return sortedFolders;
+  }
+
+  return [...sortedFolders].sort((left, right) =>
+    sortMode === 'name-desc'
+      ? compareSidebarLabels(left, right, 'desc')
+      : compareSidebarLabels(left, right, 'asc'),
+  );
+}
+
 interface WorkspaceSidebarProps {
   folders?: WorkspaceFolder[];
   onDownloadFile?: (fileId: string) => void;
   onRequestDownloadFolder?: (folderId: string) => void;
-  highlightedItem?: ActiveItem;
+  highlightedItems?: SidebarSelectableItem[];
   onFileDelete?: (fileId: string) => void;
   onFolderDelete?: (folderId: string) => void;
   onFoldersChange?: (folders: WorkspaceFolder[]) => void;
   onImportFiles?: (files: File[]) => void;
   onOpenFile?: (fileId: string) => void;
   onOpenFolder?: (folderId: string) => void;
+  onSelectedItemsChange?: (items: SidebarSelectableItem[]) => void;
 }
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   folders: controlledFolders,
   onDownloadFile,
   onRequestDownloadFolder,
-  highlightedItem = null,
+  highlightedItems = [],
   onFileDelete,
   onFolderDelete,
   onFoldersChange,
   onOpenFile,
   onOpenFolder,
+  onSelectedItemsChange,
 }: WorkspaceSidebarProps) {
   const [uncontrolledFolders, setUncontrolledFolders] = useState<WorkspaceFolder[]>(
     controlledFolders ?? createWorkspaceFolders(),
@@ -94,9 +243,20 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(getAllFolderIds(controlledFolders ?? createWorkspaceFolders())),
   );
-  const searchActive = false;
+  const [searchQuery, setSearchQuery] = useState('');
+  const [filterMode, setFilterMode] = useState<SidebarFilterMode>('all');
+  const [sortMode, setSortMode] = useState<SidebarSortMode>('custom');
+  const searchActive = searchQuery.trim().length > 0;
+  const searchableFolders = useMemo(
+    () => filterWorkspaceFolders(folders, searchQuery),
+    [folders, searchQuery],
+  );
   const visibleFolders = useMemo(
-    () => filterWorkspaceFolders(folders, ''),
+    () => sortSidebarFolders(filterFoldersBySidebarMode(searchableFolders, filterMode), sortMode),
+    [filterMode, searchableFolders, sortMode],
+  );
+  const allSelectableItems = useMemo(
+    () => collectVisibleSidebarItems(folders, new Set(getAllFolderIds(folders)), true),
     [folders],
   );
   const visibleSelectableItems = useMemo(
@@ -106,6 +266,10 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   const selectedItemKeys = useMemo(
     () => new Set(selectedItems.map((item) => getSidebarItemKey(item))),
     [selectedItems],
+  );
+  const highlightedItemKeys = useMemo(
+    () => new Set(highlightedItems.map((item) => getSidebarItemKey(item))),
+    [highlightedItems],
   );
 
   function updateFolders(recipe: (current: WorkspaceFolder[]) => WorkspaceFolder[]) {
@@ -119,7 +283,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   }
 
   useEffect(() => {
-    const validKeys = new Set(visibleSelectableItems.map((item) => getSidebarItemKey(item)));
+    const validKeys = new Set(allSelectableItems.map((item) => getSidebarItemKey(item)));
 
     setSelectedItems((current) =>
       current.filter((item) => validKeys.has(getSidebarItemKey(item))),
@@ -130,7 +294,11 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     setSelectionAnchor((current) =>
       current && validKeys.has(getSidebarItemKey(current)) ? current : null,
     );
-  }, [visibleSelectableItems]);
+  }, [allSelectableItems]);
+
+  useEffect(() => {
+    onSelectedItemsChange?.(selectedItems);
+  }, [onSelectedItemsChange, selectedItems]);
 
   function openSidebarItem(item: SidebarSelectableItem) {
     setActiveItem(item);
@@ -259,13 +427,22 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     updateFolders((current) => deleteSeparatorById(current, separatorId));
   }
 
-  function moveSeparator(
-    separatorId: string,
-    targetFolderId: string,
+  function moveSidebarItem(
+    item: WorkspaceFolderOrderEntry,
+    targetParentFolderId: string | null,
     targetIndex: number,
   ) {
-    updateFolders((current) => moveSeparatorById(current, separatorId, targetFolderId, targetIndex));
-    setExpandedFolderIds((current) => new Set(current).add(targetFolderId));
+    if (sortMode !== 'custom') {
+      setSortMode('custom');
+    }
+
+    updateFolders((current) =>
+      moveWorkspaceItemById(current, item, targetParentFolderId, targetIndex),
+    );
+
+    if (targetParentFolderId) {
+      setExpandedFolderIds((current) => new Set(current).add(targetParentFolderId));
+    }
   }
 
   return (
@@ -286,11 +463,72 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
             <SidebarContent className="soft-scrollbar gap-0">
               <SidebarGroup className="px-4 py-4">
                 <SidebarGroupContent>
-                <SidebarTree
+                  <div className="mb-3 border-b border-sidebar-border/70 pb-3">
+                    <div className="relative">
+                      <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                      <Input
+                        value={searchQuery}
+                        onChange={(event) => setSearchQuery(event.target.value)}
+                        placeholder="Search files and folders"
+                        className="h-9 rounded-lg border-sidebar-border/70 bg-sidebar/40 pl-9 shadow-none"
+                      />
+                    </div>
+
+                    <div className="mt-3 flex flex-wrap items-center gap-2">
+                      <label className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <ListFilterIcon className="size-3.5" />
+                          Filter
+                        </span>
+                        <select
+                          value={filterMode}
+                          onChange={(event) =>
+                            setFilterMode(event.target.value as SidebarFilterMode)
+                          }
+                          className="h-8 rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-2.5 text-sm font-medium normal-case tracking-normal text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35"
+                        >
+                          <option value="all">All items</option>
+                          <option value="files">Files only</option>
+                          <option value="folders">Folders only</option>
+                        </select>
+                      </label>
+
+                      <label className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+                        <span className="flex shrink-0 items-center gap-1.5">
+                          <ArrowUpDownIcon className="size-3.5" />
+                          Sort
+                        </span>
+                        <select
+                          value={sortMode}
+                          onChange={(event) =>
+                            setSortMode(event.target.value as SidebarSortMode)
+                          }
+                          className="h-8 rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-2.5 text-sm font-medium normal-case tracking-normal text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35"
+                        >
+                          <option value="custom">Manual order</option>
+                          <option value="name-asc">Name A-Z</option>
+                          <option value="name-desc">Name Z-A</option>
+                          <option value="type">Type</option>
+                        </select>
+                      </label>
+                    </div>
+
+                    <div className="mt-2 flex items-center justify-between gap-3 px-0.5 text-[11px] font-medium text-muted-foreground">
+                      <span>
+                        {visibleSelectableItems.length} visible item
+                        {visibleSelectableItems.length === 1 ? '' : 's'}
+                      </span>
+                      <span>
+                        {selectedItems.length} selected
+                      </span>
+                    </div>
+                  </div>
+
+                  <SidebarTree
                     editingItem={editingItem}
                     expandedFolderIds={expandedFolderIds}
                     folders={visibleFolders}
-                    highlightedItem={highlightedItem}
+                    highlightedItemKeys={highlightedItemKeys}
                     selectedItemKeys={selectedItemKeys}
                     onBeginRename={setEditingItem}
                     onCancelRename={() => setEditingItem(null)}
@@ -312,7 +550,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     onDeleteFile={deleteFile}
                     onDeleteFolder={deleteFolder}
                     onDeleteSeparator={deleteSeparator}
-                    onMoveSeparator={moveSeparator}
+                    onMoveItem={moveSidebarItem}
                     onRequestDeleteFolder={(folderToDelete) =>
                       setPendingFolderDelete({
                         id: folderToDelete.id,

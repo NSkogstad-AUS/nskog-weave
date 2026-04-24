@@ -67,6 +67,7 @@ interface FileCanvasNodeProps {
   isContextMenuOpen: boolean;
   isDragging: boolean;
   isEditing: boolean;
+  isHighlighted?: boolean;
   isResizing?: boolean;
   isWorkerConnectionTarget?: boolean;
   resizeAxis?: GroupResizeAxis;
@@ -121,6 +122,7 @@ function FileCanvasNodeComponent({
   isContextMenuOpen,
   isDragging,
   isEditing,
+  isHighlighted = false,
   isResizing = false,
   isWorkerConnectionTarget = false,
   resizeAxis,
@@ -270,6 +272,10 @@ function FileCanvasNodeComponent({
         !isGroupNode &&
           isSelected &&
           'border-sky-300/95 shadow-[0_0_0_4px_rgba(125,211,252,0.18),0_18px_40px_-30px_rgba(15,23,42,0.28)]',
+        !isGroupNode &&
+          !isSelected &&
+          isHighlighted &&
+          'border-slate-300/95 bg-slate-50/92 shadow-[0_0_0_3px_rgba(148,163,184,0.14),0_18px_40px_-30px_rgba(15,23,42,0.22)]',
         isGroupNode && 'overflow-hidden',
         isDragging && 'z-40 transition-none',
         isDragging && isGroupNode && 'shadow-[0_24px_52px_-28px_rgba(15,23,42,0.34)]',
@@ -887,6 +893,7 @@ function areFileCanvasNodePropsEqual(
     previous.isDragging !== next.isDragging ||
     previous.isEditing !== next.isEditing ||
     previous.isResizing !== next.isResizing ||
+    previous.isHighlighted !== next.isHighlighted ||
     previous.isSelected !== next.isSelected ||
     previous.folderExpandState !== next.folderExpandState
   ) {

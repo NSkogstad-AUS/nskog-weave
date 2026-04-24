@@ -109,6 +109,7 @@ import type { Point } from '@/types/geometry';
 // ─── Props ────────────────────────────────────────────────────────────────────
 
 interface FileCanvasViewProps {
+  highlightedNodeIds?: string[];
   nodes: FilePageNode[];
   selectedNodeIds: string[];
   onMoveNodes: (positions: Record<string, Point>) => void;
@@ -135,6 +136,7 @@ interface FileCanvasViewProps {
 
 export function FileCanvasView({
   nodes,
+  highlightedNodeIds = [],
   selectedNodeIds,
   onMoveNodes,
   onResizeNode,
@@ -284,6 +286,10 @@ export function FileCanvasView({
 
   const displaySelectedNodeIds = draftSelectedNodeIds ?? selectedNodeIds;
   const selectedIdSet = useMemo(() => new Set(displaySelectedNodeIds), [displaySelectedNodeIds]);
+  const highlightedIdSet = useMemo(
+    () => new Set(highlightedNodeIds),
+    [highlightedNodeIds],
+  );
   const dragNodeIdSet = useMemo(() => new Set(dragState?.nodeIds ?? []), [dragState?.nodeIds]);
 
   // ── Stable node lookup ─────────────────────────────────────────────────────
@@ -2053,6 +2059,7 @@ export function FileCanvasView({
         isResizing={resizeState?.nodeId === node.id}
         isWorkerConnectionTarget={workerConnectionDragState?.targetNodeId === node.id}
         resizeAxis={resizeState?.nodeId === node.id ? resizeState.axis : undefined}
+        isHighlighted={highlightedIdSet.has(node.id)}
         isSelected={selectedIdSet.has(node.id)}
         node={node}
         snapPreviewPosition={showSnapPreview ? previewPosition : undefined}

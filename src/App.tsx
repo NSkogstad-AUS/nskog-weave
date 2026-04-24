@@ -42,6 +42,7 @@ import { downloadFile, downloadFiles, type DownloadableFile } from '@/lib/fileDo
 import { deletePdfBinary } from '@/lib/pdfBinaryStore';
 import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
+import type { SidebarSelectableItem } from './features/sidebar/sidebar-tree';
 import { useFilePages } from './hooks/useFilePages';
 import { useSystemTheme } from './hooks/use-system-theme';
 import type { FilePageNode, FilePageState } from '@/types/filePage';
@@ -517,13 +518,10 @@ function App() {
   const [openFolderId, setOpenFolderId] = useState<string | null>(null);
   const [folderView, setFolderView] = useState<'canvas' | 'explorer'>('canvas');
   const [isFileDropActive, setIsFileDropActive] = useState(false);
-  const [hoveredSidebarItem, setHoveredSidebarItem] = useState<
-    | {
-        type: 'folder' | 'file';
-        id: string;
-      }
-    | null
-  >(null);
+  const [sidebarSelectedItems, setSidebarSelectedItems] = useState<SidebarSelectableItem[]>([]);
+  const [highlightedSidebarItems, setHighlightedSidebarItems] = useState<
+    SidebarSelectableItem[]
+  >([]);
   const [pendingFolderDownload, setPendingFolderDownload] = useState<PendingFolderDownload>(null);
   const fileDragDepthRef = useRef(0);
   const activeFileSeedMatch = useMemo(
@@ -863,8 +861,8 @@ function App() {
   }, [displayFolders, openFolderId]);
 
   useEffect(() => {
-    if (activeView !== 'canvas') {
-      setHoveredSidebarItem(null);
+    if (activeView === 'document' || !activeView) {
+      setHighlightedSidebarItems([]);
     }
   }, [activeView, activeFile?.id, activeFolder?.id]);
 
@@ -888,11 +886,12 @@ function App() {
       >
         <WorkspaceSidebar
           folders={displayFolders}
-          highlightedItem={hoveredSidebarItem}
+          highlightedItems={highlightedSidebarItems}
           onFoldersChange={(nextFolders) => setFolders(stripGeneratedWorkspaceEntries(nextFolders))}
           onImportFiles={(files) => {
             void handleUploadFiles(files);
           }}
+          onSelectedItemsChange={setSidebarSelectedItems}
           onOpenFile={handleOpenFile}
           onOpenFolder={(folderId) => {
             setOpenFolderId(folderId);
@@ -920,7 +919,8 @@ function App() {
                 onSelectNodes={setSelectedNodeIds}
                 onDownloadFiles={handleDownloadCanvasFiles}
                 onRequestDownloadFolder={handleRequestDownloadCanvasFolder}
-                onHoveredSidebarItemChange={setHoveredSidebarItem}
+                selectedSidebarItems={sidebarSelectedItems}
+                onHighlightedSidebarItemsChange={setHighlightedSidebarItems}
                 onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
                 onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
                 onDeleteWorkspaceFolder={handleDeleteWorkspaceFolder}

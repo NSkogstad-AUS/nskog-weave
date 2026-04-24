@@ -42,6 +42,30 @@ export type OrderedWorkspaceFolderItem =
 
 const WORKSPACE_FOLDERS_SEED: WorkspaceFolder[] = [];
 
+type FolderLocation = {
+  folder: WorkspaceFolder;
+  parentFolder: WorkspaceFolder | null;
+  parentFolderId: string | null;
+  index: number;
+  orderIndex: number;
+};
+
+type FileLocation = {
+  file: WorkspaceFile;
+  parentFolder: WorkspaceFolder;
+  parentFolderId: string;
+  index: number;
+  orderIndex: number;
+};
+
+type SeparatorLocation = {
+  separator: WorkspaceSeparator;
+  parentFolder: WorkspaceFolder;
+  parentFolderId: string;
+  index: number;
+  orderIndex: number;
+};
+
 function normalizeFolderOrdering(folder: WorkspaceFolder): WorkspaceFolder {
   const children = folder.children.map((child) => normalizeFolderOrdering(child));
   const files = folder.files.map((file) => ({ ...file }));
@@ -185,6 +209,109 @@ function insertAtIndex<T>(items: T[], index: number, item: T) {
 
   nextItems.splice(targetIndex, 0, item);
   return nextItems;
+}
+
+function findFolderLocation(
+  folders: WorkspaceFolder[],
+  folderId: string,
+  parentFolder: WorkspaceFolder | null = null,
+): FolderLocation | null {
+  for (const [index, folder] of folders.entries()) {
+    if (folder.id === folderId) {
+      return {
+        folder,
+        parentFolder,
+        parentFolderId: parentFolder?.id ?? null,
+        index,
+        orderIndex: parentFolder
+          ? (parentFolder.itemOrder ?? []).findIndex(
+              (entry) => entry.type === 'folder' && entry.id === folderId,
+            )
+          : index,
+      };
+    }
+
+    const nestedLocation = findFolderLocation(folder.children, folderId, folder);
+
+    if (nestedLocation) {
+      return nestedLocation;
+    }
+  }
+
+  return null;
+}
+
+function findFileLocation(
+  folders: WorkspaceFolder[],
+  fileId: string,
+): FileLocation | null {
+  for (const folder of folders) {
+    const index = folder.files.findIndex((candidate) => candidate.id === fileId);
+
+    if (index >= 0) {
+      return {
+        file: folder.files[index],
+        parentFolder: folder,
+        parentFolderId: folder.id,
+        index,
+        orderIndex: (folder.itemOrder ?? []).findIndex(
+          (entry) => entry.type === 'file' && entry.id === fileId,
+        ),
+      };
+    }
+
+    const nestedLocation = findFileLocation(folder.children, fileId);
+
+    if (nestedLocation) {
+      return nestedLocation;
+    }
+  }
+
+  return null;
+}
+
+function findSeparatorLocation(
+  folders: WorkspaceFolder[],
+  separatorId: string,
+): SeparatorLocation | null {
+  for (const folder of folders) {
+    const separators = folder.separators ?? [];
+    const index = separators.findIndex((candidate) => candidate.id === separatorId);
+
+    if (index >= 0) {
+      return {
+        separator: separators[index],
+        parentFolder: folder,
+        parentFolderId: folder.id,
+        index,
+        orderIndex: (folder.itemOrder ?? []).findIndex(
+          (entry) => entry.type === 'separator' && entry.id === separatorId,
+        ),
+      };
+    }
+
+    const nestedLocation = findSeparatorLocation(folder.children, separatorId);
+
+    if (nestedLocation) {
+      return nestedLocation;
+    }
+  }
+
+  return null;
+}
+
+function folderContainsDescendant(
+  folder: WorkspaceFolder,
+  descendantId: string,
+): boolean {
+  return folder.children.some(
+    (child) =>
+      child.id === descendantId || folderContainsDescendant(child, descendantId),
+  );
+}
+
+function normalizeWorkspaceFolders(folders: WorkspaceFolder[]) {
+  return folders.map((folder) => normalizeFolderOrdering(folder));
 }
 
 function insertSeparatorIntoFolder(
@@ -473,39 +600,180 @@ export function moveSeparatorById(
   targetFolderId: string,
   targetIndex: number,
 ): WorkspaceFolder[] {
-  const existingMatch = findSeparatorById(folders, separatorId);
+  return moveWorkspaceItemById(
+    folders,
+    {
+      type: 'separator',
+      id: separatorId,
+    },
+    targetFolderId,
+    targetIndex,
+  );
+}
 
-  if (!existingMatch) {
+export function moveWorkspaceItemById(
+  folders: WorkspaceFolder[],
+  item: WorkspaceFolderOrderEntry,
+  targetParentFolderId: string | null,
+  targetIndex: number,
+): WorkspaceFolder[] {
+  const nextFolders = cloneFolders(folders);
+
+  if (item.type === 'folder') {
+    const sourceLocation = findFolderLocation(nextFolders, item.id);
+
+    if (!sourceLocation) {
+      return folders;
+    }
+
+    if (targetParentFolderId === sourceLocation.folder.id) {
+      return folders;
+    }
+
+    if (
+      targetParentFolderId &&
+      folderContainsDescendant(sourceLocation.folder, targetParentFolderId)
+    ) {
+      return folders;
+    }
+
+    if (sourceLocation.parentFolder) {
+      sourceLocation.parentFolder.children = sourceLocation.parentFolder.children.filter(
+        (candidate) => candidate.id !== item.id,
+      );
+      sourceLocation.parentFolder.itemOrder = (sourceLocation.parentFolder.itemOrder ?? []).filter(
+        (entry) => !(entry.type === 'folder' && entry.id === item.id),
+      );
+    } else {
+      nextFolders.splice(sourceLocation.index, 1);
+    }
+
+    const resolvedTargetIndex =
+      sourceLocation.parentFolderId === targetParentFolderId &&
+      sourceLocation.orderIndex >= 0 &&
+      targetIndex > sourceLocation.orderIndex
+        ? targetIndex - 1
+        : targetIndex;
+
+    if (!targetParentFolderId) {
+      nextFolders.splice(
+        Math.max(0, Math.min(resolvedTargetIndex, nextFolders.length)),
+        0,
+        sourceLocation.folder,
+      );
+
+      return normalizeWorkspaceFolders(nextFolders);
+    }
+
+    const targetFolder = findFolderById(nextFolders, targetParentFolderId);
+
+    if (!targetFolder) {
+      return folders;
+    }
+
+    targetFolder.children = [
+      ...targetFolder.children.filter((candidate) => candidate.id !== item.id),
+      sourceLocation.folder,
+    ];
+    targetFolder.itemOrder = insertAtIndex(
+      (targetFolder.itemOrder ?? []).filter(
+        (entry) => !(entry.type === 'folder' && entry.id === item.id),
+      ),
+      resolvedTargetIndex,
+      {
+        type: 'folder',
+        id: item.id,
+      } satisfies WorkspaceFolderOrderEntry,
+    );
+
+    return normalizeWorkspaceFolders(nextFolders);
+  }
+
+  if (!targetParentFolderId) {
     return folders;
   }
 
-  const sourceFolder = findFolderById(folders, existingMatch.folderId);
-  const sourceIndex = sourceFolder
-    ? (sourceFolder.itemOrder ?? []).findIndex(
-        (entry) => entry.type === 'separator' && entry.id === separatorId,
-      )
-    : -1;
+  const targetFolder = findFolderById(nextFolders, targetParentFolderId);
 
-  const foldersWithoutSeparator = removeSeparatorByIdInternal(folders, separatorId);
-  const separator = existingMatch.separator;
-
-  if (!findFolderById(foldersWithoutSeparator, targetFolderId)) {
+  if (!targetFolder) {
     return folders;
   }
+
+  if (item.type === 'file') {
+    const sourceLocation = findFileLocation(nextFolders, item.id);
+
+    if (!sourceLocation) {
+      return folders;
+    }
+
+    sourceLocation.parentFolder.files = sourceLocation.parentFolder.files.filter(
+      (candidate) => candidate.id !== item.id,
+    );
+    sourceLocation.parentFolder.itemOrder = (sourceLocation.parentFolder.itemOrder ?? []).filter(
+      (entry) => !(entry.type === 'file' && entry.id === item.id),
+    );
+
+    const resolvedTargetIndex =
+      sourceLocation.parentFolderId === targetParentFolderId &&
+      sourceLocation.orderIndex >= 0 &&
+      targetIndex > sourceLocation.orderIndex
+        ? targetIndex - 1
+        : targetIndex;
+
+    targetFolder.files = [
+      ...targetFolder.files.filter((candidate) => candidate.id !== item.id),
+      sourceLocation.file,
+    ];
+    targetFolder.itemOrder = insertAtIndex(
+      (targetFolder.itemOrder ?? []).filter(
+        (entry) => !(entry.type === 'file' && entry.id === item.id),
+      ),
+      resolvedTargetIndex,
+      {
+        type: 'file',
+        id: item.id,
+      } satisfies WorkspaceFolderOrderEntry,
+    );
+
+    return normalizeWorkspaceFolders(nextFolders);
+  }
+
+  const sourceLocation = findSeparatorLocation(nextFolders, item.id);
+
+  if (!sourceLocation) {
+    return folders;
+  }
+
+  sourceLocation.parentFolder.separators = (
+    sourceLocation.parentFolder.separators ?? []
+  ).filter((candidate) => candidate.id !== item.id);
+  sourceLocation.parentFolder.itemOrder = (sourceLocation.parentFolder.itemOrder ?? []).filter(
+    (entry) => !(entry.type === 'separator' && entry.id === item.id),
+  );
 
   const resolvedTargetIndex =
-    existingMatch.folderId === targetFolderId &&
-    sourceIndex >= 0 &&
-    targetIndex > sourceIndex
+    sourceLocation.parentFolderId === targetParentFolderId &&
+    sourceLocation.orderIndex >= 0 &&
+    targetIndex > sourceLocation.orderIndex
       ? targetIndex - 1
       : targetIndex;
 
-  return insertSeparatorIntoFolder(
-    foldersWithoutSeparator,
-    targetFolderId,
-    separator,
+  targetFolder.separators = [
+    ...(targetFolder.separators ?? []).filter((candidate) => candidate.id !== item.id),
+    sourceLocation.separator,
+  ];
+  targetFolder.itemOrder = insertAtIndex(
+    (targetFolder.itemOrder ?? []).filter(
+      (entry) => !(entry.type === 'separator' && entry.id === item.id),
+    ),
     resolvedTargetIndex,
+    {
+      type: 'separator',
+      id: item.id,
+    } satisfies WorkspaceFolderOrderEntry,
   );
+
+  return normalizeWorkspaceFolders(nextFolders);
 }
 
 export function getOrderedWorkspaceFolderItems(
