@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, UploadIcon } from 'lucide-react';
+import { UploadIcon } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -634,13 +634,6 @@ function App() {
 
     return folders[0] ?? null;
   }, [activeFileSeedMatch, activeFolderPath, folders, openFolderId]);
-  const locationSegments = useMemo(
-    () =>
-      activeFileMatch
-        ? [...activeFileMatch.folders.map((folder) => folder.label), activeFileMatch.file.label]
-        : activeFolderPath?.map((folder) => folder.label) ?? [],
-    [activeFileMatch, activeFolderPath],
-  );
   const activeView = activeFile ? activePage?.view ?? 'explorer' : activeFolder ? folderView : null;
   const activeSidebarItem = useMemo<SidebarSelectableItem | null>(() => {
     if (openFileId) {
@@ -1073,46 +1066,6 @@ function App() {
         />
         <SidebarInset className="min-h-screen bg-transparent md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
           <div className="flex h-full min-h-screen flex-col">
-            <div className="flex items-center gap-3 border-b border-slate-200/80 bg-white/72 px-5 py-3 backdrop-blur-sm dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.58)]">
-              <div className="flex items-center gap-1">
-                <button
-                  type="button"
-                  aria-label="Back to canvas"
-                  disabled={!canNavigateBackToCanvas}
-                  onClick={handleNavigateBackToCanvas}
-                  className={canNavigateBackToCanvas
-                    ? 'flex size-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/92 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-slate-100'
-                    : 'flex size-9 items-center justify-center rounded-xl border border-slate-200/70 bg-slate-100/85 text-slate-300 dark:border-slate-700/40 dark:bg-slate-800/50 dark:text-slate-600'}
-                >
-                  <ChevronLeftIcon className="size-4" />
-                </button>
-                <button
-                  type="button"
-                  aria-label="Forward to file"
-                  disabled={!canNavigateForwardToFile}
-                  onClick={handleNavigateForwardToFile}
-                  className={canNavigateForwardToFile
-                    ? 'flex size-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/92 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-slate-100'
-                    : 'flex size-9 items-center justify-center rounded-xl border border-slate-200/70 bg-slate-100/85 text-slate-300 dark:border-slate-700/40 dark:bg-slate-800/50 dark:text-slate-600'}
-                >
-                  <ChevronRightIcon className="size-4" />
-                </button>
-              </div>
-              <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
-                  {locationSegments.length > 0 ? locationSegments.join(' / ') : 'Workspace'}
-                </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400">
-                  {activeView === 'canvas'
-                    ? 'Canvas'
-                    : activeView === 'document'
-                      ? 'Document'
-                      : activeView === 'explorer'
-                        ? 'Explorer'
-                        : 'No selection'}
-                </div>
-              </div>
-            </div>
             <div className="min-h-0 flex-1">
               <FileWorkspace
                 activeFile={activeFile}
@@ -1133,6 +1086,10 @@ function App() {
                 onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
                 onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
                 onDeleteWorkspaceFolder={handleDeleteWorkspaceFolder}
+                canNavigateBackToCanvas={canNavigateBackToCanvas}
+                canNavigateForwardToFile={canNavigateForwardToFile}
+                onNavigateBackToCanvas={handleNavigateBackToCanvas}
+                onNavigateForwardToFile={handleNavigateForwardToFile}
                 onOpenCanvasFile={handleOpenCanvasFile}
               />
             </div>

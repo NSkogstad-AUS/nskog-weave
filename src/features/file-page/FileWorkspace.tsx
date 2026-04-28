@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { FileTextIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, FileTextIcon } from 'lucide-react';
 
 import {
   collectFilesInFolder,
@@ -42,6 +42,10 @@ interface FileWorkspaceProps {
   onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
   onDeleteWorkspaceFile?: (fileId: string) => void;
   onDeleteWorkspaceFolder?: (folderId: string) => void;
+  canNavigateBackToCanvas: boolean;
+  canNavigateForwardToFile: boolean;
+  onNavigateBackToCanvas: () => void;
+  onNavigateForwardToFile: () => void;
   onOpenCanvasFile?: (fileId: string) => void;
 }
 
@@ -64,6 +68,10 @@ export function FileWorkspace({
   onUpdateWorkspaceFileContent,
   onDeleteWorkspaceFile,
   onDeleteWorkspaceFolder,
+  canNavigateBackToCanvas,
+  canNavigateForwardToFile,
+  onNavigateBackToCanvas,
+  onNavigateForwardToFile,
   onOpenCanvasFile,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
@@ -246,6 +254,13 @@ export function FileWorkspace({
     resolveSidebarItemFromNode,
   ]);
 
+  const baseNavButtonClassName =
+    'pointer-events-auto flex size-9 items-center justify-center rounded-2xl border shadow-[0_14px_30px_-18px_rgba(15,23,42,0.28)] backdrop-blur-md transition';
+  const activeNavButtonClassName =
+    'border-slate-200/85 bg-white/94 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/84 dark:text-slate-100';
+  const disabledNavButtonClassName =
+    'border-slate-200/70 bg-slate-100/88 text-slate-300 shadow-none dark:border-slate-700/35 dark:bg-slate-800/58 dark:text-slate-600';
+
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
       <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)] dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.54)] dark:shadow-[0_32px_90px_-62px_rgba(15,23,42,0.42)]">
@@ -265,7 +280,27 @@ export function FileWorkspace({
   }
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2">
+        <button
+          type="button"
+          aria-label="Back to canvas"
+          disabled={!canNavigateBackToCanvas}
+          onClick={onNavigateBackToCanvas}
+          className={`${baseNavButtonClassName} ${canNavigateBackToCanvas ? activeNavButtonClassName : disabledNavButtonClassName}`}
+        >
+          <ChevronLeftIcon className="size-4" />
+        </button>
+        <button
+          type="button"
+          aria-label="Forward to file"
+          disabled={!canNavigateForwardToFile}
+          onClick={onNavigateForwardToFile}
+          className={`${baseNavButtonClassName} ${canNavigateForwardToFile ? activeNavButtonClassName : disabledNavButtonClassName}`}
+        >
+          <ChevronRightIcon className="size-4" />
+        </button>
+      </div>
       <div className="min-h-0 flex flex-1">
         <div className="min-h-0 flex-1">
           {activeView === 'document' && activeFile ? (
