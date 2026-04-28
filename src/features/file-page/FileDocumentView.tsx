@@ -1,15 +1,8 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import { MinusIcon, PlusIcon } from 'lucide-react';
 
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuRadioGroup,
-  DropdownMenuRadioItem,
-  DropdownMenuTrigger,
-} from '@/components/ui/dropdown-menu';
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
@@ -27,6 +20,10 @@ const CODE_EXTENSIONS = new Set([
   'sql', 'graphql', 'gql',
 ]);
 const DOCUMENT_ZOOM_OPTIONS = [50, 75, 90, 100, 125, 150, 175, 200];
+const DOCUMENT_MIN_ZOOM = DOCUMENT_ZOOM_OPTIONS[0];
+const DOCUMENT_MAX_ZOOM = DOCUMENT_ZOOM_OPTIONS[DOCUMENT_ZOOM_OPTIONS.length - 1];
+const CONTENT_WIDTH_PX = 768; // 48rem at 16px base
+const CONTENT_INITIAL_TOP = 144; // px — space below fixed header overlay
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 
@@ -37,6 +34,19 @@ function detectKind(label: string, mimeType?: string | null): DocKind {
   if (ext === 'json' || mimeType === 'application/json') return 'json';
   if (CODE_EXTENSIONS.has(ext)) return 'code';
   return 'text';
+}
+
+function getPreviousZoomOption(value: number) {
+  for (let index = DOCUMENT_ZOOM_OPTIONS.length - 1; index >= 0; index -= 1) {
+    if (DOCUMENT_ZOOM_OPTIONS[index] < value) {
+      return DOCUMENT_ZOOM_OPTIONS[index];
+    }
+  }
+  return DOCUMENT_MIN_ZOOM;
+}
+
+function getNextZoomOption(value: number) {
+  return DOCUMENT_ZOOM_OPTIONS.find((option) => option > value) ?? DOCUMENT_MAX_ZOOM;
 }
 
 // ─── Inline markdown ───────────────────────────────────────────────────────────
@@ -203,12 +213,10 @@ type PdfPageStatus = 'waiting' | 'rendering' | 'ready' | 'error';
 function PdfPage({
   pdf,
   pageNumber,
-  renderScale,
   totalPages,
 }: {
   pdf: PDFDocumentProxy;
   pageNumber: number;
-  renderScale: number;
   totalPages: number;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -242,7 +250,7 @@ function PdfPage({
           return;
         }
 
-        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE * renderScale });
+        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext('2d');
 
@@ -303,7 +311,7 @@ function PdfPage({
         // Ignore cancellation races from pdf.js.
       }
     };
-  }, [pageNumber, pdf, renderScale]);
+  }, [pageNumber, pdf]);
 
   return (
     <div
@@ -328,7 +336,7 @@ function PdfPage({
   );
 }
 
-function PdfDocument({ fileId, zoomScale }: { fileId: string; zoomScale: number }) {
+function PdfDocument({ fileId }: { fileId: string }) {
   const [state, setState] = useState<PdfDocState>({ status: 'loading' });
 
   useEffect(() => {
@@ -408,7 +416,6 @@ function PdfDocument({ fileId, zoomScale }: { fileId: string; zoomScale: number 
           key={`${fileId}-${index + 1}`}
           pdf={state.pdf}
           pageNumber={index + 1}
-          renderScale={zoomScale}
           totalPages={state.pageCount}
         />
       ))}
@@ -433,14 +440,194 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const ext = file.label.split('.').pop()?.toLowerCase() ?? '';
   const text = file.contentText ?? '';
   const hasText = text.length > 0;
+
   const [zoomPercent, setZoomPercent] = useState(100);
+  const [pan, setPan] = useState({ x: 0, y: CONTENT_INITIAL_TOP });
+  const [initialized, setInitialized] = useState(false);
   const [overlayInsets, setOverlayInsets] = useState({ left: 0, right: 0 });
-  const zoomScale = zoomPercent / 100;
-  const zoomIndex = DOCUMENT_ZOOM_OPTIONS.indexOf(zoomPercent);
-  const canZoomOut = zoomIndex > 0;
-  const canZoomIn = zoomIndex >= 0 && zoomIndex < DOCUMENT_ZOOM_OPTIONS.length - 1;
+
+  // Mutable ref for synchronous reads in event handlers — kept in sync with state
+  const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
+  const zoomRafRef = useRef<number | null>(null);
+  const pendingZoomRef = useRef<{ cx: number; cy: number; zoom: number } | null>(null);
+  const panRafRef = useRef<number | null>(null);
+  const isDraggingRef = useRef(false);
+  const dragStartRef = useRef({ clientX: 0, clientY: 0, panX: 0, panY: 0 });
+
+  const scale = zoomPercent / 100;
+  const canZoomOut = zoomPercent > DOCUMENT_MIN_ZOOM;
+  const canZoomIn = zoomPercent < DOCUMENT_MAX_ZOOM;
+
+  // Center content horizontally on first layout
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root || initialized) return;
+    const x = Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2);
+    vpRef.current = { zoomPercent: 100, panX: x, panY: CONTENT_INITIAL_TOP };
+    setPan({ x, y: CONTENT_INITIAL_TOP });
+    setInitialized(true);
+  }, [initialized]);
+
+  // Keep vpRef in sync with React state
+  useEffect(() => {
+    vpRef.current = { zoomPercent, panX: pan.x, panY: pan.y };
+  }, [zoomPercent, pan]);
+
+  // Zoom centred at a specific container-space point
+  const applyZoomAt = useCallback((nextZoomPercent: number, cx: number, cy: number) => {
+    const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, Math.round(nextZoomPercent)));
+    const { zoomPercent: curZoom, panX, panY } = vpRef.current;
+    if (bounded === curZoom) return;
+    const factor = bounded / curZoom;
+    const newPanX = cx + (panX - cx) * factor;
+    const newPanY = cy + (panY - cy) * factor;
+    vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
+    setZoomPercent(bounded);
+    setPan({ x: newPanX, y: newPanY });
+  }, []);
+
+  const zoomAtCenter = useCallback((nextZoomPercent: number) => {
+    const root = rootRef.current;
+    if (!root) return;
+    applyZoomAt(nextZoomPercent, root.clientWidth / 2, root.clientHeight / 2);
+  }, [applyZoomAt]);
+
+  const resetZoom = useCallback(() => {
+    const root = rootRef.current;
+    if (!root) return;
+    const x = Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2);
+    vpRef.current = { zoomPercent: 100, panX: x, panY: CONTENT_INITIAL_TOP };
+    setZoomPercent(100);
+    setPan({ x, y: CONTENT_INITIAL_TOP });
+  }, []);
+
+  // Wheel: ctrl/cmd = zoom at cursor, otherwise pan
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+
+    const handleWheel = (event: WheelEvent) => {
+      event.preventDefault();
+
+      if (event.ctrlKey || event.metaKey) {
+        const rect = root.getBoundingClientRect();
+        const cx = event.clientX - rect.left;
+        const cy = event.clientY - rect.top;
+        const baseZoom = pendingZoomRef.current?.zoom ?? vpRef.current.zoomPercent;
+        const factor = Math.exp(-event.deltaY * 0.0024);
+        const nextZoom = Math.max(
+          DOCUMENT_MIN_ZOOM,
+          Math.min(DOCUMENT_MAX_ZOOM, Math.round(baseZoom * factor)),
+        );
+
+        pendingZoomRef.current = { cx, cy, zoom: nextZoom };
+
+        if (zoomRafRef.current !== null) return;
+        zoomRafRef.current = requestAnimationFrame(() => {
+          zoomRafRef.current = null;
+          const pending = pendingZoomRef.current;
+          pendingZoomRef.current = null;
+          if (!pending) return;
+          applyZoomAt(pending.zoom, pending.cx, pending.cy);
+        });
+      } else {
+        // Accumulate pan in ref; batch the React state update to one rAF
+        vpRef.current.panX -= event.deltaX;
+        vpRef.current.panY -= event.deltaY;
+
+        if (panRafRef.current === null) {
+          panRafRef.current = requestAnimationFrame(() => {
+            panRafRef.current = null;
+            setPan({ x: vpRef.current.panX, y: vpRef.current.panY });
+          });
+        }
+      }
+    };
+
+    root.addEventListener('wheel', handleWheel, { passive: false });
+
+    return () => {
+      if (zoomRafRef.current !== null) { cancelAnimationFrame(zoomRafRef.current); zoomRafRef.current = null; }
+      if (panRafRef.current !== null) { cancelAnimationFrame(panRafRef.current); panRafRef.current = null; }
+      root.removeEventListener('wheel', handleWheel);
+    };
+  }, [applyZoomAt]);
+
+  // Middle-mouse drag to pan
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      isDraggingRef.current = true;
+      dragStartRef.current = {
+        clientX: event.clientX,
+        clientY: event.clientY,
+        panX: vpRef.current.panX,
+        panY: vpRef.current.panY,
+      };
+      root.setPointerCapture(event.pointerId);
+    };
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (!isDraggingRef.current) return;
+      const newPanX = dragStartRef.current.panX + (event.clientX - dragStartRef.current.clientX);
+      const newPanY = dragStartRef.current.panY + (event.clientY - dragStartRef.current.clientY);
+      vpRef.current.panX = newPanX;
+      vpRef.current.panY = newPanY;
+      setPan({ x: newPanX, y: newPanY });
+    };
+
+    const handlePointerUp = () => {
+      isDraggingRef.current = false;
+    };
+
+    root.addEventListener('pointerdown', handlePointerDown);
+    root.addEventListener('pointermove', handlePointerMove);
+    root.addEventListener('pointerup', handlePointerUp);
+    root.addEventListener('pointercancel', handlePointerUp);
+
+    return () => {
+      root.removeEventListener('pointerdown', handlePointerDown);
+      root.removeEventListener('pointermove', handlePointerMove);
+      root.removeEventListener('pointerup', handlePointerUp);
+      root.removeEventListener('pointercancel', handlePointerUp);
+    };
+  }, []);
+
+  // Overlay insets (keeps fixed overlays aligned with the container)
+  useLayoutEffect(() => {
+    const updateOverlayInsets = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setOverlayInsets({
+        left: Math.max(0, rect.left),
+        right: Math.max(0, window.innerWidth - rect.right),
+      });
+    };
+    const observedElements = [
+      rootRef.current,
+      rootRef.current?.parentElement,
+      document.querySelector('[data-slot="sidebar-inset"]'),
+    ].filter((element): element is Element => Boolean(element));
+    const resizeObserver = new ResizeObserver(() => {
+      window.requestAnimationFrame(updateOverlayInsets);
+    });
+    updateOverlayInsets();
+    observedElements.forEach((element) => resizeObserver.observe(element));
+    window.addEventListener('resize', updateOverlayInsets);
+    window.addEventListener('scroll', updateOverlayInsets, true);
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateOverlayInsets);
+      window.removeEventListener('scroll', updateOverlayInsets, true);
+    };
+  }, []);
+
   const documentContent = kind === 'pdf' ? (
-    <PdfDocument fileId={file.id} zoomScale={zoomScale} />
+    <PdfDocument fileId={file.id} />
   ) : kind === 'markdown' && hasText ? (
     <MarkdownDocument text={text} />
   ) : kind === 'json' && hasText ? (
@@ -464,46 +651,25 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     </div>
   );
 
-  useLayoutEffect(() => {
-    const updateOverlayInsets = () => {
-      const rect = rootRef.current?.getBoundingClientRect();
-
-      if (!rect) {
-        return;
-      }
-
-      setOverlayInsets({
-        left: Math.max(0, rect.left),
-        right: Math.max(0, window.innerWidth - rect.right),
-      });
-    };
-
-    updateOverlayInsets();
-    window.addEventListener('resize', updateOverlayInsets);
-    window.addEventListener('scroll', updateOverlayInsets, true);
-
-    return () => {
-      window.removeEventListener('resize', updateOverlayInsets);
-      window.removeEventListener('scroll', updateOverlayInsets, true);
-    };
-  }, []);
-
   return (
     <div
       ref={rootRef}
       className="relative h-full overflow-hidden bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
     >
-      <div className="h-full overflow-auto">
-        <div className="mx-auto max-w-3xl px-8 pb-24 pt-36">
-          <div
-            className="mx-auto"
-            style={{ width: `${zoomPercent}%` } as CSSProperties}
-          >
-            {documentContent}
-          </div>
-        </div>
+      {/* Canvas-style pan/zoom content layer */}
+      <div
+        className="absolute left-0 top-0 pb-24"
+        style={{
+          width: CONTENT_WIDTH_PX,
+          opacity: initialized ? 1 : 0,
+          transformOrigin: '0 0',
+          transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
+        } as CSSProperties}
+      >
+        {documentContent}
       </div>
 
+      {/* Fixed title overlay */}
       <div
         className="pointer-events-none fixed top-0 z-30 bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
@@ -517,6 +683,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         </div>
       </div>
 
+      {/* Zoom controls */}
       <div
         className="pointer-events-none fixed bottom-4 z-30 flex justify-center px-4"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
@@ -525,45 +692,26 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           <button
             type="button"
             disabled={!canZoomOut}
-            onClick={() => setZoomPercent(DOCUMENT_ZOOM_OPTIONS[Math.max(0, zoomIndex - 1)])}
+            onClick={() => zoomAtCenter(getPreviousZoomOption(zoomPercent))}
             className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
             aria-label="Zoom out"
           >
             <MinusIcon className="size-4" />
           </button>
 
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <button
-                type="button"
-                className="mx-1 flex h-8 min-w-16 items-center justify-center rounded-lg px-2 font-mono text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
-                aria-label="Select zoom level"
-              >
-                {zoomPercent}%
-              </button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="center" side="top" className="w-28 min-w-28">
-              <DropdownMenuRadioGroup
-                value={String(zoomPercent)}
-                onValueChange={(value) => setZoomPercent(Number(value))}
-              >
-                {DOCUMENT_ZOOM_OPTIONS.map((option) => (
-                  <DropdownMenuRadioItem key={option} value={String(option)}>
-                    {option}%
-                  </DropdownMenuRadioItem>
-                ))}
-              </DropdownMenuRadioGroup>
-            </DropdownMenuContent>
-          </DropdownMenu>
+          <button
+            type="button"
+            onClick={resetZoom}
+            className="mx-1 flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
+            aria-label="Reset zoom"
+          >
+            Reset
+          </button>
 
           <button
             type="button"
             disabled={!canZoomIn}
-            onClick={() =>
-              setZoomPercent(
-                DOCUMENT_ZOOM_OPTIONS[Math.min(DOCUMENT_ZOOM_OPTIONS.length - 1, zoomIndex + 1)],
-              )
-            }
+            onClick={() => zoomAtCenter(getNextZoomOption(zoomPercent))}
             className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
             aria-label="Zoom in"
           >

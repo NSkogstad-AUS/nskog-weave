@@ -276,12 +276,22 @@ export function FileWorkspace({
         top: 16,
       });
     };
+    const observedElements = [
+      workspaceRef.current,
+      workspaceRef.current?.parentElement,
+      document.querySelector('[data-slot="sidebar-inset"]'),
+    ].filter((element): element is Element => Boolean(element));
+    const resizeObserver = new ResizeObserver(() => {
+      window.requestAnimationFrame(updateNavPosition);
+    });
 
     updateNavPosition();
+    observedElements.forEach((element) => resizeObserver.observe(element));
     window.addEventListener('resize', updateNavPosition);
     window.addEventListener('scroll', updateNavPosition, true);
 
     return () => {
+      resizeObserver.disconnect();
       window.removeEventListener('resize', updateNavPosition);
       window.removeEventListener('scroll', updateNavPosition, true);
     };
