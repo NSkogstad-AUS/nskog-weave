@@ -479,8 +479,13 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const { zoomPercent: curZoom, panX, panY } = vpRef.current;
     if (bounded === curZoom) return;
     const factor = bounded / curZoom;
-    const newPanX = cx + (panX - cx) * factor;
+    let newPanX = cx + (panX - cx) * factor;
     const newPanY = cy + (panY - cy) * factor;
+    // Returning to normal mode: snap horizontal pan back to centred
+    if (bounded === 100) {
+      const root = rootRef.current;
+      if (root) newPanX = Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2);
+    }
     vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
     setZoomPercent(bounded);
     setPan({ x: newPanX, y: newPanY });
@@ -514,7 +519,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         const cx = event.clientX - rect.left;
         const cy = event.clientY - rect.top;
         const baseZoom = pendingZoomRef.current?.zoom ?? vpRef.current.zoomPercent;
-        const factor = Math.exp(-event.deltaY * 0.0024);
+        const factor = Math.exp(-event.deltaY * 0.005);
         const nextZoom = Math.max(
           DOCUMENT_MIN_ZOOM,
           Math.min(DOCUMENT_MAX_ZOOM, Math.round(baseZoom * factor)),
@@ -531,8 +536,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           applyZoomAt(pending.zoom, pending.cx, pending.cy);
         });
       } else {
-        // Accumulate pan in ref; batch the React state update to one rAF
-        vpRef.current.panX -= event.deltaX;
+        // Normal mode (100%): vertical scroll only. Free-form mode: pan both axes.
+        if (vpRef.current.zoomPercent !== 100) {
+          vpRef.current.panX -= event.deltaX;
+        }
         vpRef.current.panY -= event.deltaY;
 
         if (panRafRef.current === null) {
@@ -573,8 +580,11 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
     const handlePointerMove = (event: PointerEvent) => {
       if (!isDraggingRef.current) return;
-      const newPanX = dragStartRef.current.panX + (event.clientX - dragStartRef.current.clientX);
       const newPanY = dragStartRef.current.panY + (event.clientY - dragStartRef.current.clientY);
+      // In normal mode, horizontal drag is locked
+      const newPanX = vpRef.current.zoomPercent !== 100
+        ? dragStartRef.current.panX + (event.clientX - dragStartRef.current.clientX)
+        : vpRef.current.panX;
       vpRef.current.panX = newPanX;
       vpRef.current.panY = newPanY;
       setPan({ x: newPanX, y: newPanY });
@@ -703,9 +713,9 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             type="button"
             onClick={resetZoom}
             className="mx-1 flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
-            aria-label="Reset zoom"
+            aria-label="Reset zoom to 100%"
           >
-            Reset
+            {zoomPercent !== 100 ? 'Reset' : '100%'}
           </button>
 
           <button
