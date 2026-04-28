@@ -46,7 +46,7 @@ import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import type { SidebarSelectableItem } from './features/sidebar/sidebar-tree';
 import { useFilePages } from './hooks/useFilePages';
 import { useSystemTheme } from './hooks/use-system-theme';
-import type { FilePageNode, FilePageState } from '@/types/filePage';
+import type { FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
 
 const WORKSPACE_FOLDERS_STORAGE_KEY = 'weave:workspace-folders:v1';
 const GENERATED_WORKSPACE_FOLDER_PREFIX = 'worker-output-folder:';
@@ -54,21 +54,17 @@ const GENERATED_WORKSPACE_FILE_PREFIX = 'worker-output-file:';
 const ROOT_WORKSPACE_FOLDER_ID = 'workspace-root';
 
 type GeneratedWorkspaceOwnerType = 'file' | 'folder';
-type CanvasNavigationSource =
+type NavigationRoute =
   | {
       type: 'file';
-      id: string;
+      fileId: string;
+      view: FilePageView;
     }
   | {
       type: 'folder';
-      id: string;
+      folderId: string;
+      view: 'canvas' | 'explorer';
     };
-type CanvasFileNavigation =
-  | {
-      source: CanvasNavigationSource;
-      targetFileId: string;
-    }
-  | null;
 type PendingFolderDownload =
   | {
       label: string;
@@ -524,6 +520,29 @@ function hasFileDrag(types: readonly string[]) {
   return types.includes('Files');
 }
 
+function areNavigationRoutesEqual(left: NavigationRoute | null, right: NavigationRoute | null) {
+  if (!left || !right) {
+    return left === right;
+  }
+
+  if (left.type !== right.type || left.view !== right.view) {
+    return false;
+  }
+
+  return left.type === 'file'
+    ? left.fileId === (right as Extract<NavigationRoute, { type: 'file' }>).fileId
+    : left.folderId === (right as Extract<NavigationRoute, { type: 'folder' }>).folderId;
+}
+
+function isValidNavigationRoute(
+  folders: WorkspaceFolder[],
+  route: NavigationRoute,
+) {
+  return route.type === 'file'
+    ? Boolean(findFileById(folders, route.fileId))
+    : Boolean(findFolderById(folders, route.folderId));
+}
+
 function App() {
   useSystemTheme();
   const [folders, setFolders] = useState<WorkspaceFolder[]>(hydrateWorkspaceFolders);
@@ -538,9 +557,13 @@ function App() {
   const [highlightedSidebarItems, setHighlightedSidebarItems] = useState<
     SidebarSelectableItem[]
   >([]);
-  const [canvasFileNavigation, setCanvasFileNavigation] = useState<CanvasFileNavigation>(null);
+  const [navigationHistory, setNavigationHistory] = useState<NavigationRoute[]>([]);
+  const [navigationIndex, setNavigationIndex] = useState(-1);
   const [pendingFolderDownload, setPendingFolderDownload] = useState<PendingFolderDownload>(null);
   const fileDragDepthRef = useRef(0);
+  const navigationHistoryRef = useRef<NavigationRoute[]>([]);
+  const navigationIndexRef = useRef(-1);
+  const applyingNavigationRef = useRef(false);
   const foldersPersistTimeoutRef = useRef<number | null>(null);
   const latestFoldersRef = useRef(folders);
   const lastPersistedFoldersRef = useRef('');
@@ -635,6 +658,25 @@ function App() {
     return folders[0] ?? null;
   }, [activeFileSeedMatch, activeFolderPath, folders, openFolderId]);
   const activeView = activeFile ? activePage?.view ?? 'explorer' : activeFolder ? folderView : null;
+  const currentNavigationRoute = useMemo<NavigationRoute | null>(() => {
+    if (activeFile && activeView) {
+      return {
+        type: 'file',
+        fileId: activeFile.id,
+        view: activeView,
+      };
+    }
+
+    if (activeFolder && (activeView === 'canvas' || activeView === 'explorer')) {
+      return {
+        type: 'folder',
+        folderId: activeFolder.id,
+        view: activeView,
+      };
+    }
+
+    return null;
+  }, [activeFile, activeFolder, activeView]);
   const activeSidebarItem = useMemo<SidebarSelectableItem | null>(() => {
     if (openFileId) {
       return {
@@ -838,67 +880,8 @@ function App() {
     setOpenFolderId(null);
   }, [displayFolders, setViewForFile]);
 
-  const openFileWithCanvasHistory = useCallback((fileId: string) => {
-    const source =
-      activeView === 'canvas'
-        ? activeFile
-          ? {
-              type: 'file' as const,
-              id: activeFile.id,
-            }
-          : activeFolder
-            ? {
-                type: 'folder' as const,
-                id: activeFolder.id,
-              }
-            : null
-        : null;
-
-    setCanvasFileNavigation(source ? { source, targetFileId: fileId } : null);
-    openFileInDocument(fileId);
-  }, [activeFile, activeFolder, activeView, openFileInDocument]);
-
-  const handleOpenFile = openFileWithCanvasHistory;
-  const handleOpenCanvasFile = openFileWithCanvasHistory;
-
-  const canNavigateBackToCanvas =
-    canvasFileNavigation !== null && activeFile?.id === canvasFileNavigation.targetFileId;
-  const canNavigateForwardToFile =
-    canvasFileNavigation !== null &&
-    activeView === 'canvas' &&
-    (canvasFileNavigation.source.type === 'folder'
-      ? openFileId === null && openFolderId === canvasFileNavigation.source.id
-      : openFileId === canvasFileNavigation.source.id);
-
-  const handleNavigateBackToCanvas = useCallback(() => {
-    if (!canvasFileNavigation) {
-      return;
-    }
-
-    if (canvasFileNavigation.source.type === 'folder') {
-      setFolderView('canvas');
-      setOpenFolderId(canvasFileNavigation.source.id);
-      setOpenFileId(null);
-      return;
-    }
-
-    const sourceFileMatch = findFileById(displayFolders, canvasFileNavigation.source.id);
-
-    if (sourceFileMatch) {
-      setViewForFile(sourceFileMatch.file, 'canvas');
-    }
-
-    setOpenFileId(canvasFileNavigation.source.id);
-    setOpenFolderId(null);
-  }, [canvasFileNavigation, displayFolders, setViewForFile]);
-
-  const handleNavigateForwardToFile = useCallback(() => {
-    if (!canvasFileNavigation) {
-      return;
-    }
-
-    openFileInDocument(canvasFileNavigation.targetFileId);
-  }, [canvasFileNavigation, openFileInDocument]);
+  const handleOpenFile = openFileInDocument;
+  const handleOpenCanvasFile = openFileInDocument;
 
   const handleAppDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!hasFileDrag(Array.from(event.dataTransfer.types))) {
@@ -993,6 +976,14 @@ function App() {
   }, []);
 
   useEffect(() => {
+    navigationHistoryRef.current = navigationHistory;
+  }, [navigationHistory]);
+
+  useEffect(() => {
+    navigationIndexRef.current = navigationIndex;
+  }, [navigationIndex]);
+
+  useEffect(() => {
     if (openFileId && !findFilePathById(displayFolders, openFileId)) {
       setOpenFileId(null);
     }
@@ -1005,20 +996,114 @@ function App() {
   }, [displayFolders, openFolderId]);
 
   useEffect(() => {
-    if (!canvasFileNavigation) {
+    if (!currentNavigationRoute) {
       return;
     }
 
-    const targetExists = Boolean(findFileById(displayFolders, canvasFileNavigation.targetFileId));
-    const sourceExists =
-      canvasFileNavigation.source.type === 'folder'
-        ? Boolean(findFolderById(displayFolders, canvasFileNavigation.source.id))
-        : Boolean(findFileById(displayFolders, canvasFileNavigation.source.id));
-
-    if (!targetExists || !sourceExists) {
-      setCanvasFileNavigation(null);
+    if (applyingNavigationRef.current) {
+      applyingNavigationRef.current = false;
+      return;
     }
-  }, [canvasFileNavigation, displayFolders]);
+
+    const currentHistory = navigationHistoryRef.current;
+    const currentIndex = navigationIndexRef.current;
+
+    if (currentIndex >= 0 && areNavigationRoutesEqual(currentHistory[currentIndex], currentNavigationRoute)) {
+      return;
+    }
+
+    const nextHistory = currentHistory.slice(0, currentIndex + 1);
+    nextHistory.push(currentNavigationRoute);
+    navigationHistoryRef.current = nextHistory;
+    navigationIndexRef.current = nextHistory.length - 1;
+    setNavigationHistory(nextHistory);
+    setNavigationIndex(nextHistory.length - 1);
+  }, [currentNavigationRoute]);
+
+  useEffect(() => {
+    const currentHistory = navigationHistoryRef.current;
+
+    if (currentHistory.length === 0) {
+      return;
+    }
+
+    const nextHistory = currentHistory.filter((route) => isValidNavigationRoute(displayFolders, route));
+
+    if (nextHistory.length === currentHistory.length) {
+      return;
+    }
+
+    const nextIndex = Math.min(
+      nextHistory.length - 1,
+      currentHistory
+        .slice(0, navigationIndexRef.current + 1)
+        .filter((route) => isValidNavigationRoute(displayFolders, route)).length - 1,
+    );
+
+    navigationHistoryRef.current = nextHistory;
+    navigationIndexRef.current = nextIndex;
+    setNavigationHistory(nextHistory);
+    setNavigationIndex(nextIndex);
+  }, [displayFolders]);
+
+  const applyNavigationRoute = useCallback((route: NavigationRoute) => {
+    applyingNavigationRef.current = true;
+
+    if (route.type === 'file') {
+      const fileMatch = findFileById(displayFolders, route.fileId);
+
+      if (!fileMatch) {
+        applyingNavigationRef.current = false;
+        return;
+      }
+
+      setViewForFile(fileMatch.file, route.view);
+      setOpenFileId(route.fileId);
+      setOpenFolderId(null);
+      return;
+    }
+
+    setFolderView(route.view);
+    setOpenFolderId(route.folderId);
+    setOpenFileId(null);
+  }, [displayFolders, setViewForFile]);
+
+  const canNavigateBack = navigationIndex > 0;
+  const canNavigateForward = navigationIndex >= 0 && navigationIndex < navigationHistory.length - 1;
+
+  const handleNavigateBack = useCallback(() => {
+    if (!canNavigateBack) {
+      return;
+    }
+
+    const nextIndex = navigationIndexRef.current - 1;
+    const route = navigationHistoryRef.current[nextIndex];
+
+    if (!route) {
+      return;
+    }
+
+    navigationIndexRef.current = nextIndex;
+    setNavigationIndex(nextIndex);
+    applyNavigationRoute(route);
+  }, [applyNavigationRoute, canNavigateBack]);
+
+  const handleNavigateForward = useCallback(() => {
+    if (!canNavigateForward) {
+      return;
+    }
+
+    const nextIndex = navigationIndexRef.current + 1;
+    const route = navigationHistoryRef.current[nextIndex];
+
+    if (!route) {
+      return;
+    }
+
+    navigationIndexRef.current = nextIndex;
+    setNavigationIndex(nextIndex);
+    applyNavigationRoute(route);
+  }, [applyNavigationRoute, canNavigateForward]);
 
   useEffect(() => {
     if (activeView === 'document' || !activeView) {
@@ -1055,7 +1140,6 @@ function App() {
           onSelectedItemsChange={setSidebarSelectedItems}
           onOpenFile={handleOpenFile}
           onOpenFolder={(folderId) => {
-            setCanvasFileNavigation(null);
             setOpenFolderId(folderId);
             setOpenFileId(null);
           }}
@@ -1086,10 +1170,10 @@ function App() {
                 onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
                 onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
                 onDeleteWorkspaceFolder={handleDeleteWorkspaceFolder}
-                canNavigateBackToCanvas={canNavigateBackToCanvas}
-                canNavigateForwardToFile={canNavigateForwardToFile}
-                onNavigateBackToCanvas={handleNavigateBackToCanvas}
-                onNavigateForwardToFile={handleNavigateForwardToFile}
+                canNavigateBack={canNavigateBack}
+                canNavigateForward={canNavigateForward}
+                onNavigateBack={handleNavigateBack}
+                onNavigateForward={handleNavigateForward}
                 onOpenCanvasFile={handleOpenCanvasFile}
               />
             </div>

@@ -42,10 +42,10 @@ interface FileWorkspaceProps {
   onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
   onDeleteWorkspaceFile?: (fileId: string) => void;
   onDeleteWorkspaceFolder?: (folderId: string) => void;
-  canNavigateBackToCanvas: boolean;
-  canNavigateForwardToFile: boolean;
-  onNavigateBackToCanvas: () => void;
-  onNavigateForwardToFile: () => void;
+  canNavigateBack: boolean;
+  canNavigateForward: boolean;
+  onNavigateBack: () => void;
+  onNavigateForward: () => void;
   onOpenCanvasFile?: (fileId: string) => void;
 }
 
@@ -68,10 +68,10 @@ export function FileWorkspace({
   onUpdateWorkspaceFileContent,
   onDeleteWorkspaceFile,
   onDeleteWorkspaceFolder,
-  canNavigateBackToCanvas,
-  canNavigateForwardToFile,
-  onNavigateBackToCanvas,
-  onNavigateForwardToFile,
+  canNavigateBack,
+  canNavigateForward,
+  onNavigateBack,
+  onNavigateForward,
   onOpenCanvasFile,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
@@ -284,19 +284,19 @@ export function FileWorkspace({
       <div className="pointer-events-none absolute left-4 top-4 z-30 flex items-center gap-2">
         <button
           type="button"
-          aria-label="Back to canvas"
-          disabled={!canNavigateBackToCanvas}
-          onClick={onNavigateBackToCanvas}
-          className={`${baseNavButtonClassName} ${canNavigateBackToCanvas ? activeNavButtonClassName : disabledNavButtonClassName}`}
+          aria-label="Back"
+          disabled={!canNavigateBack}
+          onClick={onNavigateBack}
+          className={`${baseNavButtonClassName} ${canNavigateBack ? activeNavButtonClassName : disabledNavButtonClassName}`}
         >
           <ChevronLeftIcon className="size-4" />
         </button>
         <button
           type="button"
-          aria-label="Forward to file"
-          disabled={!canNavigateForwardToFile}
-          onClick={onNavigateForwardToFile}
-          className={`${baseNavButtonClassName} ${canNavigateForwardToFile ? activeNavButtonClassName : disabledNavButtonClassName}`}
+          aria-label="Forward"
+          disabled={!canNavigateForward}
+          onClick={onNavigateForward}
+          className={`${baseNavButtonClassName} ${canNavigateForward ? activeNavButtonClassName : disabledNavButtonClassName}`}
         >
           <ChevronRightIcon className="size-4" />
         </button>
