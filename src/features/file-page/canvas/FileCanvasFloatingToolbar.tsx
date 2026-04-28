@@ -85,7 +85,7 @@ export function FileCanvasFloatingToolbar({
   onDragStartItem,
   onInsertItem,
 }: FileCanvasFloatingToolbarProps) {
-  const [isCollapsed, setIsCollapsed] = useState(false);
+  const [isCollapsed, setIsCollapsed] = useState(true);
   const [toolbarHeight, setToolbarHeight] = useState(0);
   const toolbarRef = useRef<HTMLElement | null>(null);
   const items = [...structureItems, ...workerItems];
@@ -117,8 +117,8 @@ export function FileCanvasFloatingToolbar({
   return (
     <div
       className={cn(
-        'pointer-events-none absolute inset-x-0 z-30 flex justify-center px-4 transition-[top] duration-300 ease-out',
-        isCollapsed ? 'top-0' : 'top-5',
+        'pointer-events-none absolute inset-x-0 z-30 flex justify-center px-4 transition-[top] duration-150 ease-out',
+        isCollapsed ? 'top-0' : 'top-2',
       )}
     >
       <div
@@ -131,7 +131,7 @@ export function FileCanvasFloatingToolbar({
       >
         <div
           className={cn(
-            'w-full max-w-[min(100%,72rem)] overflow-hidden transition-[height] duration-400 ease-[cubic-bezier(0.33,1,0.68,1)] will-change-[height]',
+            'w-full max-w-[min(100%,72rem)] overflow-hidden transition-[height] duration-150 ease-out will-change-[height]',
           )}
           style={{
             height: isCollapsed ? 0 : toolbarHeight,
@@ -142,7 +142,7 @@ export function FileCanvasFloatingToolbar({
             ref={toolbarRef}
             className={cn(
               'panel-surface flex max-w-full items-center gap-2 overflow-x-auto rounded-[1.6rem] p-2 soft-scrollbar',
-              'transition-opacity duration-300 ease-out',
+              'transition-opacity duration-100 ease-out',
               isCollapsed ? 'opacity-0 pointer-events-none' : 'opacity-100',
             )}
             aria-label="Canvas insert toolbar"
@@ -164,9 +164,9 @@ export function FileCanvasFloatingToolbar({
           type="button"
           onClick={() => setIsCollapsed((current) => !current)}
           aria-expanded={!isCollapsed}
-          aria-controls="canvas-insert-toolbar "
+          aria-controls="canvas-insert-toolbar"
           className={cn(
-            'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-300 ease-out dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)] dark:shadow-[0_20px_40px_-30px_rgba(15,23,42,0.42)]',
+            'relative flex h-11 items-center justify-center border border-slate-200/85 bg-white/92 px-4 shadow-[0_20px_40px_-30px_rgba(15,23,42,0.32)] backdrop-blur-md transition-[width,margin,transform,background-color,border-color,box-shadow,border-radius] duration-150 ease-out dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.82)] dark:shadow-[0_20px_40px_-30px_rgba(15,23,42,0.42)]',
             isCollapsed
               ? 'mt-0 w-56 translate-y-0 rounded-b-[1.05rem] rounded-t-none border-t-transparent'
               : 'mt-2 w-24 translate-y-0 rounded-[1.05rem]',

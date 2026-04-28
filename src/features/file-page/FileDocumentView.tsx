@@ -1,7 +1,15 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
+import { MinusIcon, PlusIcon } from 'lucide-react';
 
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
@@ -18,6 +26,7 @@ const CODE_EXTENSIONS = new Set([
   'yaml', 'yml', 'toml', 'ini', 'env',
   'sql', 'graphql', 'gql',
 ]);
+const DOCUMENT_ZOOM_OPTIONS = [50, 75, 90, 100, 125, 150, 175, 200];
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 
@@ -194,10 +203,12 @@ type PdfPageStatus = 'waiting' | 'rendering' | 'ready' | 'error';
 function PdfPage({
   pdf,
   pageNumber,
+  renderScale,
   totalPages,
 }: {
   pdf: PDFDocumentProxy;
   pageNumber: number;
+  renderScale: number;
   totalPages: number;
 }) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -213,6 +224,7 @@ function PdfPage({
     let cancelled = false;
     let hasStarted = false;
     let renderTask: { promise: Promise<void>; cancel: () => void } | null = null;
+    setStatus('waiting');
 
     async function renderPage() {
       if (cancelled || hasStarted) {
@@ -230,7 +242,7 @@ function PdfPage({
           return;
         }
 
-        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
+        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE * renderScale });
         const canvas = canvasRef.current;
         const ctx = canvas?.getContext('2d');
 
@@ -291,7 +303,7 @@ function PdfPage({
         // Ignore cancellation races from pdf.js.
       }
     };
-  }, [pageNumber, pdf]);
+  }, [pageNumber, pdf, renderScale]);
 
   return (
     <div
@@ -316,7 +328,7 @@ function PdfPage({
   );
 }
 
-function PdfDocument({ fileId }: { fileId: string }) {
+function PdfDocument({ fileId, zoomScale }: { fileId: string; zoomScale: number }) {
   const [state, setState] = useState<PdfDocState>({ status: 'loading' });
 
   useEffect(() => {
@@ -396,6 +408,7 @@ function PdfDocument({ fileId }: { fileId: string }) {
           key={`${fileId}-${index + 1}`}
           pdf={state.pdf}
           pageNumber={index + 1}
+          renderScale={zoomScale}
           totalPages={state.pageCount}
         />
       ))}
@@ -415,45 +428,148 @@ interface FileDocumentViewProps {
 }
 
 export function FileDocumentView({ file }: FileDocumentViewProps) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
   const kind = detectKind(file.label, file.mimeType);
   const ext = file.label.split('.').pop()?.toLowerCase() ?? '';
   const text = file.contentText ?? '';
   const hasText = text.length > 0;
+  const [zoomPercent, setZoomPercent] = useState(100);
+  const [overlayInsets, setOverlayInsets] = useState({ left: 0, right: 0 });
+  const zoomScale = zoomPercent / 100;
+  const zoomIndex = DOCUMENT_ZOOM_OPTIONS.indexOf(zoomPercent);
+  const canZoomOut = zoomIndex > 0;
+  const canZoomIn = zoomIndex >= 0 && zoomIndex < DOCUMENT_ZOOM_OPTIONS.length - 1;
+  const documentContent = kind === 'pdf' ? (
+    <PdfDocument fileId={file.id} zoomScale={zoomScale} />
+  ) : kind === 'markdown' && hasText ? (
+    <MarkdownDocument text={text} />
+  ) : kind === 'json' && hasText ? (
+    <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-50 p-5 font-mono text-[0.82rem] leading-relaxed text-slate-700 dark:border-slate-600/40 dark:bg-slate-800/60 dark:text-slate-200">
+      {(() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })()}
+    </pre>
+  ) : (kind === 'code' || kind === 'text') && hasText ? (
+    <div>
+      {kind === 'code' && ext ? (
+        <span className="mb-3 inline-block rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[0.7rem] uppercase tracking-wide text-slate-400 dark:bg-slate-700/50 dark:text-slate-500">
+          .{ext}
+        </span>
+      ) : null}
+      <pre className={`overflow-x-auto whitespace-pre-wrap break-all text-[0.82rem] leading-relaxed text-slate-700 dark:text-slate-300 ${kind === 'code' ? 'rounded-xl border border-slate-200/80 bg-slate-50 p-5 font-mono dark:border-slate-600/40 dark:bg-slate-800/60' : 'font-sans'}`}>
+        {text}
+      </pre>
+    </div>
+  ) : (
+    <div className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/60 p-8 text-center text-sm text-slate-400 dark:border-slate-600/40 dark:bg-[rgba(51,65,85,0.34)] dark:text-slate-400">
+      No content preview available for this file.
+    </div>
+  );
+
+  useLayoutEffect(() => {
+    const updateOverlayInsets = () => {
+      const rect = rootRef.current?.getBoundingClientRect();
+
+      if (!rect) {
+        return;
+      }
+
+      setOverlayInsets({
+        left: Math.max(0, rect.left),
+        right: Math.max(0, window.innerWidth - rect.right),
+      });
+    };
+
+    updateOverlayInsets();
+    window.addEventListener('resize', updateOverlayInsets);
+    window.addEventListener('scroll', updateOverlayInsets, true);
+
+    return () => {
+      window.removeEventListener('resize', updateOverlayInsets);
+      window.removeEventListener('scroll', updateOverlayInsets, true);
+    };
+  }, []);
 
   return (
-    <div className="h-full overflow-y-auto bg-white/88 dark:bg-[rgba(30,41,59,0.68)]">
-      <div className="mx-auto max-w-3xl px-8 py-10">
-        <div className="mb-8 border-b border-slate-200/80 pb-6 dark:border-slate-600/35">
-          <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-            {file.label}
-          </h1>
+    <div
+      ref={rootRef}
+      className="relative h-full overflow-hidden bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
+    >
+      <div className="h-full overflow-auto">
+        <div className="mx-auto max-w-3xl px-8 pb-24 pt-36">
+          <div
+            className="mx-auto"
+            style={{ width: `${zoomPercent}%` } as CSSProperties}
+          >
+            {documentContent}
+          </div>
         </div>
+      </div>
 
-        {/* Content */}
-        {kind === 'pdf' ? (
-          <PdfDocument fileId={file.id} />
-        ) : kind === 'markdown' && hasText ? (
-          <MarkdownDocument text={text} />
-        ) : kind === 'json' && hasText ? (
-          <pre className="overflow-x-auto whitespace-pre-wrap break-all rounded-xl border border-slate-200/80 bg-slate-50 p-5 font-mono text-[0.82rem] leading-relaxed text-slate-700 dark:border-slate-600/40 dark:bg-slate-800/60 dark:text-slate-200">
-            {(() => { try { return JSON.stringify(JSON.parse(text), null, 2); } catch { return text; } })()}
-          </pre>
-        ) : (kind === 'code' || kind === 'text') && hasText ? (
-          <div>
-            {kind === 'code' && ext ? (
-              <span className="mb-3 inline-block rounded-full bg-slate-100 px-2.5 py-1 font-mono text-[0.7rem] uppercase tracking-wide text-slate-400 dark:bg-slate-700/50 dark:text-slate-500">
-                .{ext}
-              </span>
-            ) : null}
-            <pre className={`overflow-x-auto whitespace-pre-wrap break-all text-[0.82rem] leading-relaxed text-slate-700 dark:text-slate-300 ${kind === 'code' ? 'rounded-xl border border-slate-200/80 bg-slate-50 p-5 font-mono dark:border-slate-600/40 dark:bg-slate-800/60' : 'font-sans'}`}>
-              {text}
-            </pre>
+      <div
+        className="pointer-events-none fixed top-0 z-30 bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
+        style={{ left: overlayInsets.left, right: overlayInsets.right }}
+      >
+        <div className="mx-auto max-w-3xl px-8 pt-10">
+          <div className="border-b border-slate-200/80 pb-6 dark:border-slate-600/35">
+            <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {file.label}
+            </h1>
           </div>
-        ) : (
-          <div className="rounded-2xl border border-dashed border-slate-200/90 bg-slate-50/60 p-8 text-center text-sm text-slate-400 dark:border-slate-600/40 dark:bg-[rgba(51,65,85,0.34)] dark:text-slate-400">
-            No content preview available for this file.
-          </div>
-        )}
+        </div>
+      </div>
+
+      <div
+        className="pointer-events-none fixed bottom-4 z-30 flex justify-center px-4"
+        style={{ left: overlayInsets.left, right: overlayInsets.right }}
+      >
+        <div className="pointer-events-auto flex items-center rounded-xl border border-slate-200/85 bg-white/94 p-1 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.42)] backdrop-blur-md dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.9)]">
+          <button
+            type="button"
+            disabled={!canZoomOut}
+            onClick={() => setZoomPercent(DOCUMENT_ZOOM_OPTIONS[Math.max(0, zoomIndex - 1)])}
+            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
+            aria-label="Zoom out"
+          >
+            <MinusIcon className="size-4" />
+          </button>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <button
+                type="button"
+                className="mx-1 flex h-8 min-w-16 items-center justify-center rounded-lg px-2 font-mono text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
+                aria-label="Select zoom level"
+              >
+                {zoomPercent}%
+              </button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="center" side="top" className="w-28 min-w-28">
+              <DropdownMenuRadioGroup
+                value={String(zoomPercent)}
+                onValueChange={(value) => setZoomPercent(Number(value))}
+              >
+                {DOCUMENT_ZOOM_OPTIONS.map((option) => (
+                  <DropdownMenuRadioItem key={option} value={String(option)}>
+                    {option}%
+                  </DropdownMenuRadioItem>
+                ))}
+              </DropdownMenuRadioGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <button
+            type="button"
+            disabled={!canZoomIn}
+            onClick={() =>
+              setZoomPercent(
+                DOCUMENT_ZOOM_OPTIONS[Math.min(DOCUMENT_ZOOM_OPTIONS.length - 1, zoomIndex + 1)],
+              )
+            }
+            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
+            aria-label="Zoom in"
+          >
+            <PlusIcon className="size-4" />
+          </button>
+        </div>
       </div>
     </div>
   );
