@@ -284,14 +284,19 @@ function FileRow({
           />
         </div>
       ) : (
-        <ContextMenu>
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (open) {
+              onSelectForContextMenu();
+            }
+          }}
+        >
           <ContextMenuTrigger asChild>
             <SidebarMenuButton
               isActive={isSelected}
               draggable
               onClick={onSelect}
               onDoubleClick={onBeginRename}
-              onContextMenu={onSelectForContextMenu}
               onDragStart={(event) => {
                 event.dataTransfer.effectAllowed = 'move';
                 event.dataTransfer.setData('text/plain', file.id);
@@ -532,7 +537,13 @@ function FolderRow({
           />
         </div>
       ) : (
-        <ContextMenu>
+        <ContextMenu
+          onOpenChange={(open) => {
+            if (open) {
+              onSelectFolderForContextMenu(folder.id);
+            }
+          }}
+        >
           <ContextMenuTrigger asChild>
             <div className="relative w-full">
               <SidebarMenuButton
@@ -546,7 +557,6 @@ function FolderRow({
                     value: folder.label,
                   })
                 }
-                onContextMenu={() => onSelectFolderForContextMenu(folder.id)}
                 onDragEnter={(event) => {
                   if (!draggingItem) {
                     return;

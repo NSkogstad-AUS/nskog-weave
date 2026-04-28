@@ -29,6 +29,8 @@ import {
   filterWorkspaceFolders,
   getAllFolderIds,
   getOrderedWorkspaceFolderItems,
+  findFilePathById,
+  findFolderPathById,
   moveWorkspaceItemById,
   renameFileById,
   renameFolderById,
@@ -199,6 +201,7 @@ function sortSidebarFolders(
 
 interface WorkspaceSidebarProps {
   folders?: WorkspaceFolder[];
+  activeSidebarItem?: SidebarSelectableItem | null;
   onDownloadFile?: (fileId: string) => void;
   onRequestDownloadFolder?: (folderId: string) => void;
   highlightedItems?: SidebarSelectableItem[];
@@ -213,6 +216,7 @@ interface WorkspaceSidebarProps {
 
 export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   folders: controlledFolders,
+  activeSidebarItem = null,
   onDownloadFile,
   onRequestDownloadFolder,
   highlightedItems = [],
@@ -304,6 +308,37 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   useEffect(() => {
     onSelectedItemsChange?.(selectedItems);
   }, [onSelectedItemsChange, selectedItems]);
+
+  useEffect(() => {
+    if (!activeSidebarItem) {
+      return;
+    }
+
+    const isValidActiveItem = allSelectableItems.some((item) =>
+      areSidebarItemsEqual(item, activeSidebarItem),
+    );
+
+    if (!isValidActiveItem) {
+      return;
+    }
+
+    setActiveItem(activeSidebarItem);
+    setSelectedItems([activeSidebarItem]);
+    setSelectionAnchor(activeSidebarItem);
+    setExpandedFolderIds((current) => {
+      const next = new Set(current);
+      const folderPath =
+        activeSidebarItem.type === 'folder'
+          ? findFolderPathById(folders, activeSidebarItem.id)
+          : findFilePathById(folders, activeSidebarItem.id)?.folders ?? null;
+
+      folderPath?.forEach((folder) => {
+        next.add(folder.id);
+      });
+
+      return next;
+    });
+  }, [activeSidebarItem, allSelectableItems, folders]);
 
   function openSidebarItem(item: SidebarSelectableItem) {
     setActiveItem(item);

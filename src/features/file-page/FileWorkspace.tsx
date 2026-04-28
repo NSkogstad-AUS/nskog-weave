@@ -42,6 +42,7 @@ interface FileWorkspaceProps {
   onUpdateWorkspaceFileContent: (fileId: string, contentText: string) => void;
   onDeleteWorkspaceFile?: (fileId: string) => void;
   onDeleteWorkspaceFolder?: (folderId: string) => void;
+  onOpenCanvasFile?: (fileId: string) => void;
 }
 
 export function FileWorkspace({
@@ -63,6 +64,7 @@ export function FileWorkspace({
   onUpdateWorkspaceFileContent,
   onDeleteWorkspaceFile,
   onDeleteWorkspaceFolder,
+  onOpenCanvasFile,
 }: FileWorkspaceProps) {
   const folderCanvasState = useFolderCanvasState(activeFolder);
   const displayNodes = activeFile ? nodes : folderCanvasState.activeNodes;
@@ -317,6 +319,7 @@ export function FileWorkspace({
               resolveCanvasFileId={resolveCanvasFileId}
               resolveCanvasFolderSourceFiles={resolveCanvasFolderSourceFiles}
               onUpdateWorkspaceFileContent={onUpdateWorkspaceFileContent}
+              onOpenCanvasFile={onOpenCanvasFile}
             />
           ) : (
             <FileExplorerView

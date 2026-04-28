@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { UploadIcon } from 'lucide-react';
+import { ChevronLeftIcon, ChevronRightIcon, UploadIcon } from 'lucide-react';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -53,6 +53,21 @@ const GENERATED_WORKSPACE_FILE_PREFIX = 'worker-output-file:';
 const ROOT_WORKSPACE_FOLDER_ID = 'workspace-root';
 
 type GeneratedWorkspaceOwnerType = 'file' | 'folder';
+type CanvasNavigationSource =
+  | {
+      type: 'file';
+      id: string;
+    }
+  | {
+      type: 'folder';
+      id: string;
+    };
+type CanvasFileNavigation =
+  | {
+      source: CanvasNavigationSource;
+      targetFileId: string;
+    }
+  | null;
 type PendingFolderDownload =
   | {
       label: string;
@@ -522,6 +537,7 @@ function App() {
   const [highlightedSidebarItems, setHighlightedSidebarItems] = useState<
     SidebarSelectableItem[]
   >([]);
+  const [canvasFileNavigation, setCanvasFileNavigation] = useState<CanvasFileNavigation>(null);
   const [pendingFolderDownload, setPendingFolderDownload] = useState<PendingFolderDownload>(null);
   const fileDragDepthRef = useRef(0);
   const activeFileSeedMatch = useMemo(
@@ -607,6 +623,23 @@ function App() {
     [activeFileMatch, activeFolderPath],
   );
   const activeView = activeFile ? activePage?.view ?? 'explorer' : activeFolder ? folderView : null;
+  const activeSidebarItem = useMemo<SidebarSelectableItem | null>(() => {
+    if (openFileId) {
+      return {
+        type: 'file',
+        id: openFileId,
+      };
+    }
+
+    if (openFolderId) {
+      return {
+        type: 'folder',
+        id: openFolderId,
+      };
+    }
+
+    return null;
+  }, [openFileId, openFolderId]);
 
   const handleFileDelete = useCallback(
     (fileId: string) => {
@@ -782,7 +815,7 @@ function App() {
     }
   }, [uploadTargetFolder]);
 
-  const handleOpenFile = useCallback((fileId: string) => {
+  const openFileInDocument = useCallback((fileId: string) => {
     const fileMatch = findFileById(displayFolders, fileId);
 
     if (fileMatch) {
@@ -792,6 +825,70 @@ function App() {
     setOpenFileId(fileId);
     setOpenFolderId(null);
   }, [displayFolders, setViewForFile]);
+
+  const handleOpenFile = useCallback((fileId: string) => {
+    setCanvasFileNavigation(null);
+    openFileInDocument(fileId);
+  }, [openFileInDocument]);
+
+  const handleOpenCanvasFile = useCallback((fileId: string) => {
+    const source =
+      activeView === 'canvas'
+        ? activeFile
+          ? {
+              type: 'file' as const,
+              id: activeFile.id,
+            }
+          : activeFolder
+            ? {
+                type: 'folder' as const,
+                id: activeFolder.id,
+              }
+            : null
+        : null;
+
+    setCanvasFileNavigation(source ? { source, targetFileId: fileId } : null);
+    openFileInDocument(fileId);
+  }, [activeFile, activeFolder, activeView, openFileInDocument]);
+
+  const canNavigateBackToCanvas =
+    canvasFileNavigation !== null && activeFile?.id === canvasFileNavigation.targetFileId;
+  const canNavigateForwardToFile =
+    canvasFileNavigation !== null &&
+    activeView === 'canvas' &&
+    (canvasFileNavigation.source.type === 'folder'
+      ? openFileId === null && openFolderId === canvasFileNavigation.source.id
+      : openFileId === canvasFileNavigation.source.id);
+
+  const handleNavigateBackToCanvas = useCallback(() => {
+    if (!canvasFileNavigation) {
+      return;
+    }
+
+    if (canvasFileNavigation.source.type === 'folder') {
+      setFolderView('canvas');
+      setOpenFolderId(canvasFileNavigation.source.id);
+      setOpenFileId(null);
+      return;
+    }
+
+    const sourceFileMatch = findFileById(displayFolders, canvasFileNavigation.source.id);
+
+    if (sourceFileMatch) {
+      setViewForFile(sourceFileMatch.file, 'canvas');
+    }
+
+    setOpenFileId(canvasFileNavigation.source.id);
+    setOpenFolderId(null);
+  }, [canvasFileNavigation, displayFolders, setViewForFile]);
+
+  const handleNavigateForwardToFile = useCallback(() => {
+    if (!canvasFileNavigation) {
+      return;
+    }
+
+    openFileInDocument(canvasFileNavigation.targetFileId);
+  }, [canvasFileNavigation, openFileInDocument]);
 
   const handleAppDragEnter = useCallback((event: React.DragEvent<HTMLDivElement>) => {
     if (!hasFileDrag(Array.from(event.dataTransfer.types))) {
@@ -861,6 +958,22 @@ function App() {
   }, [displayFolders, openFolderId]);
 
   useEffect(() => {
+    if (!canvasFileNavigation) {
+      return;
+    }
+
+    const targetExists = Boolean(findFileById(displayFolders, canvasFileNavigation.targetFileId));
+    const sourceExists =
+      canvasFileNavigation.source.type === 'folder'
+        ? Boolean(findFolderById(displayFolders, canvasFileNavigation.source.id))
+        : Boolean(findFileById(displayFolders, canvasFileNavigation.source.id));
+
+    if (!targetExists || !sourceExists) {
+      setCanvasFileNavigation(null);
+    }
+  }, [canvasFileNavigation, displayFolders]);
+
+  useEffect(() => {
     if (activeView === 'document' || !activeView) {
       setHighlightedSidebarItems([]);
     }
@@ -886,6 +999,7 @@ function App() {
       >
         <WorkspaceSidebar
           folders={displayFolders}
+          activeSidebarItem={activeSidebarItem}
           highlightedItems={highlightedSidebarItems}
           onFoldersChange={(nextFolders) => setFolders(stripGeneratedWorkspaceEntries(nextFolders))}
           onImportFiles={(files) => {
@@ -894,6 +1008,7 @@ function App() {
           onSelectedItemsChange={setSidebarSelectedItems}
           onOpenFile={handleOpenFile}
           onOpenFolder={(folderId) => {
+            setCanvasFileNavigation(null);
             setOpenFolderId(folderId);
             setOpenFileId(null);
           }}
@@ -904,6 +1019,46 @@ function App() {
         />
         <SidebarInset className="min-h-screen bg-transparent md:peer-data-[variant=inset]:m-0 md:peer-data-[variant=inset]:rounded-none md:peer-data-[variant=inset]:shadow-none md:peer-data-[variant=inset]:peer-data-[state=collapsed]:ml-0">
           <div className="flex h-full min-h-screen flex-col">
+            <div className="flex items-center gap-3 border-b border-slate-200/80 bg-white/72 px-5 py-3 backdrop-blur-sm dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.58)]">
+              <div className="flex items-center gap-1">
+                <button
+                  type="button"
+                  aria-label="Back to canvas"
+                  disabled={!canNavigateBackToCanvas}
+                  onClick={handleNavigateBackToCanvas}
+                  className={canNavigateBackToCanvas
+                    ? 'flex size-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/92 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-slate-100'
+                    : 'flex size-9 items-center justify-center rounded-xl border border-slate-200/70 bg-slate-100/85 text-slate-300 dark:border-slate-700/40 dark:bg-slate-800/50 dark:text-slate-600'}
+                >
+                  <ChevronLeftIcon className="size-4" />
+                </button>
+                <button
+                  type="button"
+                  aria-label="Forward to file"
+                  disabled={!canNavigateForwardToFile}
+                  onClick={handleNavigateForwardToFile}
+                  className={canNavigateForwardToFile
+                    ? 'flex size-9 items-center justify-center rounded-xl border border-slate-200/80 bg-white/92 text-slate-700 transition hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/80 dark:text-slate-100'
+                    : 'flex size-9 items-center justify-center rounded-xl border border-slate-200/70 bg-slate-100/85 text-slate-300 dark:border-slate-700/40 dark:bg-slate-800/50 dark:text-slate-600'}
+                >
+                  <ChevronRightIcon className="size-4" />
+                </button>
+              </div>
+              <div className="min-w-0">
+                <div className="truncate text-sm font-semibold text-slate-900 dark:text-slate-100">
+                  {locationSegments.length > 0 ? locationSegments.join(' / ') : 'Workspace'}
+                </div>
+                <div className="text-xs text-slate-500 dark:text-slate-400">
+                  {activeView === 'canvas'
+                    ? 'Canvas'
+                    : activeView === 'document'
+                      ? 'Document'
+                      : activeView === 'explorer'
+                        ? 'Explorer'
+                        : 'No selection'}
+                </div>
+              </div>
+            </div>
             <div className="min-h-0 flex-1">
               <FileWorkspace
                 activeFile={activeFile}
@@ -924,6 +1079,7 @@ function App() {
                 onUpdateWorkspaceFileContent={handleUpdateWorkspaceFileContent}
                 onDeleteWorkspaceFile={handleDeleteWorkspaceFile}
                 onDeleteWorkspaceFolder={handleDeleteWorkspaceFolder}
+                onOpenCanvasFile={handleOpenCanvasFile}
               />
             </div>
           </div>

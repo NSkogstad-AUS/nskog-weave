@@ -130,6 +130,7 @@ interface FileCanvasViewProps {
   onDownloadFileNode?: (node: FilePageNode) => void;
   onRequestDownloadFolderNode?: (node: FilePageNode) => void;
   onUpdateWorkspaceFileContent?: (fileId: string, contentText: string) => void;
+  onOpenCanvasFile?: (fileId: string) => void;
 }
 
 // ─── Component ────────────────────────────────────────────────────────────────
@@ -156,6 +157,7 @@ export function FileCanvasView({
   onDownloadFileNode,
   onRequestDownloadFolderNode,
   onUpdateWorkspaceFileContent,
+  onOpenCanvasFile,
 }: FileCanvasViewProps) {
   // ── DOM ref ────────────────────────────────────────────────────────────────
 
@@ -1454,6 +1456,24 @@ export function FileCanvasView({
     [selectSingleNode],
   );
 
+  const openNodePrimaryAction = useCallback(
+    (node: FilePageNode) => {
+      if (node.kind === 'file') {
+        const fileId = resolveCanvasFileId?.(node) ?? null;
+
+        if (fileId && onOpenCanvasFile) {
+          onOpenCanvasFile(fileId);
+          return;
+        }
+      }
+
+      if (node.kind === 'file' || node.kind === 'folder') {
+        inspectors.openFloatingInspectorForNode(node);
+      }
+    },
+    [inspectors, onOpenCanvasFile, resolveCanvasFileId],
+  );
+
   // ── Node resize helpers ────────────────────────────────────────────────────
 
   const getResizePlacement = useCallback(
@@ -2117,7 +2137,7 @@ export function FileCanvasView({
             : undefined
         }
         onHoverChange={setNodeHover}
-        onOpenPreview={inspectors.openFloatingInspectorForNode}
+        onOpenPreview={openNodePrimaryAction}
         onPointerDown={handleNodePointerDown}
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
@@ -2131,11 +2151,26 @@ export function FileCanvasView({
           const existingNode = getNodeById(item.id);
           if (existingNode) {
             selectSingleNode(item.id);
+            if (existingNode.kind === 'file') {
+              const fileId = resolveCanvasFileId?.(existingNode) ?? null;
+
+              if (fileId && onOpenCanvasFile) {
+                onOpenCanvasFile(fileId);
+                return;
+              }
+            }
+
             if (existingNode.kind === 'file' || existingNode.kind === 'folder') {
               inspectors.openFloatingInspectorForNode(existingNode);
             }
             return;
           }
+
+          if (item.kind === 'file' && item.id.startsWith('file:') && onOpenCanvasFile) {
+            onOpenCanvasFile(item.id.slice('file:'.length));
+            return;
+          }
+
           inspectors.openFloatingInspectorForItem(item);
         }}
         onSelect={selectSingleNode}
