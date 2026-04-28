@@ -883,7 +883,8 @@ function areFileCanvasNodePropsEqual(
 
   if (
     previous.filePreview?.text !== next.filePreview?.text ||
-    previous.filePreview?.mimeType !== next.filePreview?.mimeType
+    previous.filePreview?.mimeType !== next.filePreview?.mimeType ||
+    previous.filePreview?.fileId !== next.filePreview?.fileId
   ) {
     return false;
   }

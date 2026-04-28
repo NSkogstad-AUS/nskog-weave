@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -174,56 +175,200 @@ function MarkdownDocument({ text }: { text: string }) {
 
 // ─── PDF renderer ──────────────────────────────────────────────────────────────
 
-const docPdfCache = new Map<string, string[]>();
-const DOC_RENDER_SCALE = 2.0;
+const DOC_RENDER_SCALE = 1.5;
 const DOC_MAX_PAGES = 40;
 
-type PdfDocState = { status: 'loading' } | { status: 'ready'; pages: string[] } | { status: 'no-data' } | { status: 'error' };
+type PdfDocState =
+  | { status: 'loading' }
+  | {
+      status: 'ready';
+      pdf: PDFDocumentProxy;
+      pageCount: number;
+      totalPageCount: number;
+    }
+  | { status: 'no-data' }
+  | { status: 'error' };
 
-function PdfDocument({ fileId }: { fileId: string }) {
-  const [state, setState] = useState<PdfDocState>(() => {
-    const cached = docPdfCache.get(fileId);
-    return cached ? { status: 'ready', pages: cached } : { status: 'loading' };
-  });
-  const cancelRef = useRef(false);
+type PdfPageStatus = 'waiting' | 'rendering' | 'ready' | 'error';
+
+function PdfPage({
+  pdf,
+  pageNumber,
+  totalPages,
+}: {
+  pdf: PDFDocumentProxy;
+  pageNumber: number;
+  totalPages: number;
+}) {
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [status, setStatus] = useState<PdfPageStatus>('waiting');
 
   useEffect(() => {
-    if (docPdfCache.has(fileId)) {
-      setState({ status: 'ready', pages: docPdfCache.get(fileId)! });
+    const root = rootRef.current;
+    if (!root) {
       return;
     }
-    cancelRef.current = false;
 
-    async function render() {
+    let cancelled = false;
+    let hasStarted = false;
+    let renderTask: { promise: Promise<void>; cancel: () => void } | null = null;
+
+    async function renderPage() {
+      if (cancelled || hasStarted) {
+        return;
+      }
+
+      hasStarted = true;
+      setStatus('rendering');
+
       try {
-        const data = await getPdfBinary(fileId);
-        if (cancelRef.current || !data) { setState({ status: 'no-data' }); return; }
+        const page = await pdf.getPage(pageNumber);
 
-        const { getDocument } = await loadPdfJs();
-        const pdf = await getDocument({ data: new Uint8Array(data), useWorkerFetch: false, isEvalSupported: false }).promise;
-        const count = Math.min(pdf.numPages, DOC_MAX_PAGES);
-        const urls: string[] = [];
-
-        for (let n = 1; n <= count; n++) {
-          if (cancelRef.current) break;
-          const page = await pdf.getPage(n);
-          const vp = page.getViewport({ scale: DOC_RENDER_SCALE });
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.floor(vp.width);
-          canvas.height = Math.floor(vp.height);
-          const ctx = canvas.getContext('2d');
-          if (!ctx) continue;
-          await page.render({ canvas, canvasContext: ctx, viewport: vp }).promise;
-          urls.push(canvas.toDataURL('image/jpeg', 0.88));
+        if (cancelled) {
+          page.cleanup();
+          return;
         }
 
-        await pdf.destroy();
-        if (!cancelRef.current) { docPdfCache.set(fileId, urls); setState({ status: 'ready', pages: urls }); }
-      } catch { if (!cancelRef.current) setState({ status: 'error' }); }
+        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
+        const canvas = canvasRef.current;
+        const ctx = canvas?.getContext('2d');
+
+        if (!canvas || !ctx) {
+          page.cleanup();
+          setStatus('error');
+          return;
+        }
+
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+        await renderTask.promise;
+        page.cleanup();
+
+        if (!cancelled) {
+          setStatus('ready');
+        }
+      } catch {
+        if (!cancelled) {
+          setStatus('error');
+        }
+      }
     }
 
-    void render();
-    return () => { cancelRef.current = true; };
+    if (!('IntersectionObserver' in window)) {
+      void renderPage();
+      return () => {
+        cancelled = true;
+        try {
+          renderTask?.cancel();
+        } catch {
+          // Ignore cancellation races from pdf.js.
+        }
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) {
+          return;
+        }
+
+        observer.disconnect();
+        void renderPage();
+      },
+      { rootMargin: '900px 0px' },
+    );
+
+    observer.observe(root);
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      try {
+        renderTask?.cancel();
+      } catch {
+        // Ignore cancellation races from pdf.js.
+      }
+    };
+  }, [pageNumber, pdf]);
+
+  return (
+    <div
+      ref={rootRef}
+      className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-[0_2px_12px_rgba(15,23,42,0.07)] dark:border-slate-600/40 dark:bg-slate-900/30"
+      style={status === 'ready' ? undefined : { minHeight: 420 }}
+    >
+      <canvas
+        ref={canvasRef}
+        aria-label={`Page ${pageNumber}`}
+        className={`block w-full select-none ${status === 'ready' ? '' : 'invisible'}`}
+      />
+      {status !== 'ready' ? (
+        <div className="absolute inset-0 flex items-center justify-center bg-slate-50/80 text-sm text-slate-400 dark:bg-slate-800/35 dark:text-slate-500">
+          {status === 'error' ? 'Could not render this page.' : 'Rendering page...'}
+        </div>
+      ) : null}
+      <span className="absolute bottom-2 right-3 rounded bg-black/30 px-1.5 py-0.5 font-mono text-[0.7rem] text-white/80 backdrop-blur-sm">
+        {pageNumber} / {totalPages}
+      </span>
+    </div>
+  );
+}
+
+function PdfDocument({ fileId }: { fileId: string }) {
+  const [state, setState] = useState<PdfDocState>({ status: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    let loadedPdf: PDFDocumentProxy | null = null;
+
+    setState({ status: 'loading' });
+
+    async function load() {
+      try {
+        const data = await getPdfBinary(fileId);
+
+        if (cancelled) {
+          return;
+        }
+
+        if (!data) {
+          setState({ status: 'no-data' });
+          return;
+        }
+
+        const { getDocument } = await loadPdfJs();
+        loadedPdf = await getDocument({
+          data: new Uint8Array(data),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+        }).promise;
+
+        if (cancelled) {
+          await loadedPdf.destroy();
+          return;
+        }
+
+        setState({
+          status: 'ready',
+          pdf: loadedPdf,
+          pageCount: Math.min(loadedPdf.numPages, DOC_MAX_PAGES),
+          totalPageCount: loadedPdf.numPages,
+        });
+      } catch {
+        if (!cancelled) {
+          setState({ status: 'error' });
+        }
+      }
+    }
+
+    void load();
+
+    return () => {
+      cancelled = true;
+      void loadedPdf?.destroy();
+    };
   }, [fileId]);
 
   if (state.status === 'loading') {
@@ -246,14 +391,19 @@ function PdfDocument({ fileId }: { fileId: string }) {
 
   return (
     <div className="space-y-4">
-      {state.pages.map((url, i) => (
-        <div key={i} className="relative overflow-hidden rounded-xl border border-slate-200/80 shadow-[0_2px_12px_rgba(15,23,42,0.07)] dark:border-slate-600/40">
-          <img src={url} alt={`Page ${i + 1}`} draggable={false} className="block w-full select-none" />
-          <span className="absolute bottom-2 right-3 rounded bg-black/30 px-1.5 py-0.5 font-mono text-[0.7rem] text-white/80 backdrop-blur-sm">
-            {i + 1} / {state.pages.length}
-          </span>
-        </div>
+      {Array.from({ length: state.pageCount }, (_, index) => (
+        <PdfPage
+          key={`${fileId}-${index + 1}`}
+          pdf={state.pdf}
+          pageNumber={index + 1}
+          totalPages={state.pageCount}
+        />
       ))}
+      {state.totalPageCount > DOC_MAX_PAGES ? (
+        <p className="text-center text-xs text-slate-400 dark:text-slate-500">
+          Showing first {DOC_MAX_PAGES} of {state.totalPageCount} pages.
+        </p>
+      ) : null}
     </div>
   );
 }

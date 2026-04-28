@@ -5,6 +5,7 @@ import {
   ShapesIcon,
   SparklesIcon,
 } from 'lucide-react';
+import { useMemo } from 'react';
 
 import { sortFilePageNodes } from '@/lib/filePages';
 import { cn } from '@/lib/utils';
@@ -54,9 +55,9 @@ export function FileExplorerView({
   selectedNodeIds,
   onSelectNode,
 }: FileExplorerViewProps) {
-  const orderedNodes = sortFilePageNodes(nodes);
-  const selectedIdSet = new Set(selectedNodeIds);
-  const highlightedIdSet = new Set(highlightedNodeIds);
+  const orderedNodes = useMemo(() => sortFilePageNodes(nodes), [nodes]);
+  const selectedIdSet = useMemo(() => new Set(selectedNodeIds), [selectedNodeIds]);
+  const highlightedIdSet = useMemo(() => new Set(highlightedNodeIds), [highlightedNodeIds]);
 
   return (
     <div

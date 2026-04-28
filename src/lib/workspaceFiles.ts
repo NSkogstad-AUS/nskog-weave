@@ -237,7 +237,7 @@ export async function buildUploadedWorkspaceFile(file: File, index: number): Pro
     contentText = pdfExtraction.textContent;
     extractionState = pdfExtraction.extractionState;
     if (pdfExtraction.arrayBuffer) {
-      void storePdfBinary(fileId, pdfExtraction.arrayBuffer);
+      await storePdfBinary(fileId, pdfExtraction.arrayBuffer);
     }
   } else if (isTextLikeFile(file)) {
     if (file.size <= MAX_IMPORTED_FILE_TEXT_BYTES) {
