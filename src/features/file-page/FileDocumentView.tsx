@@ -1,10 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { FileTextIcon } from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
-import { formatUploadedFileSize } from '@/lib/workspaceFiles';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
 
 // ─── File-type detection ───────────────────────────────────────────────────────
@@ -275,34 +273,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   return (
     <div className="h-full overflow-y-auto bg-white/88 dark:bg-[rgba(30,41,59,0.68)]">
       <div className="mx-auto max-w-3xl px-8 py-10">
-
-        {/* Header */}
-        <div className="mb-8 flex items-start gap-4 border-b border-slate-200/80 pb-7 dark:border-slate-600/35">
-          <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl border border-slate-200/80 bg-white/90 shadow-[0_4px_14px_-8px_rgba(15,23,42,0.18)] dark:border-slate-600/40 dark:bg-slate-800/72">
-            <FileTextIcon className="size-5 text-slate-500 dark:text-slate-300" />
-          </div>
-          <div className="min-w-0 flex-1 pt-0.5">
-            <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              {file.label}
-            </h1>
-            <div className="mt-2 flex flex-wrap gap-2">
-              {file.mimeType ? (
-                <span className="rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-0.5 text-[0.7rem] text-slate-500 dark:border-slate-600/40 dark:bg-slate-800/72 dark:text-slate-400">
-                  {file.mimeType}
-                </span>
-              ) : null}
-              {ext && !file.mimeType ? (
-                <span className="rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-0.5 font-mono text-[0.7rem] uppercase text-slate-400 dark:border-slate-600/40 dark:bg-slate-800/72">
-                  .{ext}
-                </span>
-              ) : null}
-              {typeof file.sizeBytes === 'number' && file.sizeBytes > 0 ? (
-                <span className="rounded-full border border-slate-200/80 bg-white/90 px-2.5 py-0.5 text-[0.7rem] text-slate-500 dark:border-slate-600/40 dark:bg-slate-800/72 dark:text-slate-400">
-                  {formatUploadedFileSize(file.sizeBytes)}
-                </span>
-              ) : null}
-            </div>
-          </div>
+        <div className="mb-8 border-b border-slate-200/80 pb-6 dark:border-slate-600/35">
+          <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
+            {file.label}
+          </h1>
         </div>
 
         {/* Content */}

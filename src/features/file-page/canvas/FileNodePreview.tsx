@@ -1,5 +1,7 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
+import { getPdfBinary } from '@/lib/pdfBinaryStore';
+import { loadPdfJs } from '@/lib/pdfRuntime';
 
 // ─── File-type detection ───────────────────────────────────────────────────────
 
@@ -17,7 +19,8 @@ const CODE_EXTENSIONS = new Set([
 
 type FileKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 const MAX_INLINE_PREVIEW_CHARACTERS = 2_000;
-const MAX_INLINE_PDF_TEXT_CHARACTERS = 1_200;
+const PDF_THUMBNAIL_SCALE = 0.9;
+const pdfThumbnailCache = new Map<string, string>();
 
 function detectKind(label: string, mimeType?: string | null): FileKind {
   const ext = label.split('.').pop()?.toLowerCase() ?? '';
@@ -255,6 +258,119 @@ function CodeContent({ text, ext }: { text: string; ext: string }) {
   );
 }
 
+type PdfThumbnailState =
+  | { status: 'loading' }
+  | { status: 'ready'; imageUrl: string }
+  | { status: 'no-data' }
+  | { status: 'error' };
+
+function PdfThumbnail({ fileId }: { fileId: string }) {
+  const [state, setState] = useState<PdfThumbnailState>(() => {
+    const cached = pdfThumbnailCache.get(fileId);
+    return cached ? { status: 'ready', imageUrl: cached } : { status: 'loading' };
+  });
+  const cancelRef = useRef(false);
+
+  useEffect(() => {
+    const cached = pdfThumbnailCache.get(fileId);
+
+    if (cached) {
+      setState({ status: 'ready', imageUrl: cached });
+      return;
+    }
+
+    cancelRef.current = false;
+
+    async function renderThumbnail() {
+      try {
+        const data = await getPdfBinary(fileId);
+
+        if (cancelRef.current) {
+          return;
+        }
+
+        if (!data) {
+          setState({ status: 'no-data' });
+          return;
+        }
+
+        const { getDocument } = await loadPdfJs();
+        const pdf = await getDocument({
+          data: new Uint8Array(data),
+          useWorkerFetch: false,
+          isEvalSupported: false,
+        }).promise;
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: PDF_THUMBNAIL_SCALE });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          await pdf.destroy();
+          setState({ status: 'error' });
+          return;
+        }
+
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        await pdf.destroy();
+
+        if (cancelRef.current) {
+          return;
+        }
+
+        const imageUrl = canvas.toDataURL('image/jpeg', 0.82);
+        pdfThumbnailCache.set(fileId, imageUrl);
+        setState({ status: 'ready', imageUrl });
+      } catch {
+        if (!cancelRef.current) {
+          setState({ status: 'error' });
+        }
+      }
+    }
+
+    void renderThumbnail();
+
+    return () => {
+      cancelRef.current = true;
+    };
+  }, [fileId]);
+
+  if (state.status === 'loading') {
+    return (
+      <div className="flex items-center gap-1.5 py-1">
+        <span className="size-1.5 animate-pulse rounded-full bg-slate-300 dark:bg-slate-600" />
+        <span className="text-[9px] text-slate-400 dark:text-slate-500">Rendering PDF…</span>
+      </div>
+    );
+  }
+
+  if (state.status !== 'ready') {
+    return (
+      <p className="text-[9px] text-slate-400 dark:text-slate-500">
+        {state.status === 'no-data'
+          ? 'PDF binary not found for preview.'
+          : 'Could not render PDF preview.'}
+      </p>
+    );
+  }
+
+  return (
+    <div className="relative overflow-hidden rounded-[6px] border border-slate-200/70 shadow-[0_1px_3px_rgba(15,23,42,0.06)] dark:border-slate-600/30">
+      <img
+        src={state.imageUrl}
+        alt="PDF preview"
+        draggable={false}
+        className="block w-full select-none"
+      />
+      <span className="absolute bottom-1 right-1.5 rounded-sm bg-black/30 px-1 py-[1px] font-mono text-[7px] text-white/80 backdrop-blur-[2px]">
+        1
+      </span>
+    </div>
+  );
+}
+
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface FileNodePreviewProps {
@@ -269,35 +385,14 @@ export function FileNodePreview({ textContent, label, mimeType, fileId }: FileNo
   const kind = detectKind(label, mimeType);
 
   if (kind === 'pdf') {
-    const previewText = (textContent ?? '').slice(0, MAX_INLINE_PDF_TEXT_CHARACTERS).trim();
-
-    if (previewText) {
-      return (
-        <div className="space-y-2">
-          <div className="rounded-full border border-slate-200/70 bg-slate-100/85 px-2 py-1 text-[7.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-slate-600/35 dark:bg-slate-800/60 dark:text-slate-400">
-            PDF text excerpt
-          </div>
-          <pre className="whitespace-pre-wrap break-words text-[9.5px] leading-[1.55] text-slate-600 dark:text-slate-400">
-            {previewText}
-          </pre>
-        </div>
-      );
+    if (fileId) {
+      return <PdfThumbnail fileId={fileId} />;
     }
 
     return (
-      <div className="space-y-2">
-        <div className="rounded-full border border-slate-200/70 bg-slate-100/85 px-2 py-1 text-[7.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-slate-600/35 dark:bg-slate-800/60 dark:text-slate-400">
-          PDF
-        </div>
-        <p className="text-[9px] text-slate-400 dark:text-slate-500">
-          Open this file to view the full PDF. Inline page rendering is disabled in canvas cards for performance.
-        </p>
-        {fileId ? (
-          <p className="text-[8px] text-slate-400/90 dark:text-slate-500">
-            Full document rendering is still available when the file is opened.
-          </p>
-        ) : null}
-      </div>
+      <p className="text-[9px] text-slate-400 dark:text-slate-500">
+        PDF preview unavailable.
+      </p>
     );
   }
 
