@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
 import {
@@ -250,10 +250,49 @@ function hydrateFilePages(): FilePagesStore {
 export function useFilePages(activeFile: WorkspaceFile | null) {
   const [pages, setPages] = useState<FilePagesStore>(hydrateFilePages);
   const [selectedNodeIds, setSelectedNodeIds] = useState<string[]>([]);
+  const persistTimeoutRef = useRef<number | null>(null);
+  const latestPagesRef = useRef(pages);
+  const lastPersistedPagesRef = useRef('');
 
   useEffect(() => {
-    window.localStorage.setItem(FILE_PAGES_STORAGE_KEY, JSON.stringify(pages));
+    latestPagesRef.current = pages;
+
+    if (persistTimeoutRef.current !== null) {
+      window.clearTimeout(persistTimeoutRef.current);
+    }
+
+    persistTimeoutRef.current = window.setTimeout(() => {
+      const serializedPages = JSON.stringify(latestPagesRef.current);
+
+      if (serializedPages !== lastPersistedPagesRef.current) {
+        window.localStorage.setItem(FILE_PAGES_STORAGE_KEY, serializedPages);
+        lastPersistedPagesRef.current = serializedPages;
+      }
+
+      persistTimeoutRef.current = null;
+    }, 180);
+
+    return () => {
+      if (persistTimeoutRef.current !== null) {
+        window.clearTimeout(persistTimeoutRef.current);
+      }
+    };
   }, [pages]);
+
+  useEffect(() => () => {
+    if (persistTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(persistTimeoutRef.current);
+
+    const serializedPages = JSON.stringify(latestPagesRef.current);
+
+    if (serializedPages !== lastPersistedPagesRef.current) {
+      window.localStorage.setItem(FILE_PAGES_STORAGE_KEY, serializedPages);
+      lastPersistedPagesRef.current = serializedPages;
+    }
+  }, []);
 
   useEffect(() => {
     if (!activeFile) {

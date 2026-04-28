@@ -1,8 +1,7 @@
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
 import type { FilePageContentItem } from '@/types/filePage';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import { storePdfBinary } from './pdfBinaryStore';
+import { loadPdfJs } from './pdfRuntime';
 
 export interface PreviewDocument {
   id: string;
@@ -61,8 +60,6 @@ const TEXT_FILE_EXTENSIONS = new Set([
   'yml',
   'zsh',
 ]);
-
-GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 export function getUploadedFileTypeLabel(file: File) {
   if (file.type.trim().length > 0) {
@@ -178,6 +175,7 @@ async function extractPdfText(file: File): Promise<{
   // pdfjs transfers the underlying buffer to its worker thread, detaching the
   // original. Slice a copy for storage before handing the original to pdfjs.
   const storageBuffer = arrayBuffer.slice(0);
+  const { getDocument } = await loadPdfJs();
   const pdfDocument = await getDocument({
     data: new Uint8Array(arrayBuffer),
     useWorkerFetch: false,

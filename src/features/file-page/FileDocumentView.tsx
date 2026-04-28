@@ -1,14 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { FileTextIcon } from 'lucide-react';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
+import { loadPdfJs } from '@/lib/pdfRuntime';
 import { formatUploadedFileSize } from '@/lib/workspaceFiles';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
-
-GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
 
 // ─── File-type detection ───────────────────────────────────────────────────────
 
@@ -204,6 +201,7 @@ function PdfDocument({ fileId }: { fileId: string }) {
         const data = await getPdfBinary(fileId);
         if (cancelRef.current || !data) { setState({ status: 'no-data' }); return; }
 
+        const { getDocument } = await loadPdfJs();
         const pdf = await getDocument({ data: new Uint8Array(data), useWorkerFetch: false, isEvalSupported: false }).promise;
         const count = Math.min(pdf.numPages, DOC_MAX_PAGES);
         const urls: string[] = [];

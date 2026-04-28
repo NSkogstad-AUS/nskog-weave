@@ -33,6 +33,7 @@ import {
 } from '@/data/sidebarNavigation';
 import { FileWorkspace } from '@/features/file-page/FileWorkspace';
 import {
+  FOLDER_CANVAS_STORAGE_KEY,
   FOLDER_CANVAS_UPDATED_EVENT,
   readStoredFolderCanvasNodes,
   updateStoredFolderCanvasNodes,
@@ -540,6 +541,14 @@ function App() {
   const [canvasFileNavigation, setCanvasFileNavigation] = useState<CanvasFileNavigation>(null);
   const [pendingFolderDownload, setPendingFolderDownload] = useState<PendingFolderDownload>(null);
   const fileDragDepthRef = useRef(0);
+  const foldersPersistTimeoutRef = useRef<number | null>(null);
+  const latestFoldersRef = useRef(folders);
+  const lastPersistedFoldersRef = useRef('');
+  const folderCanvasPagesRawRef = useRef(
+    typeof window === 'undefined'
+      ? ''
+      : window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY) ?? '',
+  );
   const activeFileSeedMatch = useMemo(
     () => (openFileId ? findFilePathById(folders, openFileId) : null),
     [folders, openFileId],
@@ -560,7 +569,17 @@ function App() {
     setViewForFile,
   } = useFilePages(activeFileSeed);
   useEffect(() => {
-    const syncFolderCanvasPages = () => {
+    const syncFolderCanvasPages = (event?: Event) => {
+      const nextRaw =
+        event instanceof CustomEvent && typeof event.detail === 'string'
+          ? event.detail
+          : window.localStorage.getItem(FOLDER_CANVAS_STORAGE_KEY) ?? '';
+
+      if (nextRaw === folderCanvasPagesRawRef.current) {
+        return;
+      }
+
+      folderCanvasPagesRawRef.current = nextRaw;
       setFolderCanvasPages(readStoredFolderCanvasNodes());
     };
 
@@ -937,11 +956,48 @@ function App() {
   }, [handleUploadFiles]);
 
   useEffect(() => {
-    window.localStorage.setItem(
-      WORKSPACE_FOLDERS_STORAGE_KEY,
-      JSON.stringify(stripGeneratedWorkspaceEntries(folders)),
-    );
+    latestFoldersRef.current = folders;
+
+    if (foldersPersistTimeoutRef.current !== null) {
+      window.clearTimeout(foldersPersistTimeoutRef.current);
+    }
+
+    foldersPersistTimeoutRef.current = window.setTimeout(() => {
+      const serializedFolders = JSON.stringify(
+        stripGeneratedWorkspaceEntries(latestFoldersRef.current),
+      );
+
+      if (serializedFolders !== lastPersistedFoldersRef.current) {
+        window.localStorage.setItem(WORKSPACE_FOLDERS_STORAGE_KEY, serializedFolders);
+        lastPersistedFoldersRef.current = serializedFolders;
+      }
+
+      foldersPersistTimeoutRef.current = null;
+    }, 180);
+
+    return () => {
+      if (foldersPersistTimeoutRef.current !== null) {
+        window.clearTimeout(foldersPersistTimeoutRef.current);
+      }
+    };
   }, [folders]);
+
+  useEffect(() => () => {
+    if (foldersPersistTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(foldersPersistTimeoutRef.current);
+
+    const serializedFolders = JSON.stringify(
+      stripGeneratedWorkspaceEntries(latestFoldersRef.current),
+    );
+
+    if (serializedFolders !== lastPersistedFoldersRef.current) {
+      window.localStorage.setItem(WORKSPACE_FOLDERS_STORAGE_KEY, serializedFolders);
+      lastPersistedFoldersRef.current = serializedFolders;
+    }
+  }, []);
 
   useEffect(() => {
     if (openFileId && !findFilePathById(displayFolders, openFileId)) {

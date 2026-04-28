@@ -270,12 +270,14 @@ function hydrateFolderCanvasNodes(): FolderCanvasStore {
   return readStoredFolderCanvasNodes();
 }
 
-function writeStoredFolderCanvasNodes(store: FolderCanvasStore) {
+function writeStoredFolderCanvasNodes(
+  store: FolderCanvasStore,
+  serializedStore: string = JSON.stringify(store),
+) {
   if (typeof window === 'undefined') {
     return;
   }
 
-  const serializedStore = JSON.stringify(store);
   window.localStorage.setItem(FOLDER_CANVAS_STORAGE_KEY, serializedStore);
   window.dispatchEvent(
     new CustomEvent(FOLDER_CANVAS_UPDATED_EVENT, {
@@ -511,13 +513,48 @@ export function useFolderCanvasState(activeFolder: WorkspaceFolder | null) {
     useState<FolderCanvasStore>(hydrateFolderCanvasNodes);
   const [folderSelectedNodeIds, setFolderSelectedNodeIds] = useState<Record<string, string[]>>({});
   const lastPersistedStoreRef = useRef('');
+  const latestStoreRef = useRef(folderCanvasNodes);
+  const persistTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
-    const serializedStore = JSON.stringify(folderCanvasNodes);
+    latestStoreRef.current = folderCanvasNodes;
 
-    lastPersistedStoreRef.current = serializedStore;
-    writeStoredFolderCanvasNodes(folderCanvasNodes);
+    if (persistTimeoutRef.current !== null) {
+      window.clearTimeout(persistTimeoutRef.current);
+    }
+
+    persistTimeoutRef.current = window.setTimeout(() => {
+      const serializedStore = JSON.stringify(latestStoreRef.current);
+
+      if (serializedStore !== lastPersistedStoreRef.current) {
+        lastPersistedStoreRef.current = serializedStore;
+        writeStoredFolderCanvasNodes(latestStoreRef.current, serializedStore);
+      }
+
+      persistTimeoutRef.current = null;
+    }, 180);
+
+    return () => {
+      if (persistTimeoutRef.current !== null) {
+        window.clearTimeout(persistTimeoutRef.current);
+      }
+    };
   }, [folderCanvasNodes]);
+
+  useEffect(() => () => {
+    if (persistTimeoutRef.current === null) {
+      return;
+    }
+
+    window.clearTimeout(persistTimeoutRef.current);
+
+    const serializedStore = JSON.stringify(latestStoreRef.current);
+
+    if (serializedStore !== lastPersistedStoreRef.current) {
+      lastPersistedStoreRef.current = serializedStore;
+      writeStoredFolderCanvasNodes(latestStoreRef.current, serializedStore);
+    }
+  }, []);
 
   useEffect(() => {
     const syncFromStorage = () => {

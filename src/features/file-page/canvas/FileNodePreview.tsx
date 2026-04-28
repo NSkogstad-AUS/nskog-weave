@@ -1,14 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useMemo } from 'react';
 import type { ReactNode } from 'react';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
-import pdfWorkerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
-import { getPdfBinary } from '@/lib/pdfBinaryStore';
-
-GlobalWorkerOptions.workerSrc = pdfWorkerSrc;
-
-// ─── PDF page cache (module-level, survives re-mounts) ────────────────────────
-
-const pdfPageCache = new Map<string, string[]>();
 
 // ─── File-type detection ───────────────────────────────────────────────────────
 
@@ -25,6 +16,8 @@ const CODE_EXTENSIONS = new Set([
 ]);
 
 type FileKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
+const MAX_INLINE_PREVIEW_CHARACTERS = 2_000;
+const MAX_INLINE_PDF_TEXT_CHARACTERS = 1_200;
 
 function detectKind(label: string, mimeType?: string | null): FileKind {
   const ext = label.split('.').pop()?.toLowerCase() ?? '';
@@ -262,117 +255,6 @@ function CodeContent({ text, ext }: { text: string; ext: string }) {
   );
 }
 
-// ─── PDF renderer ─────────────────────────────────────────────────────────────
-
-const MAX_PREVIEW_PAGES = 12;
-const RENDER_SCALE = 1.5;
-
-type PdfState =
-  | { status: 'loading' }
-  | { status: 'ready'; pages: string[] }
-  | { status: 'no-data' }
-  | { status: 'error' };
-
-function PdfContent({ fileId }: { fileId: string }) {
-  const [state, setState] = useState<PdfState>(() => {
-    const cached = pdfPageCache.get(fileId);
-    return cached ? { status: 'ready', pages: cached } : { status: 'loading' };
-  });
-  const cancelRef = useRef(false);
-
-  useEffect(() => {
-    if (pdfPageCache.has(fileId)) {
-      setState({ status: 'ready', pages: pdfPageCache.get(fileId)! });
-      return;
-    }
-
-    cancelRef.current = false;
-
-    async function renderPages() {
-      try {
-        const data = await getPdfBinary(fileId);
-        if (cancelRef.current) return;
-
-        if (!data) {
-          setState({ status: 'no-data' });
-          return;
-        }
-
-        const pdf = await getDocument({
-          data: new Uint8Array(data),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        }).promise;
-
-        const count = Math.min(pdf.numPages, MAX_PREVIEW_PAGES);
-        const urls: string[] = [];
-
-        for (let n = 1; n <= count; n++) {
-          if (cancelRef.current) break;
-          const page = await pdf.getPage(n);
-          const viewport = page.getViewport({ scale: RENDER_SCALE });
-          const canvas = document.createElement('canvas');
-          canvas.width = Math.floor(viewport.width);
-          canvas.height = Math.floor(viewport.height);
-          const ctx = canvas.getContext('2d');
-          if (!ctx) continue;
-          await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-          urls.push(canvas.toDataURL('image/jpeg', 0.82));
-        }
-
-        await pdf.destroy();
-
-        if (!cancelRef.current) {
-          pdfPageCache.set(fileId, urls);
-          setState({ status: 'ready', pages: urls });
-        }
-      } catch {
-        if (!cancelRef.current) setState({ status: 'error' });
-      }
-    }
-
-    void renderPages();
-    return () => { cancelRef.current = true; };
-  }, [fileId]);
-
-  if (state.status === 'loading') {
-    return (
-      <div className="flex items-center gap-1.5 py-1">
-        <span className="size-1.5 animate-pulse rounded-full bg-slate-300 dark:bg-slate-600" />
-        <span className="text-[9px] text-slate-400 dark:text-slate-500">Rendering PDF…</span>
-      </div>
-    );
-  }
-
-  if (state.status === 'no-data' || state.status === 'error') {
-    return (
-      <p className="text-[9px] text-slate-400 dark:text-slate-500">
-        {state.status === 'no-data'
-          ? 'PDF binary not found — re-upload the file to enable page preview.'
-          : 'Could not render PDF.'}
-      </p>
-    );
-  }
-
-  return (
-    <div className="space-y-1.5">
-      {state.pages.map((url, i) => (
-        <div key={i} className="relative overflow-hidden rounded-[4px] border border-slate-200/70 shadow-[0_1px_3px_rgba(15,23,42,0.06)] dark:border-slate-600/30">
-          <img
-            src={url}
-            alt={`Page ${i + 1}`}
-            draggable={false}
-            className="block w-full select-none"
-          />
-          <span className="absolute bottom-1 right-1.5 rounded-sm bg-black/30 px-1 py-[1px] font-mono text-[7px] text-white/80 backdrop-blur-[2px]">
-            {i + 1}
-          </span>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 // ─── Main component ────────────────────────────────────────────────────────────
 
 interface FileNodePreviewProps {
@@ -387,25 +269,39 @@ export function FileNodePreview({ textContent, label, mimeType, fileId }: FileNo
   const kind = detectKind(label, mimeType);
 
   if (kind === 'pdf') {
-    if (fileId) {
-      return <PdfContent fileId={fileId} />;
-    }
-    // Fallback: show extracted text if binary isn't available
-    if (textContent) {
+    const previewText = (textContent ?? '').slice(0, MAX_INLINE_PDF_TEXT_CHARACTERS).trim();
+
+    if (previewText) {
       return (
-        <pre className="whitespace-pre-wrap break-words text-[9.5px] leading-[1.55] text-slate-600 dark:text-slate-400">
-          {textContent.slice(0, 8000)}
-        </pre>
+        <div className="space-y-2">
+          <div className="rounded-full border border-slate-200/70 bg-slate-100/85 px-2 py-1 text-[7.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-slate-600/35 dark:bg-slate-800/60 dark:text-slate-400">
+            PDF text excerpt
+          </div>
+          <pre className="whitespace-pre-wrap break-words text-[9.5px] leading-[1.55] text-slate-600 dark:text-slate-400">
+            {previewText}
+          </pre>
+        </div>
       );
     }
+
     return (
-      <p className="text-[9px] text-slate-400 dark:text-slate-500">
-        Re-upload this PDF to enable page preview.
-      </p>
+      <div className="space-y-2">
+        <div className="rounded-full border border-slate-200/70 bg-slate-100/85 px-2 py-1 text-[7.5px] font-semibold uppercase tracking-[0.18em] text-slate-500 dark:border-slate-600/35 dark:bg-slate-800/60 dark:text-slate-400">
+          PDF
+        </div>
+        <p className="text-[9px] text-slate-400 dark:text-slate-500">
+          Open this file to view the full PDF. Inline page rendering is disabled in canvas cards for performance.
+        </p>
+        {fileId ? (
+          <p className="text-[8px] text-slate-400/90 dark:text-slate-500">
+            Full document rendering is still available when the file is opened.
+          </p>
+        ) : null}
+      </div>
     );
   }
 
-  const clipped = (textContent ?? '').slice(0, 8000);
+  const clipped = (textContent ?? '').slice(0, MAX_INLINE_PREVIEW_CHARACTERS);
 
   return (
     <div className="h-full">
