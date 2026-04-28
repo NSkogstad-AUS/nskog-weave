@@ -826,12 +826,7 @@ function App() {
     setOpenFolderId(null);
   }, [displayFolders, setViewForFile]);
 
-  const handleOpenFile = useCallback((fileId: string) => {
-    setCanvasFileNavigation(null);
-    openFileInDocument(fileId);
-  }, [openFileInDocument]);
-
-  const handleOpenCanvasFile = useCallback((fileId: string) => {
+  const openFileWithCanvasHistory = useCallback((fileId: string) => {
     const source =
       activeView === 'canvas'
         ? activeFile
@@ -850,6 +845,9 @@ function App() {
     setCanvasFileNavigation(source ? { source, targetFileId: fileId } : null);
     openFileInDocument(fileId);
   }, [activeFile, activeFolder, activeView, openFileInDocument]);
+
+  const handleOpenFile = openFileWithCanvasHistory;
+  const handleOpenCanvasFile = openFileWithCanvasHistory;
 
   const canNavigateBackToCanvas =
     canvasFileNavigation !== null && activeFile?.id === canvasFileNavigation.targetFileId;
