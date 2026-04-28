@@ -1458,6 +1458,10 @@ export function FileCanvasView({
 
   const openNodePrimaryAction = useCallback(
     (node: FilePageNode) => {
+      if (Date.now() < suppressPreviewOpenUntilRef.current) {
+        return;
+      }
+
       if (node.kind === 'file') {
         const fileId = resolveCanvasFileId?.(node) ?? null;
 
