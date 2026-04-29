@@ -1020,6 +1020,14 @@ function App() {
     setNavigationIndex(nextHistory.length - 1);
   }, [currentNavigationRoute]);
 
+  // Safety net: if applyNavigationRoute caused no state change (e.g. destination already
+  // displayed) the [currentNavigationRoute] effect above never fires and the flag stays true,
+  // which would silently swallow the next real navigation's history entry. Reset it here so
+  // it can never be stuck across render cycles.
+  useEffect(() => {
+    applyingNavigationRef.current = false;
+  });
+
   useEffect(() => {
     const currentHistory = navigationHistoryRef.current;
 

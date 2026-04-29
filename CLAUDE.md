@@ -81,3 +81,4 @@ npm run preview    # preview production build
 
 - The `claude/` directory can hold longer-form Claude-specific references. Keep this root `CLAUDE.md` concise so it remains useful in prompt context.
 - Do not add secrets, tokens, or internal-only credentials to this file.
+

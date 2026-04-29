@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo } from 'react';
 import { ChevronLeftIcon, ChevronRightIcon, FileTextIcon } from 'lucide-react';
 
 import {
@@ -74,8 +74,6 @@ export function FileWorkspace({
   onNavigateForward,
   onOpenCanvasFile,
 }: FileWorkspaceProps) {
-  const workspaceRef = useRef<HTMLDivElement | null>(null);
-  const [navPosition, setNavPosition] = useState({ left: 16, top: 16 });
   const folderCanvasState = useFolderCanvasState(activeFolder);
   const displayNodes = activeFile ? nodes : folderCanvasState.activeNodes;
   const displaySelectedNodeIds = activeFile
@@ -263,40 +261,6 @@ export function FileWorkspace({
   const disabledNavButtonClassName =
     'border-slate-200/70 bg-slate-100/88 text-slate-300 shadow-none dark:border-slate-700/35 dark:bg-slate-800/58 dark:text-slate-600';
 
-  useLayoutEffect(() => {
-    const updateNavPosition = () => {
-      const rect = workspaceRef.current?.getBoundingClientRect();
-
-      if (!rect) {
-        return;
-      }
-
-      setNavPosition({
-        left: Math.max(16, rect.left + 16),
-        top: 16,
-      });
-    };
-    const observedElements = [
-      workspaceRef.current,
-      workspaceRef.current?.parentElement,
-      document.querySelector('[data-slot="sidebar-inset"]'),
-    ].filter((element): element is Element => Boolean(element));
-    const resizeObserver = new ResizeObserver(() => {
-      window.requestAnimationFrame(updateNavPosition);
-    });
-
-    updateNavPosition();
-    observedElements.forEach((element) => resizeObserver.observe(element));
-    window.addEventListener('resize', updateNavPosition);
-    window.addEventListener('scroll', updateNavPosition, true);
-
-    return () => {
-      resizeObserver.disconnect();
-      window.removeEventListener('resize', updateNavPosition);
-      window.removeEventListener('scroll', updateNavPosition, true);
-    };
-  }, []);
-
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
       <div className="flex h-full min-h-[34rem] items-center justify-center rounded-none border border-dashed border-slate-200 bg-white/60 px-8 text-center shadow-[0_32px_90px_-62px_rgba(15,23,42,0.2)] dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.54)] dark:shadow-[0_32px_90px_-62px_rgba(15,23,42,0.42)]">
@@ -316,11 +280,8 @@ export function FileWorkspace({
   }
 
   return (
-    <div ref={workspaceRef} className="relative flex h-full min-h-0 flex-col">
-      <div
-        className="pointer-events-none fixed z-40 flex items-center gap-2"
-        style={{ left: navPosition.left, top: navPosition.top }}
-      >
+    <div className="relative flex h-full min-h-0 flex-col">
+      <div className="pointer-events-none absolute left-4 top-4 z-40 flex items-center gap-2">
         <button
           type="button"
           aria-label="Back"
