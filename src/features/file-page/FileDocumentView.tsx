@@ -23,7 +23,7 @@ const DOCUMENT_ZOOM_OPTIONS = [50, 75, 90, 100, 125, 150, 175, 200];
 const DOCUMENT_MIN_ZOOM = DOCUMENT_ZOOM_OPTIONS[0];
 const DOCUMENT_MAX_ZOOM = DOCUMENT_ZOOM_OPTIONS[DOCUMENT_ZOOM_OPTIONS.length - 1];
 const CONTENT_WIDTH_PX = 768; // 48rem at 16px base
-const CONTENT_INITIAL_TOP = 144; // px — space below fixed header overlay
+const CONTENT_INITIAL_TOP = 68; // px — space below fixed header overlay
 const CONTENT_BOTTOM_PADDING = 32;
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
@@ -479,6 +479,17 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     return Math.max(minY, Math.min(CONTENT_INITIAL_TOP, candidateY));
   }, []);
 
+  // Clamp horizontal pan so at least a sliver of the content stays visible on each side
+  const clampPanX = useCallback((candidateX: number, nextZoomPercent = vpRef.current.zoomPercent) => {
+    const root = rootRef.current;
+    if (!root) return candidateX;
+    const scaledWidth = CONTENT_WIDTH_PX * (nextZoomPercent / 100);
+    const edge = 80; // minimum px of content visible at either side
+    const maxX = root.clientWidth - edge;
+    const minX = edge - scaledWidth;
+    return Math.max(minX, Math.min(maxX, candidateX));
+  }, []);
+
   // Center content horizontally on first layout
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -487,6 +498,25 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     vpRef.current = { zoomPercent: 100, panX: x, panY: CONTENT_INITIAL_TOP };
     setPan({ x, y: CONTENT_INITIAL_TOP });
     setInitialized(true);
+  }, [initialized]);
+
+  // Re-center horizontally when the container resizes (e.g. sidebar toggled)
+  useLayoutEffect(() => {
+    const root = rootRef.current;
+    if (!root) return undefined;
+    const recentre = () => {
+      if (!initialized || isFreePanRef.current) return;
+      const scaledWidth = CONTENT_WIDTH_PX * (vpRef.current.zoomPercent / 100);
+      const x = scaledWidth >= root.clientWidth
+        ? (root.clientWidth - scaledWidth) / 2
+        : Math.max(32, (root.clientWidth - scaledWidth) / 2);
+      if (x === vpRef.current.panX) return;
+      vpRef.current = { ...vpRef.current, panX: x };
+      setPan((prev) => ({ ...prev, x }));
+    };
+    const observer = new ResizeObserver(() => window.requestAnimationFrame(recentre));
+    observer.observe(root);
+    return () => observer.disconnect();
   }, [initialized]);
 
   useLayoutEffect(() => {
@@ -532,20 +562,25 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const { zoomPercent: curZoom, panX, panY } = vpRef.current;
     if (bounded === curZoom) return;
     const factor = bounded / curZoom;
-    const newPanX = cx + (panX - cx) * factor;
+    const newPanX = clampPanX(cx + (panX - cx) * factor, bounded);
     const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
     isFreePanRef.current = true;
     vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
     setIsFreePan(true);
     setZoomPercent(bounded);
     setPan({ x: newPanX, y: newPanY });
-  }, [clampPanY]);
+  }, [clampPanX, clampPanY]);
 
   // +/- buttons and dropdown zoom steps: always centred, never free-form
   const applyZoomCentred = useCallback((nextZoomPercent: number) => {
     const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, nextZoomPercent));
     const root = rootRef.current;
-    const centredX = root ? Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2) : vpRef.current.panX;
+    const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
+    const centredX = root
+      ? scaledWidth >= root.clientWidth
+        ? (root.clientWidth - scaledWidth) / 2
+        : Math.max(32, (root.clientWidth - scaledWidth) / 2)
+      : vpRef.current.panX;
     const clampedY = clampPanY(vpRef.current.panY, bounded);
     isFreePanRef.current = false;
     vpRef.current = { zoomPercent: bounded, panX: centredX, panY: clampedY };
@@ -597,7 +632,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       } else {
         // Free-form: pan both axes. Centred mode: vertical only.
         if (isFreePanRef.current) {
-          vpRef.current.panX -= event.deltaX;
+          vpRef.current.panX = clampPanX(vpRef.current.panX - event.deltaX);
         }
         vpRef.current.panY = clampPanY(vpRef.current.panY - event.deltaY);
 
@@ -617,7 +652,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       if (panRafRef.current !== null) { cancelAnimationFrame(panRafRef.current); panRafRef.current = null; }
       root.removeEventListener('wheel', handleWheel);
     };
-  }, [applyZoomAt, clampPanY]);
+  }, [applyZoomAt, clampPanX, clampPanY]);
 
   // Middle-mouse drag to pan
   useEffect(() => {
@@ -644,7 +679,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       );
       // In centred mode, horizontal drag is locked
       const newPanX = isFreePanRef.current
-        ? dragStartRef.current.panX + (event.clientX - dragStartRef.current.clientX)
+        ? clampPanX(dragStartRef.current.panX + (event.clientX - dragStartRef.current.clientX))
         : vpRef.current.panX;
       vpRef.current.panX = newPanX;
       vpRef.current.panY = newPanY;
@@ -666,7 +701,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       root.removeEventListener('pointerup', handlePointerUp);
       root.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, [clampPanY]);
+  }, [clampPanX, clampPanY]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -756,18 +791,15 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
       {/* Fixed title overlay */}
       <div
-        className="pointer-events-none fixed top-0 z-30 overflow-hidden shadow-[0_18px_44px_-34px_rgba(15,23,42,0.48)]"
+        className="pointer-events-none fixed top-0 z-30 overflow-hidden"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="absolute inset-0 bg-white/58 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_72%,rgba(0,0,0,0.72)_88%,transparent_100%)] dark:bg-[rgba(15,23,42,0.34)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.74),rgba(255,255,255,0.2)_48%,rgba(255,255,255,0.42))] [mask-image:linear-gradient(to_bottom,black_0%,black_70%,rgba(0,0,0,0.68)_86%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(148,163,184,0.24),rgba(15,23,42,0.18)_50%,rgba(255,255,255,0.08))]" />
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent dark:via-white/12" />
-        <div className="relative mx-auto max-w-3xl px-8 pt-10">
-          <div className="border-b border-white/58 pb-6 dark:border-white/10">
-            <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
-              {file.label}
-            </h1>
-          </div>
+        <div className="absolute inset-0 bg-white/22 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_55%,rgba(0,0,0,0.4)_78%,transparent_100%)] dark:bg-[rgba(15,23,42,0.22)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0.22))] [mask-image:linear-gradient(to_bottom,black_0%,black_52%,rgba(0,0,0,0.3)_75%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(148,163,184,0.14),rgba(15,23,42,0.08)_50%,rgba(255,255,255,0.04))]" />
+        <div className="relative pb-10 pt-[22px] text-center">
+          <h1 className="truncate px-16 text-base font-semibold tracking-tight text-slate-700 dark:text-white/80">
+            {file.label}
+          </h1>
         </div>
       </div>
 
