@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useState } from 'react';
 import type { ReactNode } from 'react';
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -20,7 +20,11 @@ const CODE_EXTENSIONS = new Set([
 type FileKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 const MAX_INLINE_PREVIEW_CHARACTERS = 2_000;
 const PDF_THUMBNAIL_SCALE = 0.9;
+const PDF_THUMBNAIL_MAX_CONCURRENT = 2;
 const pdfThumbnailCache = new Map<string, string>();
+const pdfThumbnailPromiseCache = new Map<string, Promise<PdfThumbnailState>>();
+let activePdfThumbnailRenders = 0;
+const pdfThumbnailQueue: Array<() => void> = [];
 
 function detectKind(label: string, mimeType?: string | null): FileKind {
   const ext = label.split('.').pop()?.toLowerCase() ?? '';
@@ -264,12 +268,104 @@ type PdfThumbnailState =
   | { status: 'no-data' }
   | { status: 'error' };
 
+function schedulePdfThumbnailRender<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      activePdfThumbnailRenders += 1;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          activePdfThumbnailRenders = Math.max(0, activePdfThumbnailRenders - 1);
+          const next = pdfThumbnailQueue.shift();
+          next?.();
+        });
+    };
+
+    if (activePdfThumbnailRenders < PDF_THUMBNAIL_MAX_CONCURRENT) {
+      run();
+    } else {
+      pdfThumbnailQueue.push(run);
+    }
+  });
+}
+
+function canvasToJpegUrl(canvas: HTMLCanvasElement): Promise<string> {
+  return new Promise((resolve) => {
+    canvas.toBlob(
+      (blob) => {
+        resolve(blob ? URL.createObjectURL(blob) : canvas.toDataURL('image/jpeg', 0.82));
+      },
+      'image/jpeg',
+      0.82,
+    );
+  });
+}
+
+function loadPdfThumbnail(fileId: string): Promise<PdfThumbnailState> {
+  const cached = pdfThumbnailCache.get(fileId);
+  if (cached) {
+    return Promise.resolve({ status: 'ready', imageUrl: cached });
+  }
+
+  const inFlight = pdfThumbnailPromiseCache.get(fileId);
+  if (inFlight) {
+    return inFlight;
+  }
+
+  const promise = schedulePdfThumbnailRender(async (): Promise<PdfThumbnailState> => {
+    try {
+      const data = await getPdfBinary(fileId);
+
+      if (!data) {
+        return { status: 'no-data' };
+      }
+
+      const { getDocument } = await loadPdfJs();
+      const pdf = await getDocument({
+        data: new Uint8Array(data),
+        useWorkerFetch: false,
+        isEvalSupported: false,
+      }).promise;
+
+      try {
+        const page = await pdf.getPage(1);
+        const viewport = page.getViewport({ scale: PDF_THUMBNAIL_SCALE });
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.floor(viewport.width);
+        canvas.height = Math.floor(viewport.height);
+        const ctx = canvas.getContext('2d');
+
+        if (!ctx) {
+          page.cleanup();
+          return { status: 'error' };
+        }
+
+        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
+        page.cleanup();
+
+        const imageUrl = await canvasToJpegUrl(canvas);
+        pdfThumbnailCache.set(fileId, imageUrl);
+        return { status: 'ready', imageUrl };
+      } finally {
+        await pdf.destroy();
+      }
+    } catch {
+      return { status: 'error' };
+    }
+  });
+
+  pdfThumbnailPromiseCache.set(fileId, promise);
+  void promise.finally(() => {
+    pdfThumbnailPromiseCache.delete(fileId);
+  });
+  return promise;
+}
+
 function PdfThumbnail({ fileId }: { fileId: string }) {
   const [state, setState] = useState<PdfThumbnailState>(() => {
     const cached = pdfThumbnailCache.get(fileId);
     return cached ? { status: 'ready', imageUrl: cached } : { status: 'loading' };
   });
-  const cancelRef = useRef(false);
 
   useEffect(() => {
     const cached = pdfThumbnailCache.get(fileId);
@@ -279,61 +375,17 @@ function PdfThumbnail({ fileId }: { fileId: string }) {
       return;
     }
 
-    cancelRef.current = false;
+    let cancelled = false;
+    setState({ status: 'loading' });
 
-    async function renderThumbnail() {
-      try {
-        const data = await getPdfBinary(fileId);
-
-        if (cancelRef.current) {
-          return;
-        }
-
-        if (!data) {
-          setState({ status: 'no-data' });
-          return;
-        }
-
-        const { getDocument } = await loadPdfJs();
-        const pdf = await getDocument({
-          data: new Uint8Array(data),
-          useWorkerFetch: false,
-          isEvalSupported: false,
-        }).promise;
-        const page = await pdf.getPage(1);
-        const viewport = page.getViewport({ scale: PDF_THUMBNAIL_SCALE });
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        const ctx = canvas.getContext('2d');
-
-        if (!ctx) {
-          await pdf.destroy();
-          setState({ status: 'error' });
-          return;
-        }
-
-        await page.render({ canvas, canvasContext: ctx, viewport }).promise;
-        await pdf.destroy();
-
-        if (cancelRef.current) {
-          return;
-        }
-
-        const imageUrl = canvas.toDataURL('image/jpeg', 0.82);
-        pdfThumbnailCache.set(fileId, imageUrl);
-        setState({ status: 'ready', imageUrl });
-      } catch {
-        if (!cancelRef.current) {
-          setState({ status: 'error' });
-        }
+    void loadPdfThumbnail(fileId).then((nextState) => {
+      if (!cancelled) {
+        setState(nextState);
       }
-    }
-
-    void renderThumbnail();
+    });
 
     return () => {
-      cancelRef.current = true;
+      cancelled = true;
     };
   }, [fileId]);
 
@@ -380,7 +432,7 @@ interface FileNodePreviewProps {
   fileId?: string | null;
 }
 
-export function FileNodePreview({ textContent, label, mimeType, fileId }: FileNodePreviewProps) {
+function FileNodePreviewComponent({ textContent, label, mimeType, fileId }: FileNodePreviewProps) {
   const ext = label.split('.').pop()?.toLowerCase() ?? '';
   const kind = detectKind(label, mimeType);
 
@@ -414,3 +466,10 @@ export function FileNodePreview({ textContent, label, mimeType, fileId }: FileNo
     </div>
   );
 }
+
+export const FileNodePreview = memo(FileNodePreviewComponent, (previous, next) =>
+  previous.textContent === next.textContent &&
+  previous.label === next.label &&
+  previous.mimeType === next.mimeType &&
+  previous.fileId === next.fileId,
+);

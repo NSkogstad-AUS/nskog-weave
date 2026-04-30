@@ -66,6 +66,8 @@ export function useFloatingInspectors({
   const floatingInspectorDragStateRef = useRef<FloatingInspectorDragState | null>(null);
   const floatingInspectorResizeStateRef = useRef<FloatingInspectorResizeState | null>(null);
   const floatingInspectorCloseTimerRef = useRef<number | null>(null);
+  const floatingInspectorFrameRef = useRef<number | null>(null);
+  const floatingInspectorPointerRef = useRef<Point | null>(null);
 
   // Keep ref in sync for stable access inside pointer handlers
   useEffect(() => {
@@ -450,7 +452,7 @@ export function useFloatingInspectors({
   // ── Inspector drag / resize pointer handlers ───────────────────────────────
 
   useEffect(() => {
-    const handlePointerMove = (event: PointerEvent) => {
+    const commitPointerMove = (point: Point) => {
       const liveDrag = floatingInspectorDragStateRef.current;
       const liveResize = floatingInspectorResizeStateRef.current;
       if (!liveDrag && !liveResize) return;
@@ -468,8 +470,8 @@ export function useFloatingInspectors({
                 rect: clampFloatingInspectorRect(
                   {
                     ...liveDrag.baseRect,
-                    x: liveDrag.baseRect.x + (event.clientX - liveDrag.origin.x),
-                    y: liveDrag.baseRect.y + (event.clientY - liveDrag.origin.y),
+                    x: liveDrag.baseRect.x + (point.x - liveDrag.origin.x),
+                    y: liveDrag.baseRect.y + (point.y - liveDrag.origin.y),
                   },
                   activeTab?.target.type ?? 'file',
                 ),
@@ -494,8 +496,8 @@ export function useFloatingInspectors({
               rect: clampFloatingInspectorRect(
                 {
                   ...liveResize.baseRect,
-                  width: liveResize.baseRect.width + (event.clientX - liveResize.origin.x),
-                  height: liveResize.baseRect.height + (event.clientY - liveResize.origin.y),
+                  width: liveResize.baseRect.width + (point.x - liveResize.origin.x),
+                  height: liveResize.baseRect.height + (point.y - liveResize.origin.y),
                 },
                 activeTab?.target.type ?? 'file',
               ),
@@ -505,8 +507,32 @@ export function useFloatingInspectors({
       );
     };
 
+    const handlePointerMove = (event: PointerEvent) => {
+      const liveDrag = floatingInspectorDragStateRef.current;
+      const liveResize = floatingInspectorResizeStateRef.current;
+      if (!liveDrag && !liveResize) return;
+
+      floatingInspectorPointerRef.current = { x: event.clientX, y: event.clientY };
+      if (floatingInspectorFrameRef.current !== null) return;
+
+      floatingInspectorFrameRef.current = window.requestAnimationFrame(() => {
+        floatingInspectorFrameRef.current = null;
+        const point = floatingInspectorPointerRef.current;
+        if (point) commitPointerMove(point);
+      });
+    };
+
     const handlePointerUp = (event: PointerEvent) => {
       const liveDrag = floatingInspectorDragStateRef.current;
+      if (floatingInspectorFrameRef.current !== null) {
+        window.cancelAnimationFrame(floatingInspectorFrameRef.current);
+        floatingInspectorFrameRef.current = null;
+      }
+      const latestPoint = floatingInspectorPointerRef.current;
+      if (latestPoint) {
+        commitPointerMove(latestPoint);
+        floatingInspectorPointerRef.current = null;
+      }
       floatingInspectorDragStateRef.current = null;
       floatingInspectorResizeStateRef.current = null;
 
@@ -558,6 +584,10 @@ export function useFloatingInspectors({
     return () => {
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      if (floatingInspectorFrameRef.current !== null) {
+        window.cancelAnimationFrame(floatingInspectorFrameRef.current);
+        floatingInspectorFrameRef.current = null;
+      }
     };
   }, [clampFloatingInspectorRect]);
 

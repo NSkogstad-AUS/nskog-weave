@@ -14,6 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DragEvent as ReactDragEvent,
+  MutableRefObject,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
@@ -211,7 +212,13 @@ export function FileCanvasView({
 
   const releaseTimerRef = useRef<number | null>(null);
   const frameRef = useRef<number | null>(null);
+  const viewportFrameRef = useRef<number | null>(null);
+  const resizeDraftFrameRef = useRef<number | null>(null);
+  const marqueeFrameRef = useRef<number | null>(null);
+  const workerConnectionFrameRef = useRef<number | null>(null);
+  const paletteDragFrameRef = useRef<number | null>(null);
   const paletteDragDepthRef = useRef(0);
+  const paletteDragPreviewPointRef = useRef<Point | null>(null);
 
   // ── React state ────────────────────────────────────────────────────────────
 
@@ -247,16 +254,40 @@ export function FileCanvasView({
   useEffect(() => { selectedNodeIdsRef.current = selectedNodeIds; }, [selectedNodeIds]);
   useEffect(() => { editingNodeIdRef.current = editingNodeId; }, [editingNodeId]);
   useEffect(() => { dragStateRef.current = dragState; }, [dragState]);
-  useEffect(() => { marqueeStateRef.current = marqueeState; }, [marqueeState]);
+  useEffect(() => {
+    if (marqueeFrameRef.current === null) {
+      marqueeStateRef.current = marqueeState;
+    }
+  }, [marqueeState]);
   useEffect(() => { panStateRef.current = panState; }, [panState]);
   useEffect(() => { resizeStateRef.current = resizeState; }, [resizeState]);
-  useEffect(() => { workerConnectionDragStateRef.current = workerConnectionDragState; }, [workerConnectionDragState]);
-  useEffect(() => { draftPositionsRef.current = draftPositions; }, [draftPositions]);
-  useEffect(() => { draftSizesRef.current = draftSizes; }, [draftSizes]);
+  useEffect(() => {
+    if (workerConnectionFrameRef.current === null) {
+      workerConnectionDragStateRef.current = workerConnectionDragState;
+    }
+  }, [workerConnectionDragState]);
+  useEffect(() => {
+    if (frameRef.current === null && resizeDraftFrameRef.current === null) {
+      draftPositionsRef.current = draftPositions;
+    }
+  }, [draftPositions]);
+  useEffect(() => {
+    if (resizeDraftFrameRef.current === null) {
+      draftSizesRef.current = draftSizes;
+    }
+  }, [draftSizes]);
   useEffect(() => { snapPreviewPositionsRef.current = snapPreviewPositions; }, [snapPreviewPositions]);
   useEffect(() => { activeSnapPreviewIdsRef.current = activeSnapPreviewIds; }, [activeSnapPreviewIds]);
-  useEffect(() => { draftSelectedNodeIdsRef.current = draftSelectedNodeIds; }, [draftSelectedNodeIds]);
-  useEffect(() => { viewportRef.current = viewport; }, [viewport]);
+  useEffect(() => {
+    if (marqueeFrameRef.current === null) {
+      draftSelectedNodeIdsRef.current = draftSelectedNodeIds;
+    }
+  }, [draftSelectedNodeIds]);
+  useEffect(() => {
+    if (viewportFrameRef.current === null) {
+      viewportRef.current = viewport;
+    }
+  }, [viewport]);
   useEffect(() => { contextMenuNodeIdRef.current = contextMenuNodeId; }, [contextMenuNodeId]);
   useEffect(() => { editingLabelRef.current = editingLabel; }, [editingLabel]);
 
@@ -269,6 +300,55 @@ export function FileCanvasView({
     onHoverNodeChangeRef.current = onHoverNodeChange;
     onSelectNodesRef.current = onSelectNodes;
   }, [onAddNode, onDeleteNode, onHoverNodeChange, onMoveNodes, onResizeNode, onSelectNodes, onUpdateNode]);
+
+  const cancelScheduledFrame = useCallback((frame: MutableRefObject<number | null>) => {
+    if (frame.current === null) return;
+    window.cancelAnimationFrame(frame.current);
+    frame.current = null;
+  }, []);
+
+  const scheduleViewportCommit = useCallback(() => {
+    if (viewportFrameRef.current !== null) return;
+    viewportFrameRef.current = window.requestAnimationFrame(() => {
+      viewportFrameRef.current = null;
+      setViewport(viewportRef.current);
+    });
+  }, []);
+
+  const scheduleResizeDraftCommit = useCallback(() => {
+    if (resizeDraftFrameRef.current !== null) return;
+    resizeDraftFrameRef.current = window.requestAnimationFrame(() => {
+      resizeDraftFrameRef.current = null;
+      setDraftSizes(draftSizesRef.current);
+      setDraftPositions(draftPositionsRef.current);
+    });
+  }, []);
+
+  const scheduleMarqueeCommit = useCallback(() => {
+    if (marqueeFrameRef.current !== null) return;
+    marqueeFrameRef.current = window.requestAnimationFrame(() => {
+      marqueeFrameRef.current = null;
+      setMarqueeState(marqueeStateRef.current);
+      setDraftSelectedNodeIds(draftSelectedNodeIdsRef.current);
+    });
+  }, []);
+
+  const scheduleWorkerConnectionCommit = useCallback(() => {
+    if (workerConnectionFrameRef.current !== null) return;
+    workerConnectionFrameRef.current = window.requestAnimationFrame(() => {
+      workerConnectionFrameRef.current = null;
+      setWorkerConnectionDragState(workerConnectionDragStateRef.current);
+    });
+  }, []);
+
+  const schedulePalettePreviewCommit = useCallback((point: Point) => {
+    paletteDragPreviewPointRef.current = point;
+    if (paletteDragFrameRef.current !== null) return;
+    paletteDragFrameRef.current = window.requestAnimationFrame(() => {
+      paletteDragFrameRef.current = null;
+      setPaletteDragPreviewPoint(paletteDragPreviewPointRef.current);
+    });
+  }, []);
 
   // ── Derived node lists ─────────────────────────────────────────────────────
 
@@ -339,8 +419,9 @@ export function FileCanvasView({
    * (excluding generated outputs).
    */
   const workerInputContentsById = useMemo(
-    () =>
-      renderedNodes.reduce<Record<string, FilePageContentItem[]>>((acc, node) => {
+    () => {
+      const renderedNodeById = new Map(renderedNodes.map((node) => [node.id, node]));
+      const entries = renderedNodes.reduce<Record<string, FilePageContentItem[]>>((acc, node) => {
         if (
           !node.parentNodeId ||
           (node.kind !== 'folder' && node.kind !== 'file') ||
@@ -349,14 +430,21 @@ export function FileCanvasView({
           return acc;
         }
 
-        const parentNode = renderedNodes.find((candidate) => candidate.id === node.parentNodeId);
+        const parentNode = renderedNodeById.get(node.parentNodeId);
         if (!parentNode || parentNode.kind !== 'worker') return acc;
 
         const existing = acc[node.parentNodeId] ?? [];
         existing.push({ id: node.id, kind: node.kind, label: node.label });
-        acc[node.parentNodeId] = sortCanvasContentItems(existing);
+        acc[node.parentNodeId] = existing;
         return acc;
-      }, {}),
+      }, {});
+
+      Object.keys(entries).forEach((nodeId) => {
+        entries[nodeId] = sortCanvasContentItems(entries[nodeId]);
+      });
+
+      return entries;
+    },
     [renderedNodes],
   );
 
@@ -481,9 +569,14 @@ export function FileCanvasView({
     () => () => {
       onHoverNodeChange(null);
       if (releaseTimerRef.current !== null) window.clearTimeout(releaseTimerRef.current);
-      if (frameRef.current !== null) window.cancelAnimationFrame(frameRef.current);
+      cancelScheduledFrame(frameRef);
+      cancelScheduledFrame(viewportFrameRef);
+      cancelScheduledFrame(resizeDraftFrameRef);
+      cancelScheduledFrame(marqueeFrameRef);
+      cancelScheduledFrame(workerConnectionFrameRef);
+      cancelScheduledFrame(paletteDragFrameRef);
     },
-    [onHoverNodeChange],
+    [cancelScheduledFrame, onHoverNodeChange],
   );
 
   // ── Cancel editing when node disappears ───────────────────────────────────
@@ -602,8 +695,12 @@ export function FileCanvasView({
 
     event.preventDefault();
     event.stopPropagation();
-    setViewport((current) => ({ x: current.x - deltaX, y: current.y - deltaY }));
-  }, []);
+    viewportRef.current = {
+      x: viewportRef.current.x - deltaX,
+      y: viewportRef.current.y - deltaY,
+    };
+    scheduleViewportCommit();
+  }, [scheduleViewportCommit]);
 
   // ── Worker connection helpers ──────────────────────────────────────────────
 
@@ -907,18 +1004,20 @@ export function FileCanvasView({
         if (!nextSize || areSizesEqual(nextSize, currentSize)) return;
 
         const nextPosition = getResizePosition(nextSize);
-        setDraftSizes((c) => ({ ...c, [resizingNode.id]: nextSize }));
-        setDraftPositions((c) => ({ ...c, [resizingNode.id]: nextPosition }));
+        draftSizesRef.current = { ...draftSizesRef.current, [resizingNode.id]: nextSize };
+        draftPositionsRef.current = { ...draftPositionsRef.current, [resizingNode.id]: nextPosition };
+        scheduleResizeDraftCommit();
         return;
       }
 
       // ── Pan ───────────────────────────────────────────────────────────────
 
       if (livePan) {
-        setViewport({
+        viewportRef.current = {
           x: livePan.baseViewport.x + (event.clientX - livePan.origin.x),
           y: livePan.baseViewport.y + (event.clientY - livePan.origin.y),
-        });
+        };
+        scheduleViewportCommit();
         return;
       }
 
@@ -934,7 +1033,7 @@ export function FileCanvasView({
           targetNodeId: getWorkerInputDropTarget(liveWorkerConn.workerId, localPoint),
         };
         workerConnectionDragStateRef.current = nextState;
-        setWorkerConnectionDragState(nextState);
+        scheduleWorkerConnectionCommit();
         return;
       }
 
@@ -1018,7 +1117,7 @@ export function FileCanvasView({
           if (
             !movingNode ||
             movingNode.kind === 'group' ||
-            (movingNode.groupId && liveDrag.nodeIds.includes(movingNode.groupId))
+            (movingNode.groupId && dragNodeIdSet.has(movingNode.groupId))
           ) {
             return;
           }
@@ -1126,17 +1225,19 @@ export function FileCanvasView({
             getNodeById(rightNodeId),
             constrainedCandidateGroupIds,
           );
+        const stationaryNodesForDrag = nodesRef.current.filter((n) => !dragNodeIdSet.has(n.id));
+        const currentSizesById = Object.fromEntries(
+          nodesRef.current.map((n) => [n.id, draftSizesRef.current[n.id] ?? n.size]),
+        );
 
         const nextSnapPositions =
           sharedDragTargetBounds && sharedGroupSnapOrigin
             ? resolveSnapPositions(
                 desiredSnapPositions,
                 liveDrag.nodeIds,
-                nodesRef.current.filter((n) => !liveDrag.nodeIds.includes(n.id)),
+                stationaryNodesForDrag,
                 liveDrag.basePositions,
-                Object.fromEntries(
-                  nodesRef.current.map((n) => [n.id, draftSizesRef.current[n.id] ?? n.size]),
-                ),
+                currentSizesById,
                 canShare,
                 {
                   anchorGridOrigin: sharedGroupSnapOrigin,
@@ -1166,11 +1267,9 @@ export function FileCanvasView({
                 ? resolveSnapPositions(
                     desiredSnapPositions,
                     liveDrag.nodeIds,
-                    nodesRef.current.filter((n) => !liveDrag.nodeIds.includes(n.id)),
+                    stationaryNodesForDrag,
                     liveDrag.basePositions,
-                    Object.fromEntries(
-                      nodesRef.current.map((n) => [n.id, draftSizesRef.current[n.id] ?? n.size]),
-                    ),
+                    currentSizesById,
                     canShare,
                     {
                       anchorGridOrigin: sharedOuterSnapTarget.gridOrigin,
@@ -1244,8 +1343,7 @@ export function FileCanvasView({
 
       marqueeStateRef.current = nextMarquee;
       draftSelectedNodeIdsRef.current = nextSelectedIds;
-      setMarqueeState(nextMarquee);
-      setDraftSelectedNodeIds(nextSelectedIds);
+      scheduleMarqueeCommit();
     };
 
     // ── Pointer up ────────────────────────────────────────────────────────────
@@ -1256,6 +1354,16 @@ export function FileCanvasView({
       const liveSnapPreviewPositions = snapPreviewPositionsRef.current;
       const liveResize = resizeStateRef.current;
       const liveWorkerConn = workerConnectionDragStateRef.current;
+
+      if (viewportFrameRef.current !== null) {
+        window.cancelAnimationFrame(viewportFrameRef.current);
+        viewportFrameRef.current = null;
+        setViewport(viewportRef.current);
+      }
+      cancelScheduledFrame(frameRef);
+      cancelScheduledFrame(resizeDraftFrameRef);
+      cancelScheduledFrame(marqueeFrameRef);
+      cancelScheduledFrame(workerConnectionFrameRef);
 
       // Commit worker connection
       if (liveWorkerConn?.targetNodeId) {
@@ -1930,10 +2038,12 @@ export function FileCanvasView({
 
   const clearPaletteDragState = useCallback(() => {
     paletteDragDepthRef.current = 0;
+    paletteDragPreviewPointRef.current = null;
+    cancelScheduledFrame(paletteDragFrameRef);
     setDraggedPaletteTemplateId(null);
     setPaletteDragPreviewPoint(null);
     setIsPaletteDragOverCanvas(false);
-  }, []);
+  }, [cancelScheduledFrame]);
 
   const handleInsertPaletteNode = useCallback(
     (templateId: CanvasPaletteTemplateId) => {
@@ -1966,9 +2076,9 @@ export function FileCanvasView({
       paletteDragDepthRef.current += 1;
       setIsPaletteDragOverCanvas(true);
       const localPoint = getLocalPoint(event.clientX, event.clientY);
-      if (localPoint) setPaletteDragPreviewPoint(localPoint);
+      if (localPoint) schedulePalettePreviewCommit(localPoint);
     },
-    [getLocalPoint],
+    [getLocalPoint, schedulePalettePreviewCommit],
   );
 
   const handleCanvasPaletteDragOver = useCallback(
@@ -1982,10 +2092,10 @@ export function FileCanvasView({
       event.preventDefault();
       event.dataTransfer.dropEffect = 'copy';
       const localPoint = getLocalPoint(event.clientX, event.clientY);
-      if (localPoint) setPaletteDragPreviewPoint(localPoint);
+      if (localPoint) schedulePalettePreviewCommit(localPoint);
       if (!isPaletteDragOverCanvas) setIsPaletteDragOverCanvas(true);
     },
-    [getLocalPoint, isPaletteDragOverCanvas],
+    [getLocalPoint, isPaletteDragOverCanvas, schedulePalettePreviewCommit],
   );
 
   const handleCanvasPaletteDragLeave = useCallback(
@@ -1999,11 +2109,13 @@ export function FileCanvasView({
       event.preventDefault();
       paletteDragDepthRef.current = Math.max(0, paletteDragDepthRef.current - 1);
       if (paletteDragDepthRef.current === 0) {
+        paletteDragPreviewPointRef.current = null;
+        cancelScheduledFrame(paletteDragFrameRef);
         setPaletteDragPreviewPoint(null);
         setIsPaletteDragOverCanvas(false);
       }
     },
-    [],
+    [cancelScheduledFrame],
   );
 
   const handleCanvasPaletteDrop = useCallback(
@@ -2261,13 +2373,13 @@ export function FileCanvasView({
 
               const nextPanState: PanState = {
                 origin: { x: event.clientX, y: event.clientY },
-                baseViewport: viewport,
+                baseViewport: viewportRef.current,
               };
               panStateRef.current = nextPanState;
               setPanState(nextPanState);
             }}
             className={cn(
-              'canvas-surface relative min-w-0 flex-1 overflow-hidden touch-none',
+              'canvas-surface relative min-w-0 flex-1 overflow-hidden touch-none [contain:layout_paint_style]',
               panState ? 'cursor-grabbing' : 'cursor-grab',
             )}
           >
@@ -2333,7 +2445,7 @@ export function FileCanvasView({
 
             {/* World-space canvas layer */}
             <div
-              className="absolute inset-0"
+              className="absolute inset-0 [will-change:transform]"
               style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
             >
               {/* Groups render below content nodes */}

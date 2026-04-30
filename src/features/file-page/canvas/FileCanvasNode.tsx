@@ -896,6 +896,8 @@ function areFileCanvasNodePropsEqual(
     previous.isResizing !== next.isResizing ||
     previous.isHighlighted !== next.isHighlighted ||
     previous.isSelected !== next.isSelected ||
+    previous.isWorkerConnectionTarget !== next.isWorkerConnectionTarget ||
+    previous.resizeAxis !== next.resizeAxis ||
     previous.folderExpandState !== next.folderExpandState
   ) {
     return false;

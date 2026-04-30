@@ -25,6 +25,31 @@ const DOCUMENT_MAX_ZOOM = DOCUMENT_ZOOM_OPTIONS[DOCUMENT_ZOOM_OPTIONS.length - 1
 const CONTENT_WIDTH_PX = 768; // 48rem at 16px base
 const CONTENT_INITIAL_TOP = 68; // px — space below fixed header overlay
 const CONTENT_BOTTOM_PADDING = 32;
+const DOC_RENDER_MAX_CONCURRENT = 2;
+
+let activeDocumentPageRenders = 0;
+const documentPageRenderQueue: Array<() => void> = [];
+
+function scheduleDocumentPageRender<T>(task: () => Promise<T>): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const run = () => {
+      activeDocumentPageRenders += 1;
+      task()
+        .then(resolve, reject)
+        .finally(() => {
+          activeDocumentPageRenders = Math.max(0, activeDocumentPageRenders - 1);
+          const next = documentPageRenderQueue.shift();
+          next?.();
+        });
+    };
+
+    if (activeDocumentPageRenders < DOC_RENDER_MAX_CONCURRENT) {
+      run();
+    } else {
+      documentPageRenderQueue.push(run);
+    }
+  });
+}
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 
@@ -244,32 +269,38 @@ function PdfPage({
       setStatus('rendering');
 
       try {
-        const page = await pdf.getPage(pageNumber);
+        await scheduleDocumentPageRender(async () => {
+          if (cancelled) {
+            return;
+          }
 
-        if (cancelled) {
+          const page = await pdf.getPage(pageNumber);
+
+          if (cancelled) {
+            page.cleanup();
+            return;
+          }
+
+          const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
+          const canvas = canvasRef.current;
+          const ctx = canvas?.getContext('2d');
+
+          if (!canvas || !ctx) {
+            page.cleanup();
+            setStatus('error');
+            return;
+          }
+
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+          await renderTask.promise;
           page.cleanup();
-          return;
-        }
 
-        const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
-        const canvas = canvasRef.current;
-        const ctx = canvas?.getContext('2d');
-
-        if (!canvas || !ctx) {
-          page.cleanup();
-          setStatus('error');
-          return;
-        }
-
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
-        renderTask = page.render({ canvas, canvasContext: ctx, viewport });
-        await renderTask.promise;
-        page.cleanup();
-
-        if (!cancelled) {
-          setStatus('ready');
-        }
+          if (!cancelled) {
+            setStatus('ready');
+          }
+        });
       } catch {
         if (!cancelled) {
           setStatus('error');
@@ -697,11 +728,21 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         : vpRef.current.panX;
       vpRef.current.panX = newPanX;
       vpRef.current.panY = newPanY;
-      setPan({ x: newPanX, y: newPanY });
+      if (panRafRef.current === null) {
+        panRafRef.current = requestAnimationFrame(() => {
+          panRafRef.current = null;
+          setPan({ x: vpRef.current.panX, y: vpRef.current.panY });
+        });
+      }
     };
 
     const handlePointerUp = () => {
       isDraggingRef.current = false;
+      if (panRafRef.current !== null) {
+        cancelAnimationFrame(panRafRef.current);
+        panRafRef.current = null;
+        setPan({ x: vpRef.current.panX, y: vpRef.current.panY });
+      }
     };
 
     root.addEventListener('pointerdown', handlePointerDown);
@@ -790,7 +831,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     >
       {/* Canvas-style pan/zoom content layer */}
       <div
-        className="absolute left-0 top-0 pb-24"
+        className="absolute left-0 top-0 pb-24 [will-change:transform]"
         style={{
           width: CONTENT_WIDTH_PX,
           opacity: initialized ? 1 : 0,
