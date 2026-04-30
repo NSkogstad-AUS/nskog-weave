@@ -114,7 +114,7 @@ button {
 }
 
 .dark .canvas-surface {
-  background: #182235;
+  background: color-mix(in oklch, var(--sidebar), transparent 5%);
 }
 
 .soft-scrollbar {

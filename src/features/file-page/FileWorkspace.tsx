@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo } from 'react';
-import { ChevronLeftIcon, ChevronRightIcon, FileTextIcon } from 'lucide-react';
+import { ArrowLeftIcon, ArrowRightIcon, FileTextIcon } from 'lucide-react';
 
 import {
   collectFilesInFolder,
@@ -255,11 +255,11 @@ export function FileWorkspace({
   ]);
 
   const baseNavButtonClassName =
-    'pointer-events-auto flex size-9 items-center justify-center rounded-2xl border shadow-[0_14px_30px_-18px_rgba(15,23,42,0.28)] backdrop-blur-md transition';
+    'pointer-events-auto flex size-9 items-center justify-center rounded-2xl border shadow-sm backdrop-blur-md transition hover:scale-[1.03] active:scale-95 disabled:pointer-events-none';
   const activeNavButtonClassName =
-    'border-slate-200/85 bg-white/94 text-slate-700 hover:border-slate-300 hover:bg-white dark:border-slate-600/40 dark:bg-slate-800/84 dark:text-slate-100';
+    'border-sidebar-border bg-background/80 text-foreground hover:bg-background/95';
   const disabledNavButtonClassName =
-    'border-slate-200/70 bg-slate-100/88 text-slate-300 shadow-none dark:border-slate-700/35 dark:bg-slate-800/58 dark:text-slate-600';
+    'border-sidebar-border/70 bg-background/45 text-muted-foreground/55 shadow-none opacity-70';
 
   if ((!activeFile && !activeFolder) || !activeView) {
     return (
@@ -281,7 +281,7 @@ export function FileWorkspace({
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      <div className="pointer-events-none absolute left-4 top-4 z-40 flex items-center gap-2">
+      <div className="pointer-events-none absolute left-4 top-4 z-50 flex items-center gap-2">
         <button
           type="button"
           aria-label="Back"
@@ -289,7 +289,7 @@ export function FileWorkspace({
           onClick={onNavigateBack}
           className={`${baseNavButtonClassName} ${canNavigateBack ? activeNavButtonClassName : disabledNavButtonClassName}`}
         >
-          <ChevronLeftIcon className="size-4" />
+          <ArrowLeftIcon className="size-4" strokeWidth={2.7} />
         </button>
         <button
           type="button"
@@ -298,7 +298,7 @@ export function FileWorkspace({
           onClick={onNavigateForward}
           className={`${baseNavButtonClassName} ${canNavigateForward ? activeNavButtonClassName : disabledNavButtonClassName}`}
         >
-          <ChevronRightIcon className="size-4" />
+          <ArrowRightIcon className="size-4" strokeWidth={2.7} />
         </button>
       </div>
       <div className="min-h-0 flex flex-1">

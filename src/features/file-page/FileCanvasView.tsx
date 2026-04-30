@@ -2225,7 +2225,7 @@ export function FileCanvasView({
   return (
     <ContextMenu>
       <ContextMenuTrigger asChild>
-        <div className="flex h-full min-h-[34rem] overflow-hidden rounded-none border border-slate-200/80 bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:border-slate-600/45 dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]">
+        <div className="flex h-full min-h-[34rem] overflow-hidden rounded-none bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]">
           <div
             ref={canvasRef}
             onContextMenu={handleCanvasContextMenu}

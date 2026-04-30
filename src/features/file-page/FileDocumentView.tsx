@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { CheckIcon, MinusIcon, MoveIcon, PlusIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, MinusIcon, MoveIcon, PlusIcon } from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -449,6 +449,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [overlayInsets, setOverlayInsets] = useState({ left: 0, right: 0 });
   const [isFreePan, setIsFreePan] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
   const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
@@ -804,17 +805,50 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
       {/* Fixed title overlay */}
       <div
-        className="pointer-events-none fixed top-0 z-30 overflow-hidden"
+        className={`pointer-events-none fixed top-0 z-40 h-16 overflow-hidden border-b transition-[border-color,box-shadow] duration-300 ease-out ${
+          isHeaderCollapsed
+            ? 'border-transparent shadow-none'
+            : 'border-sidebar-border/35 shadow-[0_18px_42px_-34px_rgba(0,0,0,0.65)]'
+        }`}
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="absolute inset-0 bg-white/22 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_55%,rgba(0,0,0,0.4)_78%,transparent_100%)] dark:bg-sidebar/90" />
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0.22))] [mask-image:linear-gradient(to_bottom,black_0%,black_52%,rgba(0,0,0,0.3)_75%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01)_50%,rgba(255,255,255,0.03))]" />
-        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent dark:via-white/[0.07]" />
-        <div className="relative pb-10 pt-[22px] text-center">
-          <h1 className="truncate px-16 text-base font-semibold tracking-tight text-slate-700 dark:text-white/70">
+        <div
+          className={`absolute inset-0 bg-sidebar/76 backdrop-blur-xl transition-opacity duration-300 ease-out ${
+            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
+          }`}
+        />
+        <div
+          className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent transition-opacity duration-300 ease-out ${
+            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
+          }`}
+        />
+        <div
+          className={`absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012)_52%,rgba(0,0,0,0.045))] transition-opacity duration-300 ease-out ${
+            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
+          }`}
+        />
+        <div
+          className={`relative flex h-full items-center justify-center px-28 text-center transition-[opacity,transform] duration-300 ease-out ${
+            isHeaderCollapsed ? '-translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
+          }`}
+        >
+          <h1 className="truncate text-[0.95rem] font-semibold tracking-tight text-sidebar-foreground/78">
             {file.label}
           </h1>
         </div>
+        <button
+          type="button"
+          aria-label={isHeaderCollapsed ? 'Show title bar' : 'Hide title bar'}
+          aria-expanded={!isHeaderCollapsed}
+          onClick={() => setIsHeaderCollapsed((value) => !value)}
+          className="pointer-events-auto absolute right-4 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-2xl border border-sidebar-border bg-background/80 text-foreground shadow-sm backdrop-blur-md transition-[background-color,transform,box-shadow] duration-200 hover:bg-background/95 active:scale-95"
+        >
+          {isHeaderCollapsed ? (
+            <ChevronDownIcon className="size-4" strokeWidth={2.7} />
+          ) : (
+            <ChevronUpIcon className="size-4" strokeWidth={2.7} />
+          )}
+        </button>
       </div>
 
       {/* Zoom controls */}
