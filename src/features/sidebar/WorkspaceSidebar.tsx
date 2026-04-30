@@ -1,4 +1,5 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import { SettingsPopover } from './SettingsPopover';
 import { ArrowUpDownIcon, ListFilterIcon, SearchIcon } from 'lucide-react';
 
 import {
@@ -496,6 +497,9 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
           <div className="flex w-[4.25rem] shrink-0 flex-col border-r border-sidebar-border/80">
             <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80 px-2">
               <SidebarTrigger className="size-9 rounded-2xl border border-sidebar-border bg-background/80 shadow-sm" />
+            </div>
+            <div className="mt-auto flex items-center justify-center border-t border-sidebar-border/80 p-2">
+              <SettingsPopover />
             </div>
           </div>
 

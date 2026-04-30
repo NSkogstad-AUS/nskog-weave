@@ -45,7 +45,7 @@ import { buildUploadedWorkspaceFile } from '@/lib/workspaceFiles';
 import { WorkspaceSidebar } from './features/sidebar/WorkspaceSidebar';
 import type { SidebarSelectableItem } from './features/sidebar/sidebar-tree';
 import { useFilePages } from './hooks/useFilePages';
-import { useSystemTheme } from './hooks/use-system-theme';
+import { useTheme } from './hooks/use-theme';
 import type { FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
 
 const WORKSPACE_FOLDERS_STORAGE_KEY = 'weave:workspace-folders:v1';
@@ -544,7 +544,7 @@ function isValidNavigationRoute(
 }
 
 function App() {
-  useSystemTheme();
+  useTheme();
   const [folders, setFolders] = useState<WorkspaceFolder[]>(hydrateWorkspaceFolders);
   const [folderCanvasPages, setFolderCanvasPages] = useState<FolderCanvasStore>(
     readStoredFolderCanvasNodes,
