@@ -317,7 +317,7 @@ function PdfPage({
   return (
     <div
       ref={rootRef}
-      className="relative overflow-hidden rounded-xl border border-slate-200/80 bg-white shadow-[0_2px_12px_rgba(15,23,42,0.07)] dark:border-slate-600/40 dark:bg-slate-900/30"
+      className="relative overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-[0_2px_16px_rgba(15,23,42,0.08)] dark:border-white/[0.07] dark:bg-white dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_8px_40px_rgba(0,0,0,0.55)]"
       style={status === 'ready' ? undefined : { minHeight: 420 }}
     >
       <canvas
@@ -785,7 +785,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   return (
     <div
       ref={rootRef}
-      className="relative h-full overflow-hidden bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
+      className="relative h-full overflow-hidden bg-sidebar/95 text-sidebar-foreground"
     >
       {/* Canvas-style pan/zoom content layer */}
       <div
@@ -807,10 +807,11 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         className="pointer-events-none fixed top-0 z-30 overflow-hidden"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="absolute inset-0 bg-white/22 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_55%,rgba(0,0,0,0.4)_78%,transparent_100%)] dark:bg-[rgba(15,23,42,0.22)]" />
-        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0.22))] [mask-image:linear-gradient(to_bottom,black_0%,black_52%,rgba(0,0,0,0.3)_75%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(148,163,184,0.14),rgba(15,23,42,0.08)_50%,rgba(255,255,255,0.04))]" />
+        <div className="absolute inset-0 bg-white/22 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_55%,rgba(0,0,0,0.4)_78%,transparent_100%)] dark:bg-sidebar/90" />
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.55),rgba(255,255,255,0.08)_48%,rgba(255,255,255,0.22))] [mask-image:linear-gradient(to_bottom,black_0%,black_52%,rgba(0,0,0,0.3)_75%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(255,255,255,0.04),rgba(255,255,255,0.01)_50%,rgba(255,255,255,0.03))]" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/10 to-transparent dark:via-white/[0.07]" />
         <div className="relative pb-10 pt-[22px] text-center">
-          <h1 className="truncate px-16 text-base font-semibold tracking-tight text-slate-700 dark:text-white/80">
+          <h1 className="truncate px-16 text-base font-semibold tracking-tight text-slate-700 dark:text-white/70">
             {file.label}
           </h1>
         </div>
@@ -821,12 +822,12 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         className="pointer-events-none fixed bottom-4 z-30 flex justify-center px-4"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="pointer-events-auto flex items-center rounded-xl border border-slate-200/85 bg-white/94 p-1 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.42)] backdrop-blur-md dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.9)]">
+        <div className="pointer-events-auto flex items-center rounded-xl border border-slate-200/85 bg-white/94 p-1 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.42)] backdrop-blur-md dark:border-white/[0.08] dark:bg-slate-900/95 dark:shadow-[0_18px_44px_-30px_rgba(0,0,0,0.7)]">
           <button
             type="button"
             disabled={!canZoomOut}
             onClick={() => applyZoomCentred(getPreviousZoomOption(zoomPercent))}
-            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
+            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
             aria-label="Zoom out"
           >
             <MinusIcon className="size-4" />
@@ -836,37 +837,37 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             <button
               type="button"
               onClick={() => setIsDropdownOpen((v) => !v)}
-              className="flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
+              className="flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/8 dark:hover:text-slate-100"
               aria-label={`Zoom level: ${zoomPercent}%`}
             >
               {zoomPercent}%
             </button>
 
             {isDropdownOpen && (
-              <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-10 min-w-[8.5rem] -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200/85 bg-white/96 py-1 shadow-lg backdrop-blur-md dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.96)]">
+              <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-10 min-w-[8.5rem] -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200/85 bg-white/96 py-1 shadow-lg backdrop-blur-md dark:border-white/[0.07] dark:bg-slate-900/98">
                 {DOCUMENT_ZOOM_OPTIONS.map((option) => (
                   <button
                     key={option}
                     type="button"
                     onClick={() => { applyZoomCentred(option); setIsDropdownOpen(false); }}
-                    className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-slate-700/45"
+                    className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-white/8"
                   >
-                    <span className={zoomPercent === option ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}>
+                    <span className={zoomPercent === option ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}>
                       {option}%
                     </span>
-                    {zoomPercent === option && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-400" />}
+                    {zoomPercent === option && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-500" />}
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-slate-600/50" />
+          <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-white/[0.08]" />
 
           <button
             type="button"
             onClick={() => isFreePan ? resetZoom() : (setIsFreePan(true), isFreePanRef.current = true)}
-            className={`flex size-8 items-center justify-center rounded-lg transition ${isFreePan ? 'bg-slate-100 text-slate-900 dark:bg-slate-700/55 dark:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700/45 dark:hover:text-slate-300'}`}
+            className={`flex size-8 items-center justify-center rounded-lg transition ${isFreePan ? 'bg-slate-100 text-slate-900 dark:bg-white/10 dark:text-slate-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-400'}`}
             aria-label={isFreePan ? 'Exit freeform pan' : 'Enter freeform pan'}
           >
             <MoveIcon className="size-4" />
@@ -876,7 +877,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             type="button"
             disabled={!canZoomIn}
             onClick={() => applyZoomCentred(getNextZoomOption(zoomPercent))}
-            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-200 dark:hover:bg-slate-700/45 dark:disabled:text-slate-600"
+            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
             aria-label="Zoom in"
           >
             <PlusIcon className="size-4" />
