@@ -24,6 +24,7 @@ const DOCUMENT_MIN_ZOOM = DOCUMENT_ZOOM_OPTIONS[0];
 const DOCUMENT_MAX_ZOOM = DOCUMENT_ZOOM_OPTIONS[DOCUMENT_ZOOM_OPTIONS.length - 1];
 const CONTENT_WIDTH_PX = 768; // 48rem at 16px base
 const CONTENT_INITIAL_TOP = 144; // px — space below fixed header overlay
+const CONTENT_BOTTOM_PADDING = 32;
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
 
@@ -436,6 +437,7 @@ interface FileDocumentViewProps {
 
 export function FileDocumentView({ file }: FileDocumentViewProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
+  const contentRef = useRef<HTMLDivElement | null>(null);
   const kind = detectKind(file.label, file.mimeType);
   const ext = file.label.split('.').pop()?.toLowerCase() ?? '';
   const text = file.contentText ?? '';
@@ -450,6 +452,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
   const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
+  const contentHeightRef = useRef(0);
   const isFreePanRef = useRef(false);
   const zoomRafRef = useRef<number | null>(null);
   const pendingZoomRef = useRef<{ cx: number; cy: number; zoom: number } | null>(null);
@@ -462,6 +465,20 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const canZoomOut = zoomPercent > DOCUMENT_MIN_ZOOM;
   const canZoomIn = zoomPercent < DOCUMENT_MAX_ZOOM;
 
+  const clampPanY = useCallback((candidateY: number, nextZoomPercent = vpRef.current.zoomPercent) => {
+    const root = rootRef.current;
+    if (!root) {
+      return Math.min(CONTENT_INITIAL_TOP, candidateY);
+    }
+
+    const scaledHeight = contentHeightRef.current * (nextZoomPercent / 100);
+    const minY = scaledHeight + CONTENT_INITIAL_TOP + CONTENT_BOTTOM_PADDING <= root.clientHeight
+      ? CONTENT_INITIAL_TOP
+      : root.clientHeight - scaledHeight - CONTENT_BOTTOM_PADDING;
+
+    return Math.max(minY, Math.min(CONTENT_INITIAL_TOP, candidateY));
+  }, []);
+
   // Center content horizontally on first layout
   useLayoutEffect(() => {
     const root = rootRef.current;
@@ -471,6 +488,37 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     setPan({ x, y: CONTENT_INITIAL_TOP });
     setInitialized(true);
   }, [initialized]);
+
+  useLayoutEffect(() => {
+    const content = contentRef.current;
+    if (!content) return undefined;
+
+    const updateContentHeight = () => {
+      contentHeightRef.current = content.scrollHeight;
+      const clampedY = clampPanY(vpRef.current.panY, vpRef.current.zoomPercent);
+
+      if (clampedY !== vpRef.current.panY) {
+        vpRef.current = {
+          ...vpRef.current,
+          panY: clampedY,
+        };
+        setPan({ x: vpRef.current.panX, y: clampedY });
+      }
+    };
+
+    updateContentHeight();
+
+    const resizeObserver = new ResizeObserver(() => {
+      window.requestAnimationFrame(updateContentHeight);
+    });
+    resizeObserver.observe(content);
+    window.addEventListener('resize', updateContentHeight);
+
+    return () => {
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateContentHeight);
+    };
+  }, [clampPanY, file.id, kind]);
 
   // Keep vpRef and isFreePanRef in sync with React state
   useEffect(() => {
@@ -485,25 +533,26 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     if (bounded === curZoom) return;
     const factor = bounded / curZoom;
     const newPanX = cx + (panX - cx) * factor;
-    const newPanY = cy + (panY - cy) * factor;
+    const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
     isFreePanRef.current = true;
     vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
     setIsFreePan(true);
     setZoomPercent(bounded);
     setPan({ x: newPanX, y: newPanY });
-  }, []);
+  }, [clampPanY]);
 
   // +/- buttons and dropdown zoom steps: always centred, never free-form
   const applyZoomCentred = useCallback((nextZoomPercent: number) => {
     const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, nextZoomPercent));
     const root = rootRef.current;
     const centredX = root ? Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2) : vpRef.current.panX;
+    const clampedY = clampPanY(vpRef.current.panY, bounded);
     isFreePanRef.current = false;
-    vpRef.current = { zoomPercent: bounded, panX: centredX, panY: vpRef.current.panY };
+    vpRef.current = { zoomPercent: bounded, panX: centredX, panY: clampedY };
     setIsFreePan(false);
     setZoomPercent(bounded);
-    setPan({ x: centredX, y: vpRef.current.panY });
-  }, []);
+    setPan({ x: centredX, y: clampedY });
+  }, [clampPanY]);
 
   const resetZoom = useCallback(() => {
     const root = rootRef.current;
@@ -550,10 +599,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         if (isFreePanRef.current) {
           vpRef.current.panX -= event.deltaX;
         }
-        vpRef.current.panY = Math.min(
-          CONTENT_INITIAL_TOP,
-          vpRef.current.panY - event.deltaY,
-        );
+        vpRef.current.panY = clampPanY(vpRef.current.panY - event.deltaY);
 
         if (panRafRef.current === null) {
           panRafRef.current = requestAnimationFrame(() => {
@@ -571,7 +617,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       if (panRafRef.current !== null) { cancelAnimationFrame(panRafRef.current); panRafRef.current = null; }
       root.removeEventListener('wheel', handleWheel);
     };
-  }, [applyZoomAt]);
+  }, [applyZoomAt, clampPanY]);
 
   // Middle-mouse drag to pan
   useEffect(() => {
@@ -593,8 +639,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
     const handlePointerMove = (event: PointerEvent) => {
       if (!isDraggingRef.current) return;
-      const newPanY = Math.min(
-        CONTENT_INITIAL_TOP,
+      const newPanY = clampPanY(
         dragStartRef.current.panY + (event.clientY - dragStartRef.current.clientY),
       );
       // In centred mode, horizontal drag is locked
@@ -621,7 +666,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       root.removeEventListener('pointerup', handlePointerUp);
       root.removeEventListener('pointercancel', handlePointerUp);
     };
-  }, []);
+  }, [clampPanY]);
 
   // Close dropdown when clicking outside
   useEffect(() => {
@@ -704,16 +749,21 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           transform: `translate(${pan.x}px, ${pan.y}px) scale(${scale})`,
         } as CSSProperties}
       >
-        {documentContent}
+        <div ref={contentRef}>
+          {documentContent}
+        </div>
       </div>
 
       {/* Fixed title overlay */}
       <div
-        className="pointer-events-none fixed top-0 z-30 bg-white/88 dark:bg-[rgba(30,41,59,0.68)]"
+        className="pointer-events-none fixed top-0 z-30 overflow-hidden shadow-[0_18px_44px_-34px_rgba(15,23,42,0.48)]"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="mx-auto max-w-3xl px-8 pt-10">
-          <div className="border-b border-slate-200/80 pb-6 dark:border-slate-600/35">
+        <div className="absolute inset-0 bg-white/58 backdrop-blur-2xl [mask-image:linear-gradient(to_bottom,black_0%,black_72%,rgba(0,0,0,0.72)_88%,transparent_100%)] dark:bg-[rgba(15,23,42,0.34)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(255,255,255,0.74),rgba(255,255,255,0.2)_48%,rgba(255,255,255,0.42))] [mask-image:linear-gradient(to_bottom,black_0%,black_70%,rgba(0,0,0,0.68)_86%,transparent_100%)] dark:bg-[linear-gradient(135deg,rgba(148,163,184,0.24),rgba(15,23,42,0.18)_50%,rgba(255,255,255,0.08))]" />
+        <div className="absolute inset-x-0 bottom-0 h-px bg-gradient-to-r from-transparent via-white/55 to-transparent dark:via-white/12" />
+        <div className="relative mx-auto max-w-3xl px-8 pt-10">
+          <div className="border-b border-white/58 pb-6 dark:border-white/10">
             <h1 className="truncate text-2xl font-bold tracking-tight text-slate-900 dark:text-white">
               {file.label}
             </h1>
@@ -778,7 +828,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
                     onClick={() => { setIsFreePan(true); isFreePanRef.current = true; setIsDropdownOpen(false); }}
                     className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700/45"
                   >
-                    Unbounded
+                    Freeform
                   </button>
                 </div>
               )}
