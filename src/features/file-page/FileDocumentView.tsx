@@ -576,10 +576,11 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           ? (root.clientWidth - scaledWidth) / 2
           : Math.max(32, (root.clientWidth - scaledWidth) / 2)
         : panX;
-      const clampedY = clampPanY(panY, bounded);
-      vpRef.current = { zoomPercent: bounded, panX: centredX, panY: clampedY };
+      const factor = bounded / curZoom;
+      const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
+      vpRef.current = { zoomPercent: bounded, panX: centredX, panY: newPanY };
       setZoomPercent(bounded);
-      setPan({ x: centredX, y: clampedY });
+      setPan({ x: centredX, y: newPanY });
     }
   }, [clampPanX, clampPanY]);
 
