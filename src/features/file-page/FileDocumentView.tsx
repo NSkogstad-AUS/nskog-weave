@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { CheckIcon, MinusIcon, PlusIcon } from 'lucide-react';
+import { CheckIcon, MinusIcon, MoveIcon, PlusIcon } from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -556,19 +556,31 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     isFreePanRef.current = isFreePan;
   }, [zoomPercent, pan, isFreePan]);
 
-  // Touchpad pinch-zoom: zooms at the cursor and enters free-form mode
+  // Touchpad pinch-zoom: zooms at cursor in freeform mode, stays centred otherwise
   const applyZoomAt = useCallback((nextZoomPercent: number, cx: number, cy: number) => {
     const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, Math.round(nextZoomPercent)));
     const { zoomPercent: curZoom, panX, panY } = vpRef.current;
     if (bounded === curZoom) return;
-    const factor = bounded / curZoom;
-    const newPanX = clampPanX(cx + (panX - cx) * factor, bounded);
-    const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
-    isFreePanRef.current = true;
-    vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
-    setIsFreePan(true);
-    setZoomPercent(bounded);
-    setPan({ x: newPanX, y: newPanY });
+    if (isFreePanRef.current) {
+      const factor = bounded / curZoom;
+      const newPanX = clampPanX(cx + (panX - cx) * factor, bounded);
+      const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
+      vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
+      setZoomPercent(bounded);
+      setPan({ x: newPanX, y: newPanY });
+    } else {
+      const root = rootRef.current;
+      const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
+      const centredX = root
+        ? scaledWidth >= root.clientWidth
+          ? (root.clientWidth - scaledWidth) / 2
+          : Math.max(32, (root.clientWidth - scaledWidth) / 2)
+        : panX;
+      const clampedY = clampPanY(panY, bounded);
+      vpRef.current = { zoomPercent: bounded, panX: centredX, panY: clampedY };
+      setZoomPercent(bounded);
+      setPan({ x: centredX, y: clampedY });
+    }
   }, [clampPanX, clampPanY]);
 
   // +/- buttons and dropdown zoom steps: always centred, never free-form
@@ -819,53 +831,45 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             <MinusIcon className="size-4" />
           </button>
 
-          {isFreePan ? (
+          <div className="relative mx-1" ref={dropdownRef}>
             <button
               type="button"
-              onClick={resetZoom}
-              className="mx-1 flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
-              aria-label="Reset zoom to 100%"
+              onClick={() => setIsDropdownOpen((v) => !v)}
+              className="flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
+              aria-label={`Zoom level: ${zoomPercent}%`}
             >
-              Reset
+              {zoomPercent}%
             </button>
-          ) : (
-            <div className="relative mx-1" ref={dropdownRef}>
-              <button
-                type="button"
-                onClick={() => setIsDropdownOpen((v) => !v)}
-                className="flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-100 dark:hover:bg-slate-700/45"
-                aria-label={`Zoom level: ${zoomPercent}%`}
-              >
-                {zoomPercent}%
-              </button>
 
-              {isDropdownOpen && (
-                <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-10 min-w-[8.5rem] -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200/85 bg-white/96 py-1 shadow-lg backdrop-blur-md dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.96)]">
-                  {DOCUMENT_ZOOM_OPTIONS.map((option) => (
-                    <button
-                      key={option}
-                      type="button"
-                      onClick={() => { applyZoomCentred(option); setIsDropdownOpen(false); }}
-                      className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-slate-700/45"
-                    >
-                      <span className={zoomPercent === option ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}>
-                        {option}%
-                      </span>
-                      {zoomPercent === option && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-400" />}
-                    </button>
-                  ))}
-                  <div className="mx-2.5 my-1 border-t border-slate-200/70 dark:border-slate-600/35" />
+            {isDropdownOpen && (
+              <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-10 min-w-[8.5rem] -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200/85 bg-white/96 py-1 shadow-lg backdrop-blur-md dark:border-slate-600/40 dark:bg-[rgba(30,41,59,0.96)]">
+                {DOCUMENT_ZOOM_OPTIONS.map((option) => (
                   <button
+                    key={option}
                     type="button"
-                    onClick={() => { setIsFreePan(true); isFreePanRef.current = true; setIsDropdownOpen(false); }}
-                    className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs text-slate-600 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-700/45"
+                    onClick={() => { applyZoomCentred(option); setIsDropdownOpen(false); }}
+                    className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-slate-700/45"
                   >
-                    Freeform
+                    <span className={zoomPercent === option ? 'font-semibold text-slate-900 dark:text-white' : 'text-slate-600 dark:text-slate-300'}>
+                      {option}%
+                    </span>
+                    {zoomPercent === option && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-400" />}
                   </button>
-                </div>
-              )}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-slate-600/50" />
+
+          <button
+            type="button"
+            onClick={() => isFreePan ? resetZoom() : (setIsFreePan(true), isFreePanRef.current = true)}
+            className={`flex size-8 items-center justify-center rounded-lg transition ${isFreePan ? 'bg-slate-100 text-slate-900 dark:bg-slate-700/55 dark:text-white' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-500 dark:hover:bg-slate-700/45 dark:hover:text-slate-300'}`}
+            aria-label={isFreePan ? 'Exit freeform pan' : 'Enter freeform pan'}
+          >
+            <MoveIcon className="size-4" />
+          </button>
 
           <button
             type="button"
