@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, MinusIcon, MoveIcon, PlusIcon, StickyNoteIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DownloadIcon, MinusIcon, MoveIcon, PlusIcon, StickyNoteIcon } from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -379,11 +379,13 @@ function PdfDocument({
   isNotesOpen,
   pageNotes,
   onNoteChange,
+  onPageCount,
 }: {
   fileId: string;
   isNotesOpen: boolean;
   pageNotes: Record<number, string>;
   onNoteChange: (page: number, text: string) => void;
+  onPageCount: (count: number) => void;
 }) {
   const [state, setState] = useState<PdfDocState>({ status: 'loading' });
 
@@ -418,10 +420,12 @@ function PdfDocument({
           return;
         }
 
+        const pageCount = Math.min(loadedPdf.numPages, DOC_MAX_PAGES);
+        onPageCount(pageCount);
         setState({
           status: 'ready',
           pdf: loadedPdf,
-          pageCount: Math.min(loadedPdf.numPages, DOC_MAX_PAGES),
+          pageCount,
           totalPageCount: loadedPdf.numPages,
         });
       } catch {
@@ -510,6 +514,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
   const [pageNotes, setPageNotes] = useState<Record<number, string>>({});
+  const [pdfPageCount, setPdfPageCount] = useState(0);
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
   const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
@@ -716,9 +721,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         const cy = event.clientY - rect.top;
         const baseZoom = pendingZoomRef.current?.zoom ?? vpRef.current.zoomPercent;
         const factor = Math.exp(-event.deltaY * 0.005);
+        const maxZoom = isNotesOpenRef.current ? NOTES_MAX_ZOOM : DOCUMENT_MAX_ZOOM;
         const nextZoom = Math.max(
           DOCUMENT_MIN_ZOOM,
-          Math.min(DOCUMENT_MAX_ZOOM, Math.round(baseZoom * factor)),
+          Math.min(maxZoom, Math.round(baseZoom * factor)),
         );
 
         pendingZoomRef.current = { cx, cy, zoom: nextZoom };
@@ -856,12 +862,32 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     };
   }, []);
 
+  const downloadNotes = useCallback(() => {
+    if (pdfPageCount === 0) return;
+    const lines: string[] = [];
+    for (let page = 1; page <= pdfPageCount; page++) {
+      const note = pageNotes[page]?.trim();
+      if (!note) continue;
+      lines.push(`### Page ${page}:`);
+      note.split('\n').filter((l) => l.trim()).forEach((l) => lines.push(`- ${l.trim()}`));
+      lines.push('');
+    }
+    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${file.label.replace(/\.[^.]+$/, '')}_notes.md`;
+    a.click();
+    URL.revokeObjectURL(url);
+  }, [pdfPageCount, pageNotes, file.label]);
+
   const documentContent = kind === 'pdf' ? (
     <PdfDocument
       fileId={file.id}
       isNotesOpen={isNotesOpen}
       pageNotes={pageNotes}
       onNoteChange={(page, text) => setPageNotes((prev) => ({ ...prev, [page]: text }))}
+      onPageCount={setPdfPageCount}
     />
   ) : kind === 'markdown' && hasText ? (
     <MarkdownDocument text={text} />
@@ -1057,6 +1083,16 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           </button>
 
           <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-white/[0.08]" />
+
+          <button
+            type="button"
+            onClick={downloadNotes}
+            disabled={pdfPageCount === 0}
+            className="flex size-8 items-center justify-center rounded-lg transition text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-400 dark:disabled:text-slate-700"
+            aria-label="Download notes as markdown"
+          >
+            <DownloadIcon className="size-4" />
+          </button>
 
           <button
             type="button"
