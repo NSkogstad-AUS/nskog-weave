@@ -25,7 +25,13 @@ import {
   WORKER_CONNECTION_THRESHOLD_X,
   WORKER_CONNECTION_THRESHOLD_Y,
 } from './canvasUtils';
-import { CANVAS_WORLD_LIMIT, SLOT_STEP_X, SLOT_STEP_Y } from './constants';
+import {
+  CANVAS_WORLD_LIMIT,
+  GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_TOP,
+  SLOT_STEP_X,
+  SLOT_STEP_Y,
+} from './constants';
 import type { NodeBounds, SharedOuterSnapTarget, OuterSnapTarget } from './canvasTypes';
 
 interface UseCanvasLayoutOptions {
@@ -35,6 +41,15 @@ interface UseCanvasLayoutOptions {
   draftPositionsRef: RefObject<Record<string, Point>>;
   draftSizesRef: RefObject<Record<string, FilePageNode['size']>>;
   getNodeById: (id: string) => FilePageNode | undefined;
+}
+
+function getOuterSnapPosition(node: FilePageNode, position: Point): Point {
+  return node.kind === 'group'
+    ? {
+        x: position.x - GROUP_CONTENT_INSET_LEFT,
+        y: position.y - GROUP_CONTENT_INSET_TOP,
+      }
+    : position;
 }
 
 // ─── Hook ─────────────────────────────────────────────────────────────────────
@@ -551,10 +566,7 @@ export function useCanvasLayout({
         if (distance <= OUTER_WIDGET_SNAP_THRESHOLD && distance < closestDistance) {
           closestTarget = {
             nodeId: candidate.id,
-            origin:
-              candidate.kind === 'group'
-                ? { x: origin.x - SLOT_STEP_X, y: origin.y - SLOT_STEP_Y }
-                : origin,
+            origin: getOuterSnapPosition(candidate, origin),
           };
           closestDistance = distance;
         }
@@ -584,17 +596,12 @@ export function useCanvasLayout({
 
       if (!canUseOuterSnap) return null;
 
-      const getSnapSpacePosition = (node: FilePageNode, pos: Point): Point =>
-        node.kind === 'group'
-          ? { x: pos.x - SLOT_STEP_X, y: pos.y - SLOT_STEP_Y }
-          : pos;
-
       const baseAnchorId = dragNodeIds[0];
       const baseAnchorNode = getNodeById(baseAnchorId);
       const baseAnchorPos = basePositions[baseAnchorId] ?? desiredPositions[baseAnchorId] ?? baseAnchorNode?.position;
       if (!baseAnchorNode || !baseAnchorPos) return null;
 
-      const baseAnchorSnapPos = getSnapSpacePosition(baseAnchorNode, baseAnchorPos);
+      const baseAnchorSnapPos = getOuterSnapPosition(baseAnchorNode, baseAnchorPos);
 
       for (const triggerNodeId of dragNodeIds) {
         const nearbyTarget = getNearbyOuterGridOrigin(triggerNodeId, desiredPositions, dragNodeIds);
@@ -604,7 +611,7 @@ export function useCanvasLayout({
         const triggerBasePos = basePositions[triggerNodeId] ?? desiredPositions[triggerNodeId] ?? triggerNode?.position;
         if (!triggerNode || !triggerBasePos) continue;
 
-        const triggerBaseSnapPos = getSnapSpacePosition(triggerNode, triggerBasePos);
+        const triggerBaseSnapPos = getOuterSnapPosition(triggerNode, triggerBasePos);
         const offsetX = triggerBaseSnapPos.x - baseAnchorSnapPos.x;
         const offsetY = triggerBaseSnapPos.y - baseAnchorSnapPos.y;
         const resolvedOrigin = nearbyTarget.origin;
@@ -625,10 +632,7 @@ export function useCanvasLayout({
 
         const targetSize = draftSizesRef.current[nearbyTarget.nodeId] ?? targetNode.size;
         const triggerSize = draftSizesRef.current[triggerNodeId] ?? triggerNode.size;
-        const targetSnapPos =
-          targetNode.kind === 'group'
-            ? { x: targetPos.x - SLOT_STEP_X, y: targetPos.y - SLOT_STEP_Y }
-            : targetPos;
+        const targetSnapPos = getOuterSnapPosition(targetNode, targetPos);
         const needsEdgeCandidates = triggerNode.kind === 'group' || targetNode.kind === 'group';
         const outsideTopY = targetSnapPos.y - triggerSize.heightUnits * SLOT_STEP_Y - offsetY;
         const outsideBottomY = targetSnapPos.y + targetSize.heightUnits * SLOT_STEP_Y - offsetY;
