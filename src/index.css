@@ -226,3 +226,59 @@ button {
     @apply font-sans;
   }
 }
+
+/* ── Note editor (Tiptap) ──────────────────────────────────────────────────── */
+.note-editor,
+.note-preview {
+  min-height: 0;
+}
+.note-editor .ProseMirror,
+.note-preview {
+  outline: none;
+  min-height: 100%;
+  font-size: var(--note-editor-font-size, 0.84rem);
+  line-height: 1.6;
+}
+.note-editor .ProseMirror {
+  padding: 0.75rem 1rem;
+}
+.note-editor .ProseMirror > * + *,
+.note-preview > * + * { margin-top: 0.35em; }
+.note-editor .ProseMirror p,
+.note-preview p { margin: 0; }
+.note-editor .ProseMirror h1,
+.note-preview h1 { font-size: 1.25em; font-weight: 700; margin-top: 0.5em; }
+.note-editor .ProseMirror h2,
+.note-preview h2 { font-size: 1.12em; font-weight: 650; margin-top: 0.5em; }
+.note-editor .ProseMirror h3,
+.note-preview h3 { font-size: 1em; font-weight: 650; margin-top: 0.4em; }
+.note-editor .ProseMirror strong,
+.note-preview strong { font-weight: 700; }
+.note-editor .ProseMirror em,
+.note-preview em { font-style: italic; }
+.note-editor .ProseMirror u,
+.note-preview u { text-decoration: underline; }
+.note-editor .ProseMirror s,
+.note-preview s { text-decoration: line-through; }
+.note-editor .ProseMirror ul,
+.note-preview ul { list-style-type: disc; padding-left: 1.2em; }
+.note-editor .ProseMirror ol,
+.note-preview ol { list-style-type: decimal; padding-left: 1.2em; }
+.note-editor .ProseMirror li,
+.note-preview li { margin-top: 0.1em; }
+.note-editor .ProseMirror li p,
+.note-preview li p { margin: 0; }
+.note-editor .ProseMirror hr,
+.note-preview hr { border: none; border-top: 1px solid currentColor; opacity: 0.18; margin: 0.5em 0; }
+.note-editor .ProseMirror blockquote,
+.note-preview blockquote { border-left: 2px solid currentColor; padding-left: 0.6em; opacity: 0.65; }
+.note-editor .ProseMirror code,
+.note-preview code { font-family: monospace; font-size: 0.9em; background: rgba(0,0,0,0.06); border-radius: 3px; padding: 0 3px; }
+.note-preview pre { font-family: monospace; font-size: 0.9em; white-space: pre-wrap; }
+.note-editor .ProseMirror p.is-editor-empty:first-child::before {
+  content: attr(data-placeholder);
+  float: left;
+  pointer-events: none;
+  height: 0;
+  opacity: 0.3;
+}

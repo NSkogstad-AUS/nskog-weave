@@ -1,7 +1,26 @@
-import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, DownloadIcon, MinusIcon, MoveIcon, PlusIcon, StickyNoteIcon } from 'lucide-react';
+import type { Editor } from '@tiptap/core';
+import { useEditor, EditorContent } from '@tiptap/react';
+import StarterKit from '@tiptap/starter-kit';
+import TiptapUnderline from '@tiptap/extension-underline';
+import {
+  BoldIcon,
+  CheckIcon,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  DownloadIcon,
+  Heading1Icon,
+  Heading2Icon,
+  Heading3Icon,
+  ItalicIcon,
+  MinusIcon,
+  MoveIcon,
+  PlusIcon,
+  StickyNoteIcon,
+  UnderlineIcon,
+} from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -29,6 +48,14 @@ const NOTES_PANEL_WIDTH = 384; // px — matches w-96 Tailwind class
 const NOTES_PANEL_GAP = 24; // gap between content and notes panel (fixed overlay fallback)
 const NOTES_FLEX_GAP = 16; // ml-4 in px — gap used in the in-canvas flex row
 const DOC_RENDER_MAX_CONCURRENT = 2;
+const EMPTY_PAGE_NOTES: Record<number, string> = {};
+const NOTE_EDITOR_EXTENSIONS = [
+  StarterKit.configure({
+    heading: { levels: [1, 2, 3] },
+    underline: false,
+  }),
+  TiptapUnderline,
+];
 
 let activeDocumentPageRenders = 0;
 const documentPageRenderQueue: Array<() => void> = [];
@@ -224,6 +251,475 @@ function MarkdownDocument({ text }: { text: string }) {
   return <div className="space-y-1">{blocks}</div>;
 }
 
+// ─── Rich notes editor ────────────────────────────────────────────────────────
+
+type HeadingLevel = 1 | 2 | 3;
+
+function escapeHtml(raw: string) {
+  return raw
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function noteValueToEditorContent(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return '';
+  if (/<\/?[a-z][\s\S]*>/i.test(trimmed)) return value;
+
+  return trimmed
+    .split(/\n{2,}/)
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, '<br />')}</p>`)
+    .join('');
+}
+
+function stripNoteHtml(value: string) {
+  return value
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<hr\s*\/?>/gi, '\n---\n')
+    .replace(/<\/(p|div|h[1-6]|li|blockquote)>/gi, '\n')
+    .replace(/<[^>]+>/g, '')
+    .replace(/&nbsp;/g, ' ')
+    .replace(/&amp;/g, '&')
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .trim();
+}
+
+function isNoteMeaningful(value: string) {
+  const html = noteValueToEditorContent(value).trim();
+  return Boolean(html && (/<hr\b/i.test(html) || stripNoteHtml(html).length > 0));
+}
+
+function inlineMarkdownFromNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.replace(/\u00a0/g, ' ') ?? '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
+
+  const element = node as HTMLElement;
+  const content = Array.from(element.childNodes).map(inlineMarkdownFromNode).join('');
+
+  switch (element.tagName) {
+    case 'BR':
+      return '\n';
+    case 'STRONG':
+    case 'B':
+      return content ? `**${content}**` : '';
+    case 'EM':
+    case 'I':
+      return content ? `*${content}*` : '';
+    case 'U':
+      return content ? `<u>${content}</u>` : '';
+    case 'S':
+    case 'DEL':
+      return content ? `~~${content}~~` : '';
+    case 'CODE':
+      return content ? `\`${content.replace(/`/g, '\\`')}\`` : '';
+    default:
+      return content;
+  }
+}
+
+function listItemMarkdown(element: HTMLElement, ordered: boolean, index: number) {
+  const nestedLists: HTMLElement[] = [];
+  const ownContent = Array.from(element.childNodes)
+    .map((child) => {
+      if (child.nodeType === Node.ELEMENT_NODE) {
+        const childElement = child as HTMLElement;
+        if (childElement.tagName === 'UL' || childElement.tagName === 'OL') {
+          nestedLists.push(childElement);
+          return '';
+        }
+        if (childElement.tagName === 'P') {
+          return Array.from(childElement.childNodes).map(inlineMarkdownFromNode).join('');
+        }
+      }
+      return blockMarkdownFromNode(child);
+    })
+    .join(' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const prefix = ordered ? `${index + 1}. ` : '- ';
+  const nested = nestedLists
+    .map((list) => blockMarkdownFromNode(list))
+    .filter(Boolean)
+    .join('\n')
+    .split('\n')
+    .filter(Boolean)
+    .map((line) => `  ${line}`)
+    .join('\n');
+
+  return `${prefix}${ownContent}${nested ? `\n${nested}` : ''}`;
+}
+
+function blockMarkdownFromNode(node: Node): string {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.trim() ?? '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return '';
+  }
+
+  const element = node as HTMLElement;
+  const inlineContent = () => Array.from(element.childNodes).map(inlineMarkdownFromNode).join('').trim();
+
+  switch (element.tagName) {
+    case 'P':
+      return inlineContent();
+    case 'H1':
+    case 'H2':
+    case 'H3':
+    case 'H4':
+    case 'H5':
+    case 'H6': {
+      const level = Number(element.tagName.slice(1));
+      return `${'#'.repeat(level)} ${inlineContent()}`;
+    }
+    case 'HR':
+      return '---';
+    case 'UL':
+    case 'OL': {
+      const ordered = element.tagName === 'OL';
+      return Array.from(element.children)
+        .filter((child): child is HTMLElement => child instanceof HTMLElement && child.tagName === 'LI')
+        .map((child, index) => listItemMarkdown(child, ordered, index))
+        .join('\n');
+    }
+    case 'BLOCKQUOTE': {
+      const quote = Array.from(element.childNodes)
+        .map(blockMarkdownFromNode)
+        .filter(Boolean)
+        .join('\n\n');
+      return quote.split('\n').map((line) => `> ${line}`).join('\n');
+    }
+    case 'PRE':
+      return `\`\`\`\n${(element.textContent ?? '').replace(/\n$/g, '')}\n\`\`\``;
+    default:
+      return Array.from(element.childNodes).map(blockMarkdownFromNode).filter(Boolean).join('\n\n');
+  }
+}
+
+function noteHtmlToMarkdown(value: string) {
+  const html = noteValueToEditorContent(value);
+  if (!html.trim()) return '';
+  if (typeof DOMParser === 'undefined') return stripNoteHtml(html);
+
+  const documentValue = new DOMParser().parseFromString(html, 'text/html');
+  return Array.from(documentValue.body.childNodes)
+    .map(blockMarkdownFromNode)
+    .filter(Boolean)
+    .join('\n\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+function renderNotePreviewNode(node: Node, key: string): ReactNode {
+  if (node.nodeType === Node.TEXT_NODE) {
+    return node.textContent?.replace(/\u00a0/g, ' ') ?? '';
+  }
+  if (node.nodeType !== Node.ELEMENT_NODE) {
+    return null;
+  }
+
+  const element = node as HTMLElement;
+  const children = Array.from(element.childNodes).map((child, index) => renderNotePreviewNode(child, `${key}-${index}`));
+
+  switch (element.tagName) {
+    case 'SCRIPT':
+    case 'STYLE':
+      return null;
+    case 'BR':
+      return <br key={key} />;
+    case 'P':
+      return <p key={key}>{children}</p>;
+    case 'H1':
+      return <h1 key={key}>{children}</h1>;
+    case 'H2':
+      return <h2 key={key}>{children}</h2>;
+    case 'H3':
+      return <h3 key={key}>{children}</h3>;
+    case 'STRONG':
+    case 'B':
+      return <strong key={key}>{children}</strong>;
+    case 'EM':
+    case 'I':
+      return <em key={key}>{children}</em>;
+    case 'U':
+      return <u key={key}>{children}</u>;
+    case 'S':
+    case 'DEL':
+      return <s key={key}>{children}</s>;
+    case 'CODE':
+      return <code key={key}>{children}</code>;
+    case 'PRE':
+      return <pre key={key}>{element.textContent ?? ''}</pre>;
+    case 'UL':
+      return <ul key={key}>{children}</ul>;
+    case 'OL':
+      return <ol key={key}>{children}</ol>;
+    case 'LI':
+      return <li key={key}>{children}</li>;
+    case 'HR':
+      return <hr key={key} />;
+    case 'BLOCKQUOTE':
+      return <blockquote key={key}>{children}</blockquote>;
+    case 'A':
+      return <span key={key} className="underline decoration-current/40">{children}</span>;
+    default:
+      return <span key={key}>{children}</span>;
+  }
+}
+
+function NotePreviewContent({ value }: { value: string }) {
+  const content = useMemo(() => {
+    const html = noteValueToEditorContent(value);
+    if (!html.trim() || typeof DOMParser === 'undefined') {
+      return stripNoteHtml(html);
+    }
+
+    const documentValue = new DOMParser().parseFromString(html, 'text/html');
+    return Array.from(documentValue.body.childNodes).map((node, index) => renderNotePreviewNode(node, String(index)));
+  }, [value]);
+
+  return <>{content}</>;
+}
+
+function InactiveNoteEditor({
+  ariaLabel,
+  compact = false,
+  onActivate,
+  placeholder,
+  value,
+}: {
+  ariaLabel: string;
+  compact?: boolean;
+  onActivate: () => void;
+  placeholder: string;
+  value: string;
+}) {
+  const hasContent = isNoteMeaningful(value);
+
+  return (
+    <div
+      role="textbox"
+      tabIndex={0}
+      aria-label={ariaLabel}
+      aria-multiline="true"
+      onClick={onActivate}
+      onFocus={onActivate}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter') {
+          onActivate();
+        }
+      }}
+      className={`note-preview h-full min-h-0 cursor-text overflow-y-auto px-4 py-3 text-sidebar-foreground/80 outline-none transition hover:bg-sidebar-accent/30 focus:bg-sidebar-accent/30 soft-scrollbar ${compact ? 'note-preview-compact' : ''}`}
+      style={{ '--note-editor-font-size': compact ? '9px' : '0.84rem' } as CSSProperties}
+    >
+      {hasContent ? (
+        <NotePreviewContent value={value} />
+      ) : (
+        <span className="text-sidebar-foreground/25">{placeholder}</span>
+      )}
+    </div>
+  );
+}
+
+function NoteToolbarButton({
+  active = false,
+  children,
+  disabled = false,
+  label,
+  onClick,
+}: {
+  active?: boolean;
+  children: ReactNode;
+  disabled?: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      title={label}
+      aria-label={label}
+      disabled={disabled}
+      onMouseDown={(event) => event.preventDefault()}
+      onClick={onClick}
+      className={`flex size-7 items-center justify-center rounded-md transition disabled:pointer-events-none disabled:opacity-35 ${
+        active
+          ? 'bg-sidebar-accent text-sidebar-accent-foreground'
+          : 'text-sidebar-foreground/50 hover:bg-sidebar-accent/80 hover:text-sidebar-foreground/80'
+      }`}
+    >
+      {children}
+    </button>
+  );
+}
+
+function NoteToolbar({ editor, compact = false }: { editor: Editor | null; compact?: boolean }) {
+  const iconClassName = compact ? 'size-3' : 'size-3.5';
+  const disabled = !editor;
+  const run = (command: (target: Editor) => void) => {
+    if (!editor) return;
+    command(editor);
+  };
+  const headingButton = (level: HeadingLevel, icon: ReactNode) => (
+    <NoteToolbarButton
+      key={level}
+      label={`Heading ${level}`}
+      disabled={disabled}
+      active={editor?.isActive('heading', { level }) ?? false}
+      onClick={() => run((target) => target.chain().focus().toggleHeading({ level }).run())}
+    >
+      {icon}
+    </NoteToolbarButton>
+  );
+
+  return (
+    <div className="flex items-center gap-1 rounded-xl border border-sidebar-border/35 bg-sidebar/95 p-1 shadow-lg backdrop-blur-xl">
+      <NoteToolbarButton
+        label="Bold"
+        disabled={disabled}
+        active={editor?.isActive('bold') ?? false}
+        onClick={() => run((target) => target.chain().focus().toggleBold().run())}
+      >
+        <BoldIcon className={iconClassName} />
+      </NoteToolbarButton>
+      <NoteToolbarButton
+        label="Italic"
+        disabled={disabled}
+        active={editor?.isActive('italic') ?? false}
+        onClick={() => run((target) => target.chain().focus().toggleItalic().run())}
+      >
+        <ItalicIcon className={iconClassName} />
+      </NoteToolbarButton>
+      <NoteToolbarButton
+        label="Underline"
+        disabled={disabled}
+        active={editor?.isActive('underline') ?? false}
+        onClick={() => run((target) => target.chain().focus().toggleUnderline().run())}
+      >
+        <UnderlineIcon className={iconClassName} />
+      </NoteToolbarButton>
+
+      <div className="mx-1 h-4 w-px bg-sidebar-border/40" />
+
+      {headingButton(1, <Heading1Icon className={iconClassName} />)}
+      {headingButton(2, <Heading2Icon className={iconClassName} />)}
+      {headingButton(3, <Heading3Icon className={iconClassName} />)}
+    </div>
+  );
+}
+
+function NoteEditor({
+  ariaLabel,
+  autoFocus = false,
+  compact = false,
+  onChange,
+  placeholder,
+  value,
+}: {
+  ariaLabel: string;
+  autoFocus?: boolean;
+  compact?: boolean;
+  onChange: (value: string) => void;
+  placeholder: string;
+  value: string;
+}) {
+  const [editorUiState, setEditorUiState] = useState({
+    hasTextSelection: false,
+    isEmpty: !isNoteMeaningful(value),
+    revision: 0,
+  });
+  const refreshEditorState = useCallback((target: Editor) => {
+    const { from, to } = target.state.selection;
+    const hasTextSelection = target.isFocused && from !== to && target.state.doc.textBetween(from, to, ' ').trim().length > 0;
+
+    setEditorUiState((previous) => {
+      const shouldTrackToolbarState = hasTextSelection || previous.hasTextSelection;
+      if (
+        previous.isEmpty === target.isEmpty
+        && previous.hasTextSelection === hasTextSelection
+        && !shouldTrackToolbarState
+      ) {
+        return previous;
+      }
+
+      return {
+        hasTextSelection,
+        isEmpty: target.isEmpty,
+        revision: shouldTrackToolbarState ? previous.revision + 1 : previous.revision,
+      };
+    });
+  }, []);
+  const editor = useEditor({
+    extensions: NOTE_EDITOR_EXTENSIONS,
+    content: noteValueToEditorContent(value),
+    immediatelyRender: false,
+    editorProps: {
+      attributes: {
+        'aria-label': ariaLabel,
+        spellcheck: 'true',
+      },
+    },
+    onCreate: ({ editor: target }) => refreshEditorState(target),
+    onBlur: ({ editor: target }) => refreshEditorState(target),
+    onSelectionUpdate: ({ editor: target }) => refreshEditorState(target),
+    onUpdate: ({ editor: target }) => {
+      onChange(target.isEmpty ? '' : target.getHTML());
+      refreshEditorState(target);
+    },
+  });
+
+  useEffect(() => {
+    if (!editor) return;
+    const nextContent = noteValueToEditorContent(value);
+    const currentContent = editor.isEmpty ? '' : editor.getHTML();
+    if (nextContent === currentContent || (!nextContent && editor.isEmpty)) return;
+    editor.commands.setContent(nextContent || '<p></p>', { emitUpdate: false });
+    refreshEditorState(editor);
+  }, [editor, refreshEditorState, value]);
+
+  useEffect(() => {
+    if (!editor || !autoFocus) return undefined;
+    const frame = window.requestAnimationFrame(() => {
+      editor.commands.focus('end');
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [autoFocus, editor]);
+
+  return (
+    <div
+      className="flex h-full min-h-0 flex-col"
+      style={{ '--note-editor-font-size': compact ? '9px' : '0.84rem' } as CSSProperties}
+    >
+      <div className="relative min-h-0 flex-1">
+        {editor && editorUiState.hasTextSelection ? (
+          <div className="absolute left-3 top-2 z-10">
+            <NoteToolbar editor={editor} compact={compact} />
+          </div>
+        ) : null}
+        <EditorContent
+          editor={editor}
+          className={`note-editor h-full overflow-y-auto text-sidebar-foreground/80 soft-scrollbar ${compact ? 'note-editor-compact' : ''}`}
+        />
+        {editorUiState.isEmpty ? (
+          <div className={`pointer-events-none absolute left-4 top-3 text-sidebar-foreground/25 ${compact ? 'text-[9px]' : 'text-[0.84rem]'}`}>
+            {placeholder}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
 // ─── PDF renderer ──────────────────────────────────────────────────────────────
 
 const DOC_RENDER_SCALE = 1.5;
@@ -375,14 +871,18 @@ function PdfPage({
 }
 
 function PdfDocument({
+  activeNotePage,
   fileId,
   isNotesOpen,
+  onActivateNote,
   pageNotes,
   onNoteChange,
   onPageCount,
 }: {
+  activeNotePage: number | null;
   fileId: string;
   isNotesOpen: boolean;
+  onActivateNote: (page: number) => void;
   pageNotes: Record<number, string>;
   onNoteChange: (page: number, text: string) => void;
   onPageCount: (count: number) => void;
@@ -469,14 +969,25 @@ function PdfDocument({
           <div key={`${fileId}-${pageNumber}`} className="flex items-start">
             <PdfPage pdf={state.pdf} pageNumber={pageNumber} totalPages={state.pageCount} />
             {isNotesOpen && (
-              <div className="ml-4 flex w-96 shrink-0 self-stretch flex-col border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
-                <textarea
-                  className="flex-1 resize-none bg-transparent px-4 py-3 leading-relaxed text-sidebar-foreground/75 placeholder:text-sidebar-foreground/25 focus:outline-none"
-                  style={{ fontSize: 9 }}
-                  placeholder={`Page ${pageNumber} notes…`}
-                  value={pageNotes[pageNumber] ?? ''}
-                  onChange={(e) => onNoteChange(pageNumber, e.target.value)}
-                />
+              <div className="ml-4 flex w-96 shrink-0 self-stretch flex-col overflow-hidden border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
+                {activeNotePage === pageNumber ? (
+                  <NoteEditor
+                    compact
+                    autoFocus
+                    ariaLabel={`Page ${pageNumber} notes`}
+                    placeholder={`Page ${pageNumber} notes...`}
+                    value={pageNotes[pageNumber] ?? ''}
+                    onChange={(value) => onNoteChange(pageNumber, value)}
+                  />
+                ) : (
+                  <InactiveNoteEditor
+                    compact
+                    ariaLabel={`Page ${pageNumber} notes`}
+                    placeholder={`Page ${pageNumber} notes...`}
+                    value={pageNotes[pageNumber] ?? ''}
+                    onActivate={() => onActivateNote(pageNumber)}
+                  />
+                )}
               </div>
             )}
           </div>
@@ -513,8 +1024,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
   const [isNotesOpen, setIsNotesOpen] = useState(false);
-  const [pageNotes, setPageNotes] = useState<Record<number, string>>({});
+  const [activeNotePage, setActiveNotePage] = useState<number | null>(null);
+  const [notesByFile, setNotesByFile] = useState<Record<string, Record<number, string>>>({});
   const [pdfPageCount, setPdfPageCount] = useState(0);
+  const pageNotes = notesByFile[file.id] ?? EMPTY_PAGE_NOTES;
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
   const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
@@ -532,6 +1045,27 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const displayZoom = isNotesOpen ? Math.round(zoomPercent / 2) : zoomPercent;
   const canZoomOut = zoomPercent > (isNotesOpen ? NOTES_MIN_ZOOM : DOCUMENT_MIN_ZOOM);
   const canZoomIn = zoomPercent < (isNotesOpen ? NOTES_MAX_ZOOM : DOCUMENT_MAX_ZOOM);
+  const hasDownloadableNotes = useMemo(() => {
+    if (kind !== 'pdf') {
+      return isNoteMeaningful(pageNotes[1] ?? '');
+    }
+
+    for (let page = 1; page <= pdfPageCount; page += 1) {
+      if (isNoteMeaningful(pageNotes[page] ?? '')) return true;
+    }
+
+    return false;
+  }, [kind, pageNotes, pdfPageCount]);
+
+  const updatePageNote = useCallback((page: number, note: string) => {
+    setNotesByFile((previous) => ({
+      ...previous,
+      [file.id]: {
+        ...(previous[file.id] ?? EMPTY_PAGE_NOTES),
+        [page]: note,
+      },
+    }));
+  }, [file.id]);
 
   const clampPanY = useCallback((candidateY: number, nextZoomPercent = vpRef.current.zoomPercent) => {
     const root = rootRef.current;
@@ -638,6 +1172,17 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     isFreePanRef.current = isFreePan;
     isNotesOpenRef.current = isNotesOpen;
   }, [zoomPercent, pan, isFreePan, isNotesOpen]);
+
+  useEffect(() => {
+    setActiveNotePage(null);
+    setPdfPageCount(0);
+  }, [file.id, kind]);
+
+  useEffect(() => {
+    if (!isNotesOpen) {
+      setActiveNotePage(null);
+    }
+  }, [isNotesOpen]);
 
   // Touchpad pinch-zoom: zooms at cursor in freeform mode, stays centred otherwise
   const applyZoomAt = useCallback((nextZoomPercent: number, cx: number, cy: number) => {
@@ -863,30 +1408,44 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, []);
 
   const downloadNotes = useCallback(() => {
-    if (pdfPageCount === 0) return;
+    const noteEntries: Array<[number, string]> = kind === 'pdf'
+      ? Array.from({ length: pdfPageCount }, (_, index) => [index + 1, pageNotes[index + 1] ?? ''])
+      : [[1, pageNotes[1] ?? '']];
+    const meaningfulEntries = noteEntries.filter(([, note]) => isNoteMeaningful(note));
+    if (!meaningfulEntries.length) return;
+
     const lines: string[] = [];
-    for (let page = 1; page <= pdfPageCount; page++) {
-      const note = pageNotes[page]?.trim();
-      if (!note) continue;
-      lines.push(`### Page ${page}:`);
-      note.split('\n').filter((l) => l.trim()).forEach((l) => lines.push(`- ${l.trim()}`));
-      lines.push('');
+    if (kind !== 'pdf') {
+      lines.push(`# ${file.label} Notes`, '');
     }
-    const blob = new Blob([lines.join('\n')], { type: 'text/markdown' });
+
+    meaningfulEntries.forEach(([page, note], index) => {
+      if (kind === 'pdf') {
+        lines.push(`### Page ${page}`, '');
+      }
+      lines.push(noteHtmlToMarkdown(note));
+      if (index < meaningfulEntries.length - 1) {
+        lines.push('');
+      }
+    });
+
+    const blob = new Blob([`${lines.join('\n').replace(/\n{3,}/g, '\n\n').trim()}\n`], { type: 'text/markdown' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
     a.download = `${file.label.replace(/\.[^.]+$/, '')}_notes.md`;
     a.click();
     URL.revokeObjectURL(url);
-  }, [pdfPageCount, pageNotes, file.label]);
+  }, [file.label, kind, pageNotes, pdfPageCount]);
 
   const documentContent = kind === 'pdf' ? (
     <PdfDocument
+      activeNotePage={activeNotePage}
       fileId={file.id}
       isNotesOpen={isNotesOpen}
+      onActivateNote={setActiveNotePage}
       pageNotes={pageNotes}
-      onNoteChange={(page, text) => setPageNotes((prev) => ({ ...prev, [page]: text }))}
+      onNoteChange={updatePageNote}
       onPageCount={setPdfPageCount}
     />
   ) : kind === 'markdown' && hasText ? (
@@ -977,12 +1536,22 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             <div className="flex items-center border-b border-sidebar-border/20 px-4 py-2.5">
               <span className="text-[0.78rem] font-semibold tracking-wide text-sidebar-foreground/50 uppercase">Notes</span>
             </div>
-            <textarea
-              className="flex-1 resize-none bg-transparent px-4 py-3 text-[0.84rem] leading-relaxed text-sidebar-foreground/80 placeholder:text-sidebar-foreground/25 focus:outline-none"
-              placeholder="Add notes for this file…"
-              value={pageNotes[1] ?? ''}
-              onChange={(e) => setPageNotes((prev) => ({ ...prev, 1: e.target.value }))}
-            />
+            {activeNotePage === 1 ? (
+              <NoteEditor
+                autoFocus
+                ariaLabel={`${file.label} notes`}
+                placeholder="Add notes for this file..."
+                value={pageNotes[1] ?? ''}
+                onChange={(value) => updatePageNote(1, value)}
+              />
+            ) : (
+              <InactiveNoteEditor
+                ariaLabel={`${file.label} notes`}
+                placeholder="Add notes for this file..."
+                value={pageNotes[1] ?? ''}
+                onActivate={() => setActiveNotePage(1)}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1087,7 +1656,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           <button
             type="button"
             onClick={downloadNotes}
-            disabled={pdfPageCount === 0}
+            disabled={!hasDownloadableNotes}
             className="flex size-8 items-center justify-center rounded-lg transition text-slate-400 hover:bg-slate-100 hover:text-slate-600 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-400 dark:disabled:text-slate-700"
             aria-label="Download notes as markdown"
           >
