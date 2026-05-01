@@ -65,17 +65,20 @@ function detectKind(label: string, mimeType?: string | null): DocKind {
   return 'text';
 }
 
-function getPreviousZoomOption(value: number) {
-  for (let index = DOCUMENT_ZOOM_OPTIONS.length - 1; index >= 0; index -= 1) {
-    if (DOCUMENT_ZOOM_OPTIONS[index] < value) {
-      return DOCUMENT_ZOOM_OPTIONS[index];
-    }
+// In notes mode each displayed zoom step maps to 2× actual zoom
+const NOTES_DISPLAY_OPTIONS = DOCUMENT_ZOOM_OPTIONS; // [50,75,90,100,125,150,175,200] shown as effective
+const NOTES_MIN_ZOOM = NOTES_DISPLAY_OPTIONS[0] * 2; // 100 actual
+const NOTES_MAX_ZOOM = NOTES_DISPLAY_OPTIONS[NOTES_DISPLAY_OPTIONS.length - 1] * 2; // 400 actual
+
+function getPreviousZoomOption(value: number, options = DOCUMENT_ZOOM_OPTIONS) {
+  for (let index = options.length - 1; index >= 0; index -= 1) {
+    if (options[index] < value) return options[index];
   }
-  return DOCUMENT_MIN_ZOOM;
+  return options[0];
 }
 
-function getNextZoomOption(value: number) {
-  return DOCUMENT_ZOOM_OPTIONS.find((option) => option > value) ?? DOCUMENT_MAX_ZOOM;
+function getNextZoomOption(value: number, options = DOCUMENT_ZOOM_OPTIONS) {
+  return options.find((option) => option > value) ?? options[options.length - 1];
 }
 
 // ─── Inline markdown ───────────────────────────────────────────────────────────
@@ -521,8 +524,9 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const dropdownRef = useRef<HTMLDivElement | null>(null);
 
   const scale = zoomPercent / 100;
-  const canZoomOut = zoomPercent > DOCUMENT_MIN_ZOOM;
-  const canZoomIn = zoomPercent < DOCUMENT_MAX_ZOOM;
+  const displayZoom = isNotesOpen ? Math.round(zoomPercent / 2) : zoomPercent;
+  const canZoomOut = zoomPercent > (isNotesOpen ? NOTES_MIN_ZOOM : DOCUMENT_MIN_ZOOM);
+  const canZoomIn = zoomPercent < (isNotesOpen ? NOTES_MAX_ZOOM : DOCUMENT_MAX_ZOOM);
 
   const clampPanY = useCallback((candidateY: number, nextZoomPercent = vpRef.current.zoomPercent) => {
     const root = rootRef.current;
@@ -632,12 +636,20 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
   // Touchpad pinch-zoom: zooms at cursor in freeform mode, stays centred otherwise
   const applyZoomAt = useCallback((nextZoomPercent: number, cx: number, cy: number) => {
-    const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, Math.round(nextZoomPercent)));
+    const maxZoom = isNotesOpenRef.current ? NOTES_MAX_ZOOM : DOCUMENT_MAX_ZOOM;
+    const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(maxZoom, Math.round(nextZoomPercent)));
     const { zoomPercent: curZoom, panX, panY } = vpRef.current;
     if (bounded === curZoom) return;
+    const factor = bounded / curZoom;
     if (isFreePanRef.current) {
-      const factor = bounded / curZoom;
       const newPanX = clampPanX(cx + (panX - cx) * factor, bounded);
+      const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
+      vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
+      setZoomPercent(bounded);
+      setPan({ x: newPanX, y: newPanY });
+    } else if (isNotesOpenRef.current) {
+      // Notes mode: scale horizontally from cx so page+notes stay in view
+      const newPanX = Math.max(120, cx + (panX - cx) * factor);
       const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
       vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
       setZoomPercent(bounded);
@@ -646,7 +658,6 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       const root = rootRef.current;
       const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
       const centredX = root ? calcCentreX(root, scaledWidth) : panX;
-      const factor = bounded / curZoom;
       const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
       vpRef.current = { zoomPercent: bounded, panX: centredX, panY: newPanY };
       setZoomPercent(bounded);
@@ -656,7 +667,8 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
   // +/- buttons and dropdown zoom steps: always centred, never free-form
   const applyZoomCentred = useCallback((nextZoomPercent: number) => {
-    const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, nextZoomPercent));
+    const maxZoom = isNotesOpenRef.current ? NOTES_MAX_ZOOM : DOCUMENT_MAX_ZOOM;
+    const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(maxZoom, nextZoomPercent));
     const root = rootRef.current;
     const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
     const centredX = root ? calcCentreX(root, scaledWidth) : vpRef.current.panX;
@@ -959,7 +971,15 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           <button
             type="button"
             disabled={!canZoomOut}
-            onClick={() => applyZoomCentred(getPreviousZoomOption(zoomPercent))}
+            onClick={() => {
+              if (isNotesOpen) {
+                const prev = getPreviousZoomOption(displayZoom, NOTES_DISPLAY_OPTIONS);
+                const root = rootRef.current;
+                applyZoomAt(prev * 2, root ? root.clientWidth / 2 : 0, root ? root.clientHeight / 2 : 0);
+              } else {
+                applyZoomCentred(getPreviousZoomOption(zoomPercent));
+              }
+            }}
             className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
             aria-label="Zoom out"
           >
@@ -971,26 +991,37 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
               type="button"
               onClick={() => setIsDropdownOpen((v) => !v)}
               className="flex h-8 min-w-16 items-center justify-center rounded-lg px-3 text-xs font-semibold text-slate-700 transition hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-white/8 dark:hover:text-slate-100"
-              aria-label={`Zoom level: ${zoomPercent}%`}
+              aria-label={`Zoom level: ${displayZoom}%`}
             >
-              {zoomPercent}%
+              {displayZoom}%
             </button>
 
             {isDropdownOpen && (
               <div className="absolute bottom-[calc(100%+6px)] left-1/2 z-10 min-w-[8.5rem] -translate-x-1/2 overflow-hidden rounded-xl border border-slate-200/85 bg-white/96 py-1 shadow-lg backdrop-blur-md dark:border-white/[0.07] dark:bg-slate-900/98">
-                {DOCUMENT_ZOOM_OPTIONS.map((option) => (
-                  <button
-                    key={option}
-                    type="button"
-                    onClick={() => { applyZoomCentred(option); setIsDropdownOpen(false); }}
-                    className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-white/8"
-                  >
-                    <span className={zoomPercent === option ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}>
-                      {option}%
-                    </span>
-                    {zoomPercent === option && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-500" />}
-                  </button>
-                ))}
+                {(isNotesOpen ? NOTES_DISPLAY_OPTIONS : DOCUMENT_ZOOM_OPTIONS).map((option) => {
+                  const actual = isNotesOpen ? option * 2 : option;
+                  return (
+                    <button
+                      key={option}
+                      type="button"
+                      onClick={() => {
+                      if (isNotesOpen) {
+                        const root = rootRef.current;
+                        applyZoomAt(actual, root ? root.clientWidth / 2 : 0, root ? root.clientHeight / 2 : 0);
+                      } else {
+                        applyZoomCentred(actual);
+                      }
+                      setIsDropdownOpen(false);
+                    }}
+                      className="flex w-full items-center justify-between px-3.5 py-1.5 text-xs transition hover:bg-slate-100 dark:hover:bg-white/8"
+                    >
+                      <span className={zoomPercent === actual ? 'font-semibold text-slate-900 dark:text-slate-100' : 'text-slate-600 dark:text-slate-400'}>
+                        {option}%
+                      </span>
+                      {zoomPercent === actual && <CheckIcon className="ml-4 size-3 text-slate-500 dark:text-slate-500" />}
+                    </button>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -998,7 +1029,15 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           <button
             type="button"
             disabled={!canZoomIn}
-            onClick={() => applyZoomCentred(getNextZoomOption(zoomPercent))}
+            onClick={() => {
+              if (isNotesOpen) {
+                const next = getNextZoomOption(displayZoom, NOTES_DISPLAY_OPTIONS);
+                const root = rootRef.current;
+                applyZoomAt(next * 2, root ? root.clientWidth / 2 : 0, root ? root.clientHeight / 2 : 0);
+              } else {
+                applyZoomCentred(getNextZoomOption(zoomPercent));
+              }
+            }}
             className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
             aria-label="Zoom in"
           >
@@ -1021,7 +1060,16 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
           <button
             type="button"
-            onClick={() => setIsNotesOpen((v) => !v)}
+            onClick={() => {
+              const next = !isNotesOpen;
+              isNotesOpenRef.current = next;
+              setIsNotesOpen(next);
+              if (next) {
+                applyZoomCentred(Math.min(NOTES_MAX_ZOOM, vpRef.current.zoomPercent * 2));
+              } else {
+                applyZoomCentred(Math.max(DOCUMENT_MIN_ZOOM, Math.round(vpRef.current.zoomPercent / 2)));
+              }
+            }}
             className={`flex size-8 items-center justify-center rounded-lg transition ${isNotesOpen ? 'bg-slate-100 text-slate-900 dark:bg-white/10 dark:text-slate-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-400'}`}
             aria-label={isNotesOpen ? 'Hide notes' : 'Show notes'}
           >
