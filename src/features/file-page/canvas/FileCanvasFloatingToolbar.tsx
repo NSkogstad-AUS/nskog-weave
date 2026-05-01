@@ -2,7 +2,6 @@ import { useLayoutEffect, useRef, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
 import {
   ArrowUpDownIcon,
-  BotIcon,
   ChevronDownIcon,
   ChevronUpIcon,
   SparklesIcon,
@@ -29,7 +28,6 @@ interface FileCanvasFloatingToolbarProps {
 }
 
 const ITEM_ICON_MAP: Record<CanvasPaletteTemplateId, LucideIcon> = {
-  'ai-worker': BotIcon,
   'sort-worker': ArrowUpDownIcon,
   group: ShapesIcon,
   element: SparklesIcon,

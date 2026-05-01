@@ -7,7 +7,7 @@
  *  - Palette drag-and-drop for adding new nodes
  *  - Delegation to focused sub-hooks:
  *      useCanvasLayout  — spatial layout and snap computation
- *      useWorkerEngine  — worker node lifecycle and AI/sort processing
+ *      useWorkerEngine  — worker node lifecycle and local sort processing
  *      useFloatingInspectors — floating file/folder inspector windows
  */
 
@@ -18,7 +18,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { ArrowUpDownIcon, BotIcon, PlusIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
+import { ArrowUpDownIcon, PlusIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
 
 import {
   ContextMenu,
@@ -27,7 +27,6 @@ import {
   ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
-import { getWorkerModeMeta, resolveWorkerMode } from '@/lib/filePageWorkers';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
@@ -103,7 +102,6 @@ import type {
   FilePageNode,
   FilePageNodeSize,
   FilePageNodeUpdates,
-  FilePageWorkerMode,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
 
@@ -2019,7 +2017,6 @@ export function FileCanvasView({
   // Context menu add handlers
   function handleAddBasicElement() { addNodeAtContext(buildBasicElementNode()); }
   function handleAddGroup() { addNodeAtContext(buildGroupNode()); }
-  function handleAddAiWorker() { addNodeAtContext(buildWorkerNode('ai-ready')); }
   function handleAddSortWorker() { addNodeAtContext(buildWorkerNode('sort-data')); }
 
   // ── Palette items ──────────────────────────────────────────────────────────
@@ -2210,59 +2207,12 @@ export function FileCanvasView({
               : undefined
         }
         onEditingLabelChange={setEditingLabel}
-        onChangeWorkerFocus={
-          node.kind === 'worker' && node.workerMode === 'ai-ready'
-            ? (workerNode, focus) => {
-                onUpdateNodeRef.current(workerNode.id, {
-                  workerFocus: focus,
-                  workerOutputFolderId: null,
-                  workerStatus: 'idle',
-                  workerProgress: 0,
-                  workerInputSignature: null,
-                  workerLastError: null,
-                });
-              }
-            : undefined
-        }
-        onChangeWorkerRunMode={
-          node.kind === 'worker' && node.workerMode === 'ai-ready'
-            ? (workerNode, runMode) => {
-                onUpdateNodeRef.current(workerNode.id, {
-                  workerRunMode: runMode,
-                  workerOutputFolderId: null,
-                  workerStatus: 'idle',
-                  workerProgress: 0,
-                  workerInputSignature: null,
-                  workerLastError: null,
-                });
-              }
-            : undefined
-        }
-        onChangeWorkerOutputMode={
-          node.kind === 'worker' && node.workerMode === 'ai-ready'
-            ? (workerNode, outputMode) => {
-                onUpdateNodeRef.current(workerNode.id, {
-                  workerOutputMode: outputMode,
-                  workerOutputFolderId: null,
-                  workerStatus: 'idle',
-                  workerProgress: 0,
-                  workerInputSignature: null,
-                  workerLastError: null,
-                });
-              }
-            : undefined
-        }
         onHoverChange={setNodeHover}
         onOpenPreview={openNodePrimaryAction}
         onPointerDown={handleNodePointerDown}
         onPreviewIcon={previewNodeIcon}
         onPreviewResize={previewNodeResize}
         onResizeHandlePointerDown={node.kind !== 'element' ? beginNodeResize : undefined}
-        onRunWorker={
-          node.kind === 'worker' && getWorkerModeMeta(node.workerMode).requiresManualRun
-            ? (workerNode) => { void workerEngine.runAiWorker(workerNode.id); }
-            : undefined
-        }
         onSelectFolderContentItem={(item) => {
           const existingNode = getNodeById(item.id);
           if (existingNode) {
@@ -2596,10 +2546,6 @@ export function FileCanvasView({
             <ContextMenuSeparator />
           </>
         ) : null}
-        <ContextMenuItem onSelect={handleAddAiWorker}>
-          <BotIcon className="size-4" />
-          Add AI worker
-        </ContextMenuItem>
         <ContextMenuItem onSelect={handleAddSortWorker}>
           <ArrowUpDownIcon className="size-4" />
           Add sort worker

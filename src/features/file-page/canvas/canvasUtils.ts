@@ -31,10 +31,6 @@ export const FLOATING_INSPECTOR_STACK_OFFSET = 28;
 export const CANVAS_PALETTE_DATA_TRANSFER_TYPE = 'application/x-weave-canvas-palette-template';
 export const CANVAS_PALETTE_TEXT_PREFIX = 'weave-canvas-palette-template:';
 
-// ─── Worker constants ─────────────────────────────────────────────────────────
-
-export const COLLATED_WORKER_SOURCE_ITEM_ID = '__collated__';
-
 // ─── Floating inspector helpers ───────────────────────────────────────────────
 
 export function buildFloatingInspectorId(): string {
@@ -63,7 +59,6 @@ export function pointIsWithinRect(point: Point, rect: CanvasFloatingInspectorRec
 
 export function isCanvasPaletteTemplateId(value: string): value is CanvasPaletteTemplateId {
   return (
-    value === 'ai-worker' ||
     value === 'sort-worker' ||
     value === 'group' ||
     value === 'element'
@@ -124,8 +119,6 @@ export function createFallbackFileItem(node: FilePageNode): FilePageContentItem 
   };
 }
 
-// ─── AI output label helpers ──────────────────────────────────────────────────
-
 export function createContentHash(value: string | null | undefined): string {
   const input = value ?? '';
   let hash = 0;
@@ -133,47 +126,6 @@ export function createContentHash(value: string | null | undefined): string {
     hash = (hash * 31 + input.charCodeAt(i)) | 0;
   }
   return hash.toString(16);
-}
-
-function sanitizeFileNameSegment(value: string, fallback: string): string {
-  const normalized = value
-    .trim()
-    .replace(/[^a-zA-Z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .replace(/-{2,}/g, '-');
-  return normalized.length > 0 ? normalized : fallback;
-}
-
-function formatOutputTimestampParts(value: string): { datePart: string; timePart: string } {
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) {
-    return { datePart: 'unknown-date', timePart: 'unknown-time' };
-  }
-
-  const pad = (n: number, len = 2) => String(n).padStart(len, '0');
-  const datePart = `${pad(date.getFullYear(), 4)}${pad(date.getMonth() + 1)}${pad(date.getDate())}`;
-  const timePart = `${pad(date.getHours())}${pad(date.getMinutes())}${pad(date.getSeconds())}`;
-  return { datePart, timePart };
-}
-
-export function buildAiOutputItemId(workerId: string, sourceItemId: string): string {
-  return `${workerId}:ai:${sourceItemId}`;
-}
-
-export function buildAiOutputFileLabel(
-  workerLabel: string,
-  sourceLabel: string,
-  version: number,
-  generatedAt: string,
-): string {
-  const workerSegment = sanitizeFileNameSegment(workerLabel, 'AI-Worker');
-  const sourceSegment = sanitizeFileNameSegment(sourceLabel, 'Output');
-  const { datePart, timePart } = formatOutputTimestampParts(generatedAt);
-  return `${workerSegment}_${sourceSegment}_v${version}_${datePart}_${timePart}.md`;
-}
-
-export function formatTimeoutLabel(milliseconds: number): string {
-  return `${Math.max(1, Math.round(milliseconds / 1000))}s`;
 }
 
 // ─── Geometry helpers ─────────────────────────────────────────────────────────

@@ -2,7 +2,6 @@ import { useMemo, useState } from 'react';
 import type { DragEvent as ReactDragEvent } from 'react';
 import {
   ArrowUpDownIcon,
-  BotIcon,
   ChevronDownIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -15,7 +14,7 @@ import {
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
-export type CanvasPaletteTemplateId = 'ai-worker' | 'sort-worker' | 'group' | 'element';
+export type CanvasPaletteTemplateId = 'sort-worker' | 'group' | 'element';
 
 export interface CanvasPaletteSidebarItem {
   id: CanvasPaletteTemplateId;
@@ -43,7 +42,6 @@ interface CanvasPaletteSidebarProps {
 const SECTION_ORDER: CanvasPaletteSection[] = ['Workers', 'Structure'];
 
 const ITEM_ICON_MAP: Record<CanvasPaletteTemplateId, LucideIcon> = {
-  'ai-worker': BotIcon,
   'sort-worker': ArrowUpDownIcon,
   group: ShapesIcon,
   element: SparklesIcon,

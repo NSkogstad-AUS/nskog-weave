@@ -1,6 +1,6 @@
 /**
- * Pure factory functions for constructing canvas node objects and AI batch
- * request helpers. No React dependencies.
+ * Pure factory functions for constructing canvas node objects.
+ * No React dependencies.
  */
 
 import {
@@ -13,7 +13,6 @@ import type {
   FilePageContentItem,
   FilePageNode,
   FilePageWorkerMode,
-  FilePageWorkerRunMode,
 } from '@/types/filePage';
 import { GROUP_MIN_GRID_UNITS } from './constants';
 import type { CanvasPaletteTemplateId } from './CanvasPaletteSidebar';
@@ -88,8 +87,6 @@ export function buildCanvasPaletteNode(
   templateId: CanvasPaletteTemplateId,
 ): Omit<FilePageNode, 'position'> {
   switch (templateId) {
-    case 'ai-worker':
-      return buildWorkerNode('ai-ready');
     case 'sort-worker':
       return buildWorkerNode('sort-data');
     case 'group':
@@ -98,74 +95,6 @@ export function buildCanvasPaletteNode(
     default:
       return buildBasicElementNode();
   }
-}
-
-// ─── AI batch request helpers ─────────────────────────────────────────────────
-
-export const AI_WORKER_REQUEST_BATCH_SETTINGS: Record<
-  FilePageWorkerRunMode,
-  {
-    maxFilesPerRequest: number;
-    targetTotalCharacters: number;
-    clientTimeoutMultiplier: number;
-  }
-> = {
-  fast: {
-    maxFilesPerRequest: 4,
-    targetTotalCharacters: 9_000,
-    clientTimeoutMultiplier: 1.15,
-  },
-  balanced: {
-    maxFilesPerRequest: 6,
-    targetTotalCharacters: 18_000,
-    clientTimeoutMultiplier: 1.3,
-  },
-  thorough: {
-    maxFilesPerRequest: 8,
-    targetTotalCharacters: 28_000,
-    clientTimeoutMultiplier: 1.45,
-  },
-};
-
-/** Always 2 concurrent requests regardless of run mode (reserved for future tuning). */
-export function getAiWorkerRequestConcurrency(_runMode: FilePageWorkerRunMode): number {
-  return 2;
-}
-
-/**
- * Splits source files into batches respecting per-request file-count and
- * character-count limits for the given run mode.
- */
-export function buildAiWorkerRequestBatches<T extends { textContent?: string | null }>(
-  items: T[],
-  runMode: FilePageWorkerRunMode,
-): T[][] {
-  const { maxFilesPerRequest, targetTotalCharacters } = AI_WORKER_REQUEST_BATCH_SETTINGS[runMode];
-  const batches: T[][] = [];
-  let currentBatch: T[] = [];
-  let currentBatchCharacters = 0;
-
-  for (const item of items) {
-    const itemCharacters = (item.textContent ?? '').trim().length;
-    const wouldExceedFileLimit = currentBatch.length >= maxFilesPerRequest;
-    const wouldExceedCharacterTarget =
-      currentBatch.length > 0 && currentBatchCharacters + itemCharacters > targetTotalCharacters;
-
-    if ((wouldExceedFileLimit || wouldExceedCharacterTarget) && currentBatch.length > 0) {
-      batches.push(currentBatch);
-      currentBatch = [];
-      currentBatchCharacters = 0;
-    }
-
-    currentBatch.push(item);
-    currentBatchCharacters += itemCharacters;
-  }
-
-  if (currentBatch.length > 0) {
-    batches.push(currentBatch);
-  }
-
-  return batches;
 }
 
 /** Metadata about a canvas palette item for rendering the sidebar. */
@@ -178,16 +107,9 @@ export interface CanvasPaletteNodeMeta {
 
 /** Builds the full list of palette sidebar items in display order. */
 export function buildCanvasPaletteItems(): CanvasPaletteNodeMeta[] {
-  const aiWorkerMeta = getWorkerModeMeta('ai-ready');
   const sortWorkerMeta = getWorkerModeMeta('sort-data');
 
   return [
-    {
-      id: 'ai-worker',
-      label: aiWorkerMeta.defaultNodeLabel,
-      description: aiWorkerMeta.defaultNodeDescription,
-      section: 'Workers',
-    },
     {
       id: 'sort-worker',
       label: sortWorkerMeta.defaultNodeLabel,
@@ -203,7 +125,7 @@ export function buildCanvasPaletteItems(): CanvasPaletteNodeMeta[] {
     {
       id: 'group',
       label: 'Group',
-      description: 'Shared canvas region for clustering related notes, workers, and files.',
+      description: 'Shared canvas region for clustering related notes and files.',
       section: 'Structure',
     },
   ];

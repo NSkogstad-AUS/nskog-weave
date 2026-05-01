@@ -9,7 +9,6 @@ Investigate first before changing canvas layout, worker execution, persistence, 
 - Vite + React 19 + TypeScript (`strict`)
 - Tailwind CSS v4 with custom theme variables in [`src/index.css`](./src/index.css)
 - UI primitives from `animate-ui`, `radix`, and local `src/components/ui`
-- Local Vite server plugin in [`server/openaiWorkerApi.ts`](./server/openaiWorkerApi.ts) for AI worker runs
 
 ## Architecture Map
 
@@ -21,24 +20,15 @@ Investigate first before changing canvas layout, worker execution, persistence, 
 - [`src/features/file-page/useFolderCanvasState.ts`](./src/features/file-page/useFolderCanvasState.ts): folder canvas persistence and normalization
 - [`src/hooks/useFilePages.ts`](./src/hooks/useFilePages.ts): per-file page persistence and hydration
 - [`src/lib/filePageWorkers.ts`](./src/lib/filePageWorkers.ts): worker mode/focus/run-mode metadata and user-facing labels
-- [`server/openaiWorkerApi.ts`](./server/openaiWorkerApi.ts): `/api/worker/run` handler, provider selection, request validation, output shaping
 
 ## Commands
 
 ```bash
-npm run dev        # start Vite dev server with the AI worker API plugin
+npm run dev        # start Vite dev server
 npm run build      # typecheck app TS config, then build
 npm run typecheck  # strict TypeScript validation
 npm run preview    # preview production build
 ```
-
-## Environment
-
-- AI worker requests go through `POST /api/worker/run`
-- Local development requires either `OPENAI_API_KEY` or `OPENROUTER_API_KEY`
-- Optional model overrides:
-  - `OPENAI_MODEL`, `OPENAI_MODEL_FAST`, `OPENAI_MODEL_BALANCED`, `OPENAI_MODEL_THOROUGH`
-  - `OPENROUTER_MODEL`, `OPENROUTER_MODEL_FAST`, `OPENROUTER_MODEL_BALANCED`, `OPENROUTER_MODEL_THOROUGH`
 
 ## Persistence And Invariants
 
@@ -56,11 +46,11 @@ npm run preview    # preview production build
 - Keep React code functional and explicit. This codebase currently favors readable stateful hooks over heavy abstraction.
 - Preserve current visual language unless the task explicitly calls for redesign. Styling mixes Tailwind utilities with shared CSS variables and custom surfaces.
 - When changing canvas behavior, check the related hook/util modules before editing the top-level view component.
-- There is no formal test suite yet. At minimum, run `npm run typecheck` after code changes. Run `npm run build` for broader verification when touching app wiring, styling, or the Vite server plugin.
+- There is no formal test suite yet. At minimum, run `npm run typecheck` after code changes. Run `npm run build` for broader verification when touching app wiring, styling, or the Vite config.
 
 ## Default Workflow
 
-1. Determine whether the task is a question, a UI change, a persistence change, or an AI worker/API change.
+1. Determine whether the task is a question, a UI change, a persistence change, or a worker behavior change.
 2. Read the relevant feature files before editing, especially for canvas interactions and storage code.
 3. Make the smallest change that preserves existing behavior and data compatibility.
 4. Verify with `npm run typecheck`; use `npm run build` when the change could affect bundling, runtime wiring, or CSS.
@@ -73,12 +63,7 @@ npm run preview    # preview production build
 - Persistence changes:
   - Review both hydration and write paths.
   - Do not break existing local data without an explicit migration.
-- AI worker changes:
-  - Validate request shape, provider selection, timeout budgets, and output parsing end to end.
-  - Keep provider failures actionable and user-facing error strings clear.
-
 ## Notes
 
 - The `claude/` directory can hold longer-form Claude-specific references. Keep this root `CLAUDE.md` concise so it remains useful in prompt context.
 - Do not add secrets, tokens, or internal-only credentials to this file.
-
