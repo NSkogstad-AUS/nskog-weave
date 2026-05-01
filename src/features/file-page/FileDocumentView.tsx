@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
-import { CheckIcon, ChevronDownIcon, ChevronUpIcon, MinusIcon, MoveIcon, PlusIcon } from 'lucide-react';
+import { CheckIcon, ChevronDownIcon, ChevronUpIcon, MinusIcon, MoveIcon, PlusIcon, StickyNoteIcon } from 'lucide-react';
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
@@ -25,6 +25,9 @@ const DOCUMENT_MAX_ZOOM = DOCUMENT_ZOOM_OPTIONS[DOCUMENT_ZOOM_OPTIONS.length - 1
 const CONTENT_WIDTH_PX = 768; // 48rem at 16px base
 const CONTENT_INITIAL_TOP = 68; // px — space below fixed header overlay
 const CONTENT_BOTTOM_PADDING = 32;
+const NOTES_PANEL_WIDTH = 384; // px — matches w-96 Tailwind class
+const NOTES_PANEL_GAP = 24; // gap between content and notes panel (fixed overlay fallback)
+const NOTES_FLEX_GAP = 16; // ml-4 in px — gap used in the in-canvas flex row
 const DOC_RENDER_MAX_CONCURRENT = 2;
 
 let activeDocumentPageRenders = 0;
@@ -361,14 +364,24 @@ function PdfPage({
           {status === 'error' ? 'Could not render this page.' : 'Rendering page...'}
         </div>
       ) : null}
-      <span className="absolute bottom-2 right-3 rounded bg-black/30 px-1.5 py-0.5 font-mono text-[0.7rem] text-white/80 backdrop-blur-sm">
+      <span className="absolute bottom-2 right-2 rounded bg-black/25 px-1 py-px font-mono text-[0.58rem] text-white/70 backdrop-blur-sm">
         {pageNumber} / {totalPages}
       </span>
     </div>
   );
 }
 
-function PdfDocument({ fileId }: { fileId: string }) {
+function PdfDocument({
+  fileId,
+  isNotesOpen,
+  pageNotes,
+  onNoteChange,
+}: {
+  fileId: string;
+  isNotesOpen: boolean;
+  pageNotes: Record<number, string>;
+  onNoteChange: (page: number, text: string) => void;
+}) {
   const [state, setState] = useState<PdfDocState>({ status: 'loading' });
 
   useEffect(() => {
@@ -443,14 +456,25 @@ function PdfDocument({ fileId }: { fileId: string }) {
 
   return (
     <div className="space-y-4">
-      {Array.from({ length: state.pageCount }, (_, index) => (
-        <PdfPage
-          key={`${fileId}-${index + 1}`}
-          pdf={state.pdf}
-          pageNumber={index + 1}
-          totalPages={state.pageCount}
-        />
-      ))}
+      {Array.from({ length: state.pageCount }, (_, index) => {
+        const pageNumber = index + 1;
+        return (
+          <div key={`${fileId}-${pageNumber}`} className="flex items-start">
+            <PdfPage pdf={state.pdf} pageNumber={pageNumber} totalPages={state.pageCount} />
+            {isNotesOpen && (
+              <div className="ml-4 flex w-96 shrink-0 self-stretch flex-col border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
+                <textarea
+                  className="flex-1 resize-none bg-transparent px-4 py-3 leading-relaxed text-sidebar-foreground/75 placeholder:text-sidebar-foreground/25 focus:outline-none"
+                  style={{ fontSize: 9 }}
+                  placeholder={`Page ${pageNumber} notes…`}
+                  value={pageNotes[pageNumber] ?? ''}
+                  onChange={(e) => onNoteChange(pageNumber, e.target.value)}
+                />
+              </div>
+            )}
+          </div>
+        );
+      })}
       {state.totalPageCount > DOC_MAX_PAGES ? (
         <p className="text-center text-xs text-slate-400 dark:text-slate-500">
           Showing first {DOC_MAX_PAGES} of {state.totalPageCount} pages.
@@ -481,11 +505,14 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [isFreePan, setIsFreePan] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const [isHeaderCollapsed, setIsHeaderCollapsed] = useState(false);
+  const [isNotesOpen, setIsNotesOpen] = useState(false);
+  const [pageNotes, setPageNotes] = useState<Record<number, string>>({});
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
   const vpRef = useRef({ zoomPercent: 100, panX: 0, panY: CONTENT_INITIAL_TOP });
   const contentHeightRef = useRef(0);
   const isFreePanRef = useRef(false);
+  const isNotesOpenRef = useRef(false);
   const zoomRafRef = useRef<number | null>(null);
   const pendingZoomRef = useRef<{ cx: number; cy: number; zoom: number } | null>(null);
   const panRafRef = useRef<number | null>(null);
@@ -522,15 +549,31 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     return Math.max(minX, Math.min(maxX, candidateX));
   }, []);
 
+  // Compute the centred panX.
+  // Notes-open: center the full block (page + gap + notes), but never clip the left edge —
+  // when the block overflows the viewport, anchor to the left so the page stays readable.
+  // Notes-closed: standard behaviour — center and allow symmetric clipping at high zoom.
+  const calcCentreX = useCallback((root: HTMLElement | null, scaledWidth: number) => {
+    const total = root?.clientWidth ?? 0;
+    if (isNotesOpenRef.current) {
+      const scale = CONTENT_WIDTH_PX > 0 ? scaledWidth / CONTENT_WIDTH_PX : 1;
+      const blockWidth = scaledWidth + (NOTES_FLEX_GAP + NOTES_PANEL_WIDTH) * scale;
+      return Math.max(320, (total - blockWidth) / 2);
+    }
+    return scaledWidth >= total
+      ? (total - scaledWidth) / 2
+      : Math.max(32, (total - scaledWidth) / 2);
+  }, []);
+
   // Center content horizontally on first layout
   useLayoutEffect(() => {
     const root = rootRef.current;
     if (!root || initialized) return;
-    const x = Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2);
+    const x = calcCentreX(root, CONTENT_WIDTH_PX);
     vpRef.current = { zoomPercent: 100, panX: x, panY: CONTENT_INITIAL_TOP };
     setPan({ x, y: CONTENT_INITIAL_TOP });
     setInitialized(true);
-  }, [initialized]);
+  }, [initialized, calcCentreX]);
 
   // Re-center horizontally when the container resizes (e.g. sidebar toggled)
   useLayoutEffect(() => {
@@ -539,9 +582,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const recentre = () => {
       if (!initialized || isFreePanRef.current) return;
       const scaledWidth = CONTENT_WIDTH_PX * (vpRef.current.zoomPercent / 100);
-      const x = scaledWidth >= root.clientWidth
-        ? (root.clientWidth - scaledWidth) / 2
-        : Math.max(32, (root.clientWidth - scaledWidth) / 2);
+      const x = calcCentreX(root, scaledWidth);
       if (x === vpRef.current.panX) return;
       vpRef.current = { ...vpRef.current, panX: x };
       setPan((prev) => ({ ...prev, x }));
@@ -549,7 +590,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const observer = new ResizeObserver(() => window.requestAnimationFrame(recentre));
     observer.observe(root);
     return () => observer.disconnect();
-  }, [initialized]);
+  }, [initialized, calcCentreX]);
 
   useLayoutEffect(() => {
     const content = contentRef.current;
@@ -582,11 +623,12 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     };
   }, [clampPanY, file.id, kind]);
 
-  // Keep vpRef and isFreePanRef in sync with React state
+  // Keep vpRef, isFreePanRef, isNotesOpenRef in sync with React state
   useEffect(() => {
     vpRef.current = { zoomPercent, panX: pan.x, panY: pan.y };
     isFreePanRef.current = isFreePan;
-  }, [zoomPercent, pan, isFreePan]);
+    isNotesOpenRef.current = isNotesOpen;
+  }, [zoomPercent, pan, isFreePan, isNotesOpen]);
 
   // Touchpad pinch-zoom: zooms at cursor in freeform mode, stays centred otherwise
   const applyZoomAt = useCallback((nextZoomPercent: number, cx: number, cy: number) => {
@@ -603,47 +645,50 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     } else {
       const root = rootRef.current;
       const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
-      const centredX = root
-        ? scaledWidth >= root.clientWidth
-          ? (root.clientWidth - scaledWidth) / 2
-          : Math.max(32, (root.clientWidth - scaledWidth) / 2)
-        : panX;
+      const centredX = root ? calcCentreX(root, scaledWidth) : panX;
       const factor = bounded / curZoom;
       const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
       vpRef.current = { zoomPercent: bounded, panX: centredX, panY: newPanY };
       setZoomPercent(bounded);
       setPan({ x: centredX, y: newPanY });
     }
-  }, [clampPanX, clampPanY]);
+  }, [clampPanX, clampPanY, calcCentreX]);
 
   // +/- buttons and dropdown zoom steps: always centred, never free-form
   const applyZoomCentred = useCallback((nextZoomPercent: number) => {
     const bounded = Math.max(DOCUMENT_MIN_ZOOM, Math.min(DOCUMENT_MAX_ZOOM, nextZoomPercent));
     const root = rootRef.current;
     const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
-    const centredX = root
-      ? scaledWidth >= root.clientWidth
-        ? (root.clientWidth - scaledWidth) / 2
-        : Math.max(32, (root.clientWidth - scaledWidth) / 2)
-      : vpRef.current.panX;
+    const centredX = root ? calcCentreX(root, scaledWidth) : vpRef.current.panX;
     const clampedY = clampPanY(vpRef.current.panY, bounded);
     isFreePanRef.current = false;
     vpRef.current = { zoomPercent: bounded, panX: centredX, panY: clampedY };
     setIsFreePan(false);
     setZoomPercent(bounded);
     setPan({ x: centredX, y: clampedY });
-  }, [clampPanY]);
+  }, [clampPanY, calcCentreX]);
 
   const resetZoom = useCallback(() => {
     const root = rootRef.current;
     if (!root) return;
-    const x = Math.max(32, (root.clientWidth - CONTENT_WIDTH_PX) / 2);
+    const x = calcCentreX(root, CONTENT_WIDTH_PX);
     isFreePanRef.current = false;
     vpRef.current = { zoomPercent: 100, panX: x, panY: CONTENT_INITIAL_TOP };
     setIsFreePan(false);
     setZoomPercent(100);
     setPan({ x, y: CONTENT_INITIAL_TOP });
-  }, []);
+  }, [calcCentreX]);
+
+  // Re-center when notes panel opens/closes
+  useEffect(() => {
+    if (!initialized || isFreePanRef.current) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const scaledWidth = CONTENT_WIDTH_PX * (vpRef.current.zoomPercent / 100);
+    const x = calcCentreX(root, scaledWidth);
+    vpRef.current = { ...vpRef.current, panX: x };
+    setPan((prev) => ({ ...prev, x }));
+  }, [isNotesOpen, initialized, calcCentreX]);
 
   // Wheel: ctrl/cmd = zoom at cursor, otherwise pan
   useEffect(() => {
@@ -800,7 +845,12 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, []);
 
   const documentContent = kind === 'pdf' ? (
-    <PdfDocument fileId={file.id} />
+    <PdfDocument
+      fileId={file.id}
+      isNotesOpen={isNotesOpen}
+      pageNotes={pageNotes}
+      onNoteChange={(page, text) => setPageNotes((prev) => ({ ...prev, [page]: text }))}
+    />
   ) : kind === 'markdown' && hasText ? (
     <MarkdownDocument text={text} />
   ) : kind === 'json' && hasText ? (
@@ -846,14 +896,12 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
       {/* Fixed title overlay */}
       <div
-        className={`pointer-events-none fixed top-0 z-40 h-16 overflow-hidden border-b border-sidebar-border/35 shadow-[0_18px_42px_-34px_rgba(0,0,0,0.65)] transition-transform duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+        className={`pointer-events-none fixed top-0 z-40 h-16 overflow-hidden border-b border-sidebar-border/20 transition-transform duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
           isHeaderCollapsed ? '-translate-y-full' : 'translate-y-0'
         }`}
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div className="absolute inset-0 bg-sidebar/76 backdrop-blur-xl" />
-        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012)_52%,rgba(0,0,0,0.045))]" />
+        <div className="absolute inset-0 bg-sidebar/80 backdrop-blur-xl" />
         <div className="relative flex h-full items-center justify-center px-28 text-center">
           <h1 className="truncate text-[0.95rem] font-semibold tracking-tight text-sidebar-foreground/78">
             {file.label}
@@ -877,11 +925,36 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         )}
       </button>
 
-      {/* Zoom controls */}
+      {/* Notes panel — fixed overlay for non-PDF content (PDFs use in-canvas per-page notes) */}
+      {isNotesOpen && kind !== 'pdf' && (
+        <div
+          className="pointer-events-none fixed top-16 z-20 flex flex-col"
+          style={{
+            right: overlayInsets.right + NOTES_PANEL_GAP,
+            bottom: 72,
+            width: NOTES_PANEL_WIDTH,
+          }}
+        >
+          <div className="pointer-events-auto flex h-full flex-col overflow-hidden rounded-2xl border border-sidebar-border/30 bg-sidebar/90 backdrop-blur-xl">
+            <div className="flex items-center border-b border-sidebar-border/20 px-4 py-2.5">
+              <span className="text-[0.78rem] font-semibold tracking-wide text-sidebar-foreground/50 uppercase">Notes</span>
+            </div>
+            <textarea
+              className="flex-1 resize-none bg-transparent px-4 py-3 text-[0.84rem] leading-relaxed text-sidebar-foreground/80 placeholder:text-sidebar-foreground/25 focus:outline-none"
+              placeholder="Add notes for this file…"
+              value={pageNotes[1] ?? ''}
+              onChange={(e) => setPageNotes((prev) => ({ ...prev, 1: e.target.value }))}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Bottom controls */}
       <div
-        className="pointer-events-none fixed bottom-4 z-30 flex justify-center px-4"
+        className="pointer-events-none fixed bottom-4 z-30 flex items-center justify-center gap-2"
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
+        {/* Zoom pill */}
         <div className="pointer-events-auto flex items-center rounded-xl border border-slate-200/85 bg-white/94 p-1 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.42)] backdrop-blur-md dark:border-white/[0.08] dark:bg-slate-900/95 dark:shadow-[0_18px_44px_-30px_rgba(0,0,0,0.7)]">
           <button
             type="button"
@@ -922,8 +995,19 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             )}
           </div>
 
-          <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-white/[0.08]" />
+          <button
+            type="button"
+            disabled={!canZoomIn}
+            onClick={() => applyZoomCentred(getNextZoomOption(zoomPercent))}
+            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
+            aria-label="Zoom in"
+          >
+            <PlusIcon className="size-4" />
+          </button>
+        </div>
 
+        {/* Tool pill — freeform + notes */}
+        <div className="pointer-events-auto flex items-center rounded-xl border border-slate-200/85 bg-white/94 p-1 shadow-[0_18px_44px_-30px_rgba(15,23,42,0.42)] backdrop-blur-md dark:border-white/[0.08] dark:bg-slate-900/95 dark:shadow-[0_18px_44px_-30px_rgba(0,0,0,0.7)]">
           <button
             type="button"
             onClick={() => isFreePan ? resetZoom() : (setIsFreePan(true), isFreePanRef.current = true)}
@@ -933,14 +1017,15 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
             <MoveIcon className="size-4" />
           </button>
 
+          <div className="mx-1 h-4 w-px bg-slate-200/80 dark:bg-white/[0.08]" />
+
           <button
             type="button"
-            disabled={!canZoomIn}
-            onClick={() => applyZoomCentred(getNextZoomOption(zoomPercent))}
-            className="flex size-8 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 disabled:pointer-events-none disabled:text-slate-300 dark:text-slate-400 dark:hover:bg-white/8 dark:hover:text-slate-200 dark:disabled:text-slate-700"
-            aria-label="Zoom in"
+            onClick={() => setIsNotesOpen((v) => !v)}
+            className={`flex size-8 items-center justify-center rounded-lg transition ${isNotesOpen ? 'bg-slate-100 text-slate-900 dark:bg-white/10 dark:text-slate-200' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-600 dark:text-slate-600 dark:hover:bg-white/8 dark:hover:text-slate-400'}`}
+            aria-label={isNotesOpen ? 'Hide notes' : 'Show notes'}
           >
-            <PlusIcon className="size-4" />
+            <StickyNoteIcon className="size-4" />
           </button>
         </div>
       </div>
