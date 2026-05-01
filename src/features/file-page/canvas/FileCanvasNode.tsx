@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
+  AlignCenterHorizontalIcon,
   AlertTriangleIcon,
   DownloadIcon,
   ExpandIcon,
@@ -71,6 +72,7 @@ interface FileCanvasNodeProps {
   onContextMenu: (node: FilePageNode) => void;
   onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
   onDelete: (node: FilePageNode) => void;
+  onCenterGroupContents?: (node: FilePageNode) => void;
   onDownload?: (node: FilePageNode) => void;
   onEditingLabelChange: (value: string) => void;
   onCollapseFolder?: (node: FilePageNode) => void;
@@ -87,7 +89,6 @@ interface FileCanvasNodeProps {
   ) => void;
   onRunWorker?: (node: FilePageNode) => void;
   onSelectFolderContentItem?: (item: FilePageContentItem) => void;
-  onSelect: (nodeId: string) => void;
   onStartRename: (node: FilePageNode) => void;
   onStopRename: () => void;
   onWorkerInputHandlePointerDown?: (
@@ -123,6 +124,7 @@ function FileCanvasNodeComponent({
   onContextMenu,
   onContextMenuOpenChange,
   onDelete,
+  onCenterGroupContents,
   onDownload,
   onEditingLabelChange,
   onCollapseFolder,
@@ -135,7 +137,6 @@ function FileCanvasNodeComponent({
   onResizeHandlePointerDown,
   onRunWorker,
   onSelectFolderContentItem,
-  onSelect,
   onStartRename,
   onStopRename,
   onWorkerInputHandlePointerDown,
@@ -237,7 +238,6 @@ function FileCanvasNodeComponent({
       onContextMenu={(event) => {
         event.stopPropagation();
         onContextMenu(node);
-        onSelect(node.id);
       }}
       className={cn(
         NODE_CARD_CLASS,
@@ -317,7 +317,6 @@ function FileCanvasNodeComponent({
           editingLabel={editingLabel}
           isEditing={isEditing}
           isResizing={isResizing}
-          resizeAxis={resizeAxis}
           isSelected={isSelected}
           node={node}
           onCommitRename={onCommitRename}
@@ -587,6 +586,12 @@ function FileCanvasNodeComponent({
             <PencilLineIcon className="size-4" />
             Rename
           </ContextMenuItem>
+          {node.kind === 'group' && onCenterGroupContents ? (
+            <ContextMenuItem onSelect={() => onCenterGroupContents(node)}>
+              <AlignCenterHorizontalIcon className="size-4" />
+              Center contents
+            </ContextMenuItem>
+          ) : null}
           {isWorkerNode && onRunWorker ? (
             <ContextMenuItem disabled={!canRunWorker} onSelect={() => onRunWorker(node)}>
               <PlayIcon className="size-4" />

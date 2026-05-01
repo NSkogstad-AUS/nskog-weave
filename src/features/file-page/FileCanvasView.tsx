@@ -18,7 +18,15 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { ArrowUpDownIcon, MinusIcon, PlusIcon, RotateCcwIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
+import {
+  AlignCenterHorizontalIcon,
+  ArrowUpDownIcon,
+  MinusIcon,
+  PlusIcon,
+  RotateCcwIcon,
+  ShapesIcon,
+  Trash2Icon,
+} from 'lucide-react';
 
 import {
   ContextMenu,
@@ -596,6 +604,133 @@ export function FileCanvasView({
     resolveCanvasFolderSourceFiles,
   });
 
+  const centerNodesInGroup = useCallback(
+    (groupId: string, nodeIds?: string[]) => {
+      const groupNode = getNodeById(groupId);
+      if (!groupNode || groupNode.kind !== 'group') return;
+
+      const nodeIdSet = nodeIds ? new Set(nodeIds) : null;
+      const groupBounds = layout.getGroupBounds(groupId, draftPositionsRef.current);
+      if (!groupBounds) return;
+
+      const targetNodes = nodesRef.current.filter(
+        (node) =>
+          node.groupId === groupId &&
+          node.kind !== 'group' &&
+          (!nodeIdSet || nodeIdSet.has(node.id)),
+      );
+
+      if (targetNodes.length === 0) return;
+
+      const targetBounds = targetNodes.map((node) => ({
+        node,
+        position: draftPositionsRef.current[node.id] ?? node.position,
+        size: draftSizesRef.current[node.id] ?? node.size,
+      })).map(({ node, position, size }) => ({
+        node,
+        position,
+        size,
+        bounds: getNodeBoundsWithSize(position, size, node.kind),
+      }));
+
+      const layoutBounds = targetBounds.reduce(
+        (bounds, entry) => ({
+          left: Math.min(bounds.left, entry.bounds.left),
+          top: Math.min(bounds.top, entry.bounds.top),
+          right: Math.max(bounds.right, entry.bounds.right),
+          bottom: Math.max(bounds.bottom, entry.bounds.bottom),
+        }),
+        {
+          left: Number.POSITIVE_INFINITY,
+          top: Number.POSITIVE_INFINITY,
+          right: Number.NEGATIVE_INFINITY,
+          bottom: Number.NEGATIVE_INFINITY,
+        },
+      );
+
+      const layoutWidth = layoutBounds.right - layoutBounds.left;
+      const layoutHeight = layoutBounds.bottom - layoutBounds.top;
+      const groupWidth = groupBounds.right - groupBounds.left;
+      const groupHeight = groupBounds.bottom - groupBounds.top;
+      let offsetX = groupBounds.left + (groupWidth - layoutWidth) / 2 - layoutBounds.left;
+      let offsetY = groupBounds.top + (groupHeight - layoutHeight) / 2 - layoutBounds.top;
+
+      if (layoutWidth <= groupWidth) {
+        if (layoutBounds.left + offsetX < groupBounds.left) {
+          offsetX += groupBounds.left - (layoutBounds.left + offsetX);
+        }
+        if (layoutBounds.right + offsetX > groupBounds.right) {
+          offsetX -= layoutBounds.right + offsetX - groupBounds.right;
+        }
+      }
+
+      if (layoutHeight <= groupHeight) {
+        if (layoutBounds.top + offsetY < groupBounds.top) {
+          offsetY += groupBounds.top - (layoutBounds.top + offsetY);
+        }
+        if (layoutBounds.bottom + offsetY > groupBounds.bottom) {
+          offsetY -= layoutBounds.bottom + offsetY - groupBounds.bottom;
+        }
+      }
+
+      const nextPositions = targetBounds.reduce<Record<string, Point>>((positions, entry) => {
+        positions[entry.node.id] = clampNodePositionToBounds(
+          {
+            x: entry.position.x + offsetX,
+            y: entry.position.y + offsetY,
+          },
+          entry.size,
+          groupBounds,
+        );
+        return positions;
+      }, {});
+
+      const movedPositions = Object.fromEntries(
+        Object.entries(nextPositions).filter(([nodeId, position]) => {
+          const node = getNodeById(nodeId);
+          return node && !arePointsEqual(position, node.position);
+        }),
+      );
+
+      if (Object.keys(movedPositions).length === 0) return;
+
+      draftPositionsRef.current = {
+        ...draftPositionsRef.current,
+        ...movedPositions,
+      };
+      setDraftPositions((current) => ({
+        ...current,
+        ...movedPositions,
+      }));
+      onMoveNodesRef.current(movedPositions);
+    },
+    [getNodeById, layout],
+  );
+
+  const centerGroupContents = useCallback(
+    (groupNode: FilePageNode) => {
+      if (groupNode.kind !== 'group') return;
+      centerNodesInGroup(groupNode.id);
+    },
+    [centerNodesInGroup],
+  );
+
+  const selectedCenterGroupId = useMemo(() => {
+    if (displaySelectedNodeIds.length === 0) return null;
+
+    const selectedNodes = displaySelectedNodeIds.map((nodeId) => getNodeById(nodeId));
+    const firstGroupId = selectedNodes[0]?.groupId ?? null;
+
+    if (!firstGroupId) return null;
+
+    return selectedNodes.every(
+      (node): node is FilePageNode =>
+        Boolean(node && node.kind !== 'group' && node.groupId === firstGroupId),
+    )
+      ? firstGroupId
+      : null;
+  }, [displaySelectedNodeIds, getNodeById, nodes]);
+
   const inspectors = useFloatingInspectors({
     canvasRef,
     suppressPreviewOpenUntilRef,
@@ -896,11 +1031,12 @@ export function FileCanvasView({
       if (event.shiftKey) {
         const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
         const nextSelection = currentSelection.includes(node.id)
-          ? currentSelection
+          ? currentSelection.filter((nodeId) => nodeId !== node.id)
           : [...currentSelection, node.id];
+        onPreviewContentItemChange?.(null);
+        onSelectNodesRef.current(nextSelection);
         draftSelectedNodeIdsRef.current = nextSelection;
         setDraftSelectedNodeIds(nextSelection);
-        beginMarqueeSelection(localPoint, true);
         return;
       }
 
@@ -931,7 +1067,7 @@ export function FileCanvasView({
       dragStateRef.current = nextDragState;
       setDragState(nextDragState);
     },
-    [beginMarqueeSelection, getLocalPoint, getNodeById, layout],
+    [getLocalPoint, getNodeById, layout, onPreviewContentItemChange],
   );
 
   // ── Canvas context menu point ──────────────────────────────────────────────
@@ -1611,7 +1747,10 @@ export function FileCanvasView({
     (node: FilePageNode) => {
       setContextMenuNodeId(node.id);
       onHoverNodeChangeRef.current(node);
-      selectSingleNode(node.id);
+      const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
+      if (!currentSelection.includes(node.id)) {
+        selectSingleNode(node.id);
+      }
     },
     [selectSingleNode],
   );
@@ -2253,6 +2392,12 @@ export function FileCanvasView({
         onContextMenu={openNodeContextMenu}
         onContextMenuOpenChange={setNodeContextMenuOpen}
         onDelete={deleteCanvasNode}
+        onCenterGroupContents={
+          node.kind === 'group' &&
+          nodesRef.current.some((candidate) => candidate.groupId === node.id)
+            ? centerGroupContents
+            : undefined
+        }
         onDownload={
           node.kind === 'file'
             ? onDownloadFileNode
@@ -2293,7 +2438,6 @@ export function FileCanvasView({
 
           inspectors.openFloatingInspectorForItem(item);
         }}
-        onSelect={selectSingleNode}
         onCollapseFolder={onCollapseFolder}
         onExpandFolder={onExpandFolder}
         onStartRename={startNodeRename}
@@ -2632,6 +2776,14 @@ export function FileCanvasView({
       <ContextMenuContent className="ml-2 w-52">
         {displaySelectedNodeIds.length > 0 ? (
           <>
+            {selectedCenterGroupId ? (
+              <ContextMenuItem
+                onSelect={() => centerNodesInGroup(selectedCenterGroupId, displaySelectedNodeIds)}
+              >
+                <AlignCenterHorizontalIcon className="size-4" />
+                Center selection in group
+              </ContextMenuItem>
+            ) : null}
             <ContextMenuItem onSelect={deleteSelectedNodes}>
               <Trash2Icon className="size-4" />
               Delete selected

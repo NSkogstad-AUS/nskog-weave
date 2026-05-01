@@ -6,6 +6,9 @@ import {
   GROUP_CONTENT_INSET_LEFT,
   GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_PADDING_BOTTOM,
+  GROUP_CONTENT_PADDING_TOP,
+  GROUP_CONTENT_PADDING_X,
   MAX_NODE_GRID_UNITS,
   NODE_UNIT,
   SLOT_STEP_X,
@@ -110,10 +113,10 @@ export function getGroupContentBounds(position: Point, size: FilePageNodeSize) {
   };
 
   return {
-    left: position.x,
-    top: position.y,
-    right: position.x + innerDimensions.width,
-    bottom: position.y + innerDimensions.height,
+    left: position.x + GROUP_CONTENT_PADDING_X,
+    top: position.y + GROUP_CONTENT_PADDING_TOP,
+    right: position.x + Math.max(0, innerDimensions.width - GROUP_CONTENT_PADDING_X),
+    bottom: position.y + Math.max(0, innerDimensions.height - GROUP_CONTENT_PADDING_BOTTOM),
   };
 }
 

@@ -12,6 +12,8 @@ import {
   GROUP_CONTENT_INSET_LEFT,
   GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_PADDING_BOTTOM,
+  GROUP_CONTENT_PADDING_X,
   GROUP_MIN_GRID_UNITS,
   SLOT_STEP_X,
   SLOT_STEP_Y,
@@ -477,7 +479,10 @@ function getExpandedGroupSize(
     widthUnits: Math.max(
       currentSize.widthUnits,
       getUnitsForDimension(
-        requiredDimensions.width + GROUP_CONTENT_INSET_LEFT + GROUP_CONTENT_INSET_RIGHT,
+        requiredDimensions.width +
+          GROUP_CONTENT_INSET_LEFT +
+          GROUP_CONTENT_INSET_RIGHT +
+          GROUP_CONTENT_PADDING_X,
         SLOT_STEP_X,
         GROUP_MIN_GRID_UNITS,
       ),
@@ -485,7 +490,10 @@ function getExpandedGroupSize(
     heightUnits: Math.max(
       currentSize.heightUnits,
       getUnitsForDimension(
-        requiredDimensions.height + GROUP_CONTENT_INSET_TOP + GROUP_CONTENT_INSET_BOTTOM,
+        requiredDimensions.height +
+          GROUP_CONTENT_INSET_TOP +
+          GROUP_CONTENT_INSET_BOTTOM +
+          GROUP_CONTENT_PADDING_BOTTOM,
         SLOT_STEP_Y,
         GROUP_MIN_GRID_UNITS,
       ),
