@@ -18,7 +18,7 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { ArrowUpDownIcon, PlusIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
+import { ArrowUpDownIcon, MinusIcon, PlusIcon, RotateCcwIcon, ShapesIcon, Trash2Icon } from 'lucide-react';
 
 import {
   ContextMenu,
@@ -104,6 +104,10 @@ import type {
   FilePageNodeUpdates,
 } from '@/types/filePage';
 import type { Point } from '@/types/geometry';
+
+const CANVAS_MIN_ZOOM = 0.35;
+const CANVAS_MAX_ZOOM = 2.25;
+const CANVAS_ZOOM_STEP = 0.15;
 
 // ─── Props ────────────────────────────────────────────────────────────────────
 
@@ -191,6 +195,7 @@ export function FileCanvasView({
   // ── Viewport ───────────────────────────────────────────────────────────────
 
   const viewportRef = useRef<Point>({ x: 0, y: 0 });
+  const zoomRef = useRef(1);
 
   // ── Stable callback refs (avoid stale closures in effects) ─────────────────
 
@@ -227,6 +232,7 @@ export function FileCanvasView({
   const [workerConnectionDragState, setWorkerConnectionDragState] =
     useState<WorkerConnectionDragState | null>(null);
   const [viewport, setViewport] = useState<Point>({ x: 0, y: 0 });
+  const [zoom, setZoom] = useState(1);
   const [draftPositions, setDraftPositions] = useState<Record<string, Point>>({});
   const [snapPreviewPositions, setSnapPreviewPositions] = useState<Record<string, Point>>({});
   const [activeSnapPreviewIds, setActiveSnapPreviewIds] = useState<Record<string, boolean>>({});
@@ -286,6 +292,7 @@ export function FileCanvasView({
       viewportRef.current = viewport;
     }
   }, [viewport]);
+  useEffect(() => { zoomRef.current = zoom; }, [zoom]);
   useEffect(() => { contextMenuNodeIdRef.current = contextMenuNodeId; }, [contextMenuNodeId]);
   useEffect(() => { editingLabelRef.current = editingLabel; }, [editingLabel]);
 
@@ -312,6 +319,44 @@ export function FileCanvasView({
       setViewport(viewportRef.current);
     });
   }, []);
+
+  const applyCanvasZoom = useCallback(
+    (nextZoomValue: number, anchorClientPoint?: Point) => {
+      if (!canvasRef.current) return;
+
+      const currentZoom = zoomRef.current;
+      const nextZoom = Math.max(CANVAS_MIN_ZOOM, Math.min(CANVAS_MAX_ZOOM, nextZoomValue));
+      if (Math.abs(nextZoom - currentZoom) < 0.001) return;
+
+      const rect = canvasRef.current.getBoundingClientRect();
+      const anchor = anchorClientPoint
+        ? {
+            x: anchorClientPoint.x - rect.left,
+            y: anchorClientPoint.y - rect.top,
+          }
+        : {
+            x: rect.width / 2,
+            y: rect.height / 2,
+          };
+      const anchorWorld = {
+        x: (anchor.x - viewportRef.current.x) / currentZoom,
+        y: (anchor.y - viewportRef.current.y) / currentZoom,
+      };
+
+      viewportRef.current = {
+        x: anchor.x - anchorWorld.x * nextZoom,
+        y: anchor.y - anchorWorld.y * nextZoom,
+      };
+      zoomRef.current = nextZoom;
+      setZoom(nextZoom);
+      scheduleViewportCommit();
+    },
+    [scheduleViewportCommit],
+  );
+
+  const resetCanvasZoom = useCallback(() => {
+    applyCanvasZoom(1);
+  }, [applyCanvasZoom]);
 
   const scheduleResizeDraftCommit = useCallback(() => {
     if (resizeDraftFrameRef.current !== null) return;
@@ -657,15 +702,14 @@ export function FileCanvasView({
     if (!canvasRef.current) return null;
     const rect = canvasRef.current.getBoundingClientRect();
     return {
-      x: clientX - rect.left - viewportRef.current.x,
-      y: clientY - rect.top - viewportRef.current.y,
+      x: (clientX - rect.left - viewportRef.current.x) / zoomRef.current,
+      y: (clientY - rect.top - viewportRef.current.y) / zoomRef.current,
     };
   }, []);
 
   // ── Wheel scroll ───────────────────────────────────────────────────────────
 
   const handleCanvasWheel = useCallback((event: ReactWheelEvent<HTMLDivElement>) => {
-    if (event.ctrlKey) return;
     if (
       dragStateRef.current ||
       marqueeStateRef.current ||
@@ -676,6 +720,16 @@ export function FileCanvasView({
       return;
     }
     if ((event.target as HTMLElement).closest('[data-canvas-chrome="true"]')) return;
+
+    if (event.ctrlKey || event.metaKey) {
+      event.preventDefault();
+      event.stopPropagation();
+
+      const delta = event.deltaY;
+      const zoomMultiplier = Math.exp(-delta * 0.002);
+      applyCanvasZoom(zoomRef.current * zoomMultiplier, { x: event.clientX, y: event.clientY });
+      return;
+    }
 
     let deltaX = event.deltaX;
     let deltaY = event.deltaY;
@@ -698,7 +752,7 @@ export function FileCanvasView({
       y: viewportRef.current.y - deltaY,
     };
     scheduleViewportCommit();
-  }, [scheduleViewportCommit]);
+  }, [applyCanvasZoom, scheduleViewportCommit]);
 
   // ── Worker connection helpers ──────────────────────────────────────────────
 
@@ -2005,8 +2059,8 @@ export function FileCanvasView({
       }
       const rect = canvasRef.current.getBoundingClientRect();
       const viewportCenter: Point = {
-        x: rect.width / 2 - viewportRef.current.x,
-        y: rect.height / 2 - viewportRef.current.y,
+        x: (rect.width / 2 - viewportRef.current.x) / zoomRef.current,
+        y: (rect.height / 2 - viewportRef.current.y) / zoomRef.current,
       };
       addNodeWithPosition(node, resolveInsertionPosition(node, viewportCenter, 'center'));
       contextMenuPointRef.current = null;
@@ -2342,6 +2396,42 @@ export function FileCanvasView({
               onInsertItem={handleInsertPaletteNode}
             />
 
+            <div
+              data-canvas-chrome="true"
+              className="panel-surface absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-[1.35rem] p-1.5"
+            >
+              <button
+                type="button"
+                aria-label="Zoom out"
+                onClick={() => applyCanvasZoom(zoomRef.current - CANVAS_ZOOM_STEP)}
+                className="flex size-9 items-center justify-center rounded-[1rem] text-slate-600 transition hover:bg-slate-100/90 disabled:pointer-events-none disabled:opacity-35 dark:text-slate-200 dark:hover:bg-slate-700/34"
+                disabled={zoom <= CANVAS_MIN_ZOOM + 0.001}
+              >
+                <MinusIcon className="size-4" />
+              </button>
+              <div className="min-w-14 select-none text-center text-xs font-semibold tabular-nums text-slate-500 dark:text-slate-300">
+                {Math.round(zoom * 100)}%
+              </div>
+              <button
+                type="button"
+                aria-label="Zoom in"
+                onClick={() => applyCanvasZoom(zoomRef.current + CANVAS_ZOOM_STEP)}
+                className="flex size-9 items-center justify-center rounded-[1rem] text-slate-600 transition hover:bg-slate-100/90 disabled:pointer-events-none disabled:opacity-35 dark:text-slate-200 dark:hover:bg-slate-700/34"
+                disabled={zoom >= CANVAS_MAX_ZOOM - 0.001}
+              >
+                <PlusIcon className="size-4" />
+              </button>
+              <button
+                type="button"
+                aria-label="Reset zoom"
+                onClick={resetCanvasZoom}
+                className="flex size-9 items-center justify-center rounded-[1rem] text-slate-500 transition hover:bg-slate-100/90 disabled:pointer-events-none disabled:opacity-35 dark:text-slate-300 dark:hover:bg-slate-700/34"
+                disabled={Math.abs(zoom - 1) < 0.001}
+              >
+                <RotateCcwIcon className="size-4" />
+              </button>
+            </div>
+
             {isPaletteDragOverCanvas ? (
               <div
                 aria-hidden="true"
@@ -2396,7 +2486,10 @@ export function FileCanvasView({
             {/* World-space canvas layer */}
             <div
               className="absolute inset-0 [will-change:transform]"
-              style={{ transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0)` }}
+              style={{
+                transform: `translate3d(${viewport.x}px, ${viewport.y}px, 0) scale(${zoom})`,
+                transformOrigin: '0 0',
+              }}
             >
               {/* Groups render below content nodes */}
               {groupNodes.map((node) => renderCanvasNode(node))}
