@@ -849,6 +849,7 @@ function PdfPage({
 
   return (
     <div
+      data-document-pdf-page
       ref={rootRef}
       className="relative overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-[0_2px_16px_rgba(15,23,42,0.08)] dark:border-white/[0.07] dark:bg-white dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_8px_40px_rgba(0,0,0,0.55)]"
       style={status === 'ready' ? undefined : { minHeight: 420 }}
@@ -966,10 +967,10 @@ function PdfDocument({
       {Array.from({ length: state.pageCount }, (_, index) => {
         const pageNumber = index + 1;
         return (
-          <div key={`${fileId}-${pageNumber}`} className="flex items-start">
+          <div key={`${fileId}-${pageNumber}`} data-document-page-row className="flex items-start">
             <PdfPage pdf={state.pdf} pageNumber={pageNumber} totalPages={state.pageCount} />
             {isNotesOpen && (
-              <div className="ml-4 flex w-96 shrink-0 self-stretch flex-col overflow-hidden border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
+              <div data-document-page-note className="ml-4 flex w-96 shrink-0 self-stretch flex-col overflow-hidden border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
                 {activeNotePage === pageNumber ? (
                   <NoteEditor
                     compact
@@ -1093,20 +1094,35 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, []);
 
   // Compute the centred panX.
-  // Notes-open: center the full block (page + gap + notes), but never clip the left edge —
-  // when the block overflows the viewport, anchor to the left so the page stays readable.
+  // Notes-open PDF view: center the split between page and notes, so both panes
+  // share the viewport around the middle. Other note views keep block centering.
   // Notes-closed: standard behaviour — center and allow symmetric clipping at high zoom.
   const calcCentreX = useCallback((root: HTMLElement | null, scaledWidth: number) => {
     const total = root?.clientWidth ?? 0;
     if (isNotesOpenRef.current) {
       const scale = CONTENT_WIDTH_PX > 0 ? scaledWidth / CONTENT_WIDTH_PX : 1;
+      if (kind === 'pdf') {
+        const pageRow = contentRef.current?.querySelector<HTMLElement>('[data-document-page-row]');
+        const pageElement = pageRow?.querySelector<HTMLElement>('[data-document-pdf-page]');
+        const noteElement = pageRow?.querySelector<HTMLElement>('[data-document-page-note]');
+
+        if (pageElement && noteElement) {
+          const pageRight = pageElement.offsetLeft + pageElement.offsetWidth;
+          const noteLeft = noteElement.offsetLeft;
+          const splitAnchorX = (pageRight + noteLeft) / 2;
+          return total / 2 - splitAnchorX * scale;
+        }
+
+        const fallbackSplitAnchorX = CONTENT_WIDTH_PX + NOTES_FLEX_GAP / 2;
+        return total / 2 - fallbackSplitAnchorX * scale;
+      }
       const blockWidth = scaledWidth + (NOTES_FLEX_GAP + NOTES_PANEL_WIDTH) * scale;
-      return Math.max(320, (total - blockWidth) / 2);
+      return (total - blockWidth) / 2;
     }
     return scaledWidth >= total
       ? (total - scaledWidth) / 2
       : Math.max(32, (total - scaledWidth) / 2);
-  }, []);
+  }, [kind]);
 
   // Center content horizontally on first layout
   useLayoutEffect(() => {
@@ -1142,13 +1158,18 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const updateContentHeight = () => {
       contentHeightRef.current = content.scrollHeight;
       const clampedY = clampPanY(vpRef.current.panY, vpRef.current.zoomPercent);
+      const scaledWidth = CONTENT_WIDTH_PX * (vpRef.current.zoomPercent / 100);
+      const nextPanX = initialized && !isFreePanRef.current
+        ? calcCentreX(rootRef.current, scaledWidth)
+        : vpRef.current.panX;
 
-      if (clampedY !== vpRef.current.panY) {
+      if (clampedY !== vpRef.current.panY || nextPanX !== vpRef.current.panX) {
         vpRef.current = {
           ...vpRef.current,
+          panX: nextPanX,
           panY: clampedY,
         };
-        setPan({ x: vpRef.current.panX, y: clampedY });
+        setPan({ x: nextPanX, y: clampedY });
       }
     };
 
@@ -1164,7 +1185,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateContentHeight);
     };
-  }, [clampPanY, file.id, kind]);
+  }, [calcCentreX, clampPanY, file.id, initialized, kind]);
 
   // Keep vpRef, isFreePanRef, isNotesOpenRef in sync with React state
   useEffect(() => {
@@ -1198,8 +1219,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       setZoomPercent(bounded);
       setPan({ x: newPanX, y: newPanY });
     } else if (isNotesOpenRef.current) {
-      // Notes mode: scale horizontally from cx so page+notes stay in view
-      const newPanX = Math.max(120, cx + (panX - cx) * factor);
+      // Notes mode: keep the combined page+notes block centered horizontally.
+      const root = rootRef.current;
+      const scaledWidth = CONTENT_WIDTH_PX * (bounded / 100);
+      const newPanX = root ? calcCentreX(root, scaledWidth) : panX;
       const newPanY = clampPanY(cy + (panY - cy) * factor, bounded);
       vpRef.current = { zoomPercent: bounded, panX: newPanX, panY: newPanY };
       setZoomPercent(bounded);
