@@ -846,51 +846,36 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
 
       {/* Fixed title overlay */}
       <div
-        className={`pointer-events-none fixed top-0 z-40 h-16 overflow-hidden border-b transition-[border-color,box-shadow] duration-300 ease-out ${
-          isHeaderCollapsed
-            ? 'border-transparent shadow-none'
-            : 'border-sidebar-border/35 shadow-[0_18px_42px_-34px_rgba(0,0,0,0.65)]'
+        className={`pointer-events-none fixed top-0 z-40 h-16 overflow-hidden border-b border-sidebar-border/35 shadow-[0_18px_42px_-34px_rgba(0,0,0,0.65)] transition-transform duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] ${
+          isHeaderCollapsed ? '-translate-y-full' : 'translate-y-0'
         }`}
         style={{ left: overlayInsets.left, right: overlayInsets.right }}
       >
-        <div
-          className={`absolute inset-0 bg-sidebar/76 backdrop-blur-xl transition-opacity duration-300 ease-out ${
-            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
-          }`}
-        />
-        <div
-          className={`absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent transition-opacity duration-300 ease-out ${
-            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
-          }`}
-        />
-        <div
-          className={`absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012)_52%,rgba(0,0,0,0.045))] transition-opacity duration-300 ease-out ${
-            isHeaderCollapsed ? 'opacity-0' : 'opacity-100'
-          }`}
-        />
-        <div
-          className={`relative flex h-full items-center justify-center px-28 text-center transition-[opacity,transform] duration-300 ease-out ${
-            isHeaderCollapsed ? '-translate-y-2 opacity-0' : 'translate-y-0 opacity-100'
-          }`}
-        >
+        <div className="absolute inset-0 bg-sidebar/76 backdrop-blur-xl" />
+        <div className="absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-white/12 to-transparent" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(255,255,255,0.045),rgba(255,255,255,0.012)_52%,rgba(0,0,0,0.045))]" />
+        <div className="relative flex h-full items-center justify-center px-28 text-center">
           <h1 className="truncate text-[0.95rem] font-semibold tracking-tight text-sidebar-foreground/78">
             {file.label}
           </h1>
         </div>
-        <button
-          type="button"
-          aria-label={isHeaderCollapsed ? 'Show title bar' : 'Hide title bar'}
-          aria-expanded={!isHeaderCollapsed}
-          onClick={() => setIsHeaderCollapsed((value) => !value)}
-          className="pointer-events-auto absolute right-4 top-1/2 flex size-9 -translate-y-1/2 items-center justify-center rounded-2xl border border-sidebar-border bg-background/80 text-foreground shadow-sm backdrop-blur-md transition-[background-color,transform,box-shadow] duration-200 hover:bg-background/95 active:scale-95"
-        >
-          {isHeaderCollapsed ? (
-            <ChevronDownIcon className="size-4" strokeWidth={2.7} />
-          ) : (
-            <ChevronUpIcon className="size-4" strokeWidth={2.7} />
-          )}
-        </button>
       </div>
+
+      {/* Collapse toggle — fixed independently so it stays reachable when header is hidden */}
+      <button
+        type="button"
+        aria-label={isHeaderCollapsed ? 'Show title bar' : 'Hide title bar'}
+        aria-expanded={!isHeaderCollapsed}
+        onClick={() => setIsHeaderCollapsed((value) => !value)}
+        className="pointer-events-auto fixed top-4 z-50 flex size-9 -translate-y-0 items-center justify-center rounded-2xl border border-sidebar-border bg-background/80 text-foreground shadow-sm backdrop-blur-md transition-[background-color,box-shadow] duration-200 hover:bg-background/95 active:scale-95"
+        style={{ right: overlayInsets.right + 16 }}
+      >
+        {isHeaderCollapsed ? (
+          <ChevronDownIcon className="size-4" strokeWidth={2.7} />
+        ) : (
+          <ChevronUpIcon className="size-4" strokeWidth={2.7} />
+        )}
+      </button>
 
       {/* Zoom controls */}
       <div
