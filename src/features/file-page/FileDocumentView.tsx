@@ -1168,6 +1168,8 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       vpRef.current = { ...vpRef.current, panX: x };
       setPan((prev) => ({ ...prev, x }));
     };
+    // Re-centre immediately in case the container settled while initialized was false
+    recentre();
     const observer = new ResizeObserver(() => window.requestAnimationFrame(recentre));
     observer.observe(root);
     return () => observer.disconnect();
@@ -1285,6 +1287,23 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     setZoomPercent(100);
     setPan({ x, y: CONTENT_INITIAL_TOP });
   }, [calcCentreX]);
+
+  // Post-paint re-centre: fires once after initialization to correct any
+  // layout that hadn't fully settled when the synchronous layoutEffect ran.
+  useEffect(() => {
+    if (!initialized) return;
+    const raf = requestAnimationFrame(() => {
+      if (isFreePanRef.current) return;
+      const root = rootRef.current;
+      if (!root) return;
+      const scaledWidth = CONTENT_WIDTH_PX * (vpRef.current.zoomPercent / 100);
+      const x = calcCentreX(root, scaledWidth);
+      if (x === vpRef.current.panX) return;
+      vpRef.current = { ...vpRef.current, panX: x };
+      setPan((prev) => ({ ...prev, x }));
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [initialized, file.id, calcCentreX]);
 
   // Re-center when notes panel opens/closes
   useEffect(() => {
