@@ -723,7 +723,7 @@ function NoteEditor({
 // ─── PDF renderer ──────────────────────────────────────────────────────────────
 
 const DOC_RENDER_SCALE = 1.5;
-const DOC_MAX_PAGES = 40;
+const DOC_MAX_PAGES = 200;
 
 type PdfDocState =
   | { status: 'loading' }
@@ -1058,15 +1058,37 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     return false;
   }, [kind, pageNotes, pdfPageCount]);
 
+  useEffect(() => {
+    const key = `${file.label}_notes`;
+    try {
+      const stored = window.localStorage.getItem(key);
+      if (stored) {
+        const parsed = JSON.parse(stored) as Record<number, string>;
+        setNotesByFile((prev) => ({ ...prev, [file.id]: parsed }));
+      }
+    } catch {
+      // ignore corrupt data
+    }
+  }, [file.id, file.label]);
+
   const updatePageNote = useCallback((page: number, note: string) => {
-    setNotesByFile((previous) => ({
-      ...previous,
-      [file.id]: {
-        ...(previous[file.id] ?? EMPTY_PAGE_NOTES),
-        [page]: note,
-      },
-    }));
-  }, [file.id]);
+    setNotesByFile((previous) => {
+      const updated = {
+        ...previous,
+        [file.id]: {
+          ...(previous[file.id] ?? EMPTY_PAGE_NOTES),
+          [page]: note,
+        },
+      };
+      const key = `${file.label}_notes`;
+      try {
+        window.localStorage.setItem(key, JSON.stringify(updated[file.id]));
+      } catch {
+        // ignore quota errors
+      }
+      return updated;
+    });
+  }, [file.id, file.label]);
 
   const clampPanY = useCallback((candidateY: number, nextZoomPercent = vpRef.current.zoomPercent) => {
     const root = rootRef.current;
