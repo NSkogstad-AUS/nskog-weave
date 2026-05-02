@@ -49,6 +49,7 @@ import { useTheme } from './hooks/use-theme';
 import type { FilePageNode, FilePageState, FilePageView } from '@/types/filePage';
 
 const WORKSPACE_FOLDERS_STORAGE_KEY = 'weave:workspace-folders:v1';
+const NAV_STATE_STORAGE_KEY = 'weave:nav:v1';
 const GENERATED_WORKSPACE_FOLDER_PREFIX = 'worker-output-folder:';
 const GENERATED_WORKSPACE_FILE_PREFIX = 'worker-output-file:';
 const ROOT_WORKSPACE_FOLDER_ID = 'workspace-root';
@@ -543,15 +544,31 @@ function isValidNavigationRoute(
     : Boolean(findFolderById(folders, route.folderId));
 }
 
+interface PersistedNavState {
+  openFileId: string | null;
+  openFolderId: string | null;
+  folderView: 'canvas' | 'explorer';
+}
+
+function hydrateNavState(): PersistedNavState {
+  try {
+    const raw = window.localStorage.getItem(NAV_STATE_STORAGE_KEY);
+    if (raw) return JSON.parse(raw) as PersistedNavState;
+  } catch {
+    // ignore corrupt data
+  }
+  return { openFileId: null, openFolderId: null, folderView: 'canvas' };
+}
+
 function App() {
   useTheme();
   const [folders, setFolders] = useState<WorkspaceFolder[]>(hydrateWorkspaceFolders);
   const [folderCanvasPages, setFolderCanvasPages] = useState<FolderCanvasStore>(
     readStoredFolderCanvasNodes,
   );
-  const [openFileId, setOpenFileId] = useState<string | null>(null);
-  const [openFolderId, setOpenFolderId] = useState<string | null>(null);
-  const [folderView, setFolderView] = useState<'canvas' | 'explorer'>('canvas');
+  const [openFileId, setOpenFileId] = useState<string | null>(() => hydrateNavState().openFileId);
+  const [openFolderId, setOpenFolderId] = useState<string | null>(() => hydrateNavState().openFolderId);
+  const [folderView, setFolderView] = useState<'canvas' | 'explorer'>(() => hydrateNavState().folderView);
   const [isFileDropActive, setIsFileDropActive] = useState(false);
   const [sidebarSelectedItems, setSidebarSelectedItems] = useState<SidebarSelectableItem[]>([]);
   const [highlightedSidebarItems, setHighlightedSidebarItems] = useState<
@@ -974,6 +991,13 @@ function App() {
       lastPersistedFoldersRef.current = serializedFolders;
     }
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      NAV_STATE_STORAGE_KEY,
+      JSON.stringify({ openFileId, openFolderId, folderView }),
+    );
+  }, [openFileId, openFolderId, folderView]);
 
   useEffect(() => {
     navigationHistoryRef.current = navigationHistory;
