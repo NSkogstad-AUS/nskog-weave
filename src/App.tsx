@@ -886,6 +886,19 @@ function App() {
     }
   }, [uploadTargetFolder]);
 
+  const handleFoldersChange = useCallback((nextFolders: WorkspaceFolder[]) => {
+    setFolders(stripGeneratedWorkspaceEntries(nextFolders));
+  }, []);
+
+  const handleImportFiles = useCallback((files: File[]) => {
+    void handleUploadFiles(files);
+  }, [handleUploadFiles]);
+
+  const handleOpenFolder = useCallback((folderId: string) => {
+    setOpenFolderId(folderId);
+    setOpenFileId(null);
+  }, []);
+
   const openFileInDocument = useCallback((fileId: string) => {
     const fileMatch = findFileById(displayFolders, fileId);
 
@@ -1165,16 +1178,11 @@ function App() {
           folders={displayFolders}
           activeSidebarItem={activeSidebarItem}
           highlightedItems={highlightedSidebarItems}
-          onFoldersChange={(nextFolders) => setFolders(stripGeneratedWorkspaceEntries(nextFolders))}
-          onImportFiles={(files) => {
-            void handleUploadFiles(files);
-          }}
+          onFoldersChange={handleFoldersChange}
+          onImportFiles={handleImportFiles}
           onSelectedItemsChange={setSidebarSelectedItems}
           onOpenFile={handleOpenFile}
-          onOpenFolder={(folderId) => {
-            setOpenFolderId(folderId);
-            setOpenFileId(null);
-          }}
+          onOpenFolder={handleOpenFolder}
           onDownloadFile={handleDownloadFile}
           onRequestDownloadFolder={handleRequestDownloadFolder}
           onFileDelete={handleFileDelete}

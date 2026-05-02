@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { memo, useCallback, useEffect, useMemo } from 'react';
 import { ArrowLeftIcon, ArrowRightIcon, FileTextIcon } from 'lucide-react';
 
 import {
@@ -49,7 +49,7 @@ interface FileWorkspaceProps {
   onOpenCanvasFile?: (fileId: string) => void;
 }
 
-export function FileWorkspace({
+export const FileWorkspace = memo(function FileWorkspace({
   activeFile,
   activeFolder,
   activeView,
@@ -370,4 +370,4 @@ export function FileWorkspace({
       </div>
     </div>
   );
-}
+});
