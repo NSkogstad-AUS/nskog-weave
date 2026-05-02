@@ -304,7 +304,7 @@ export const FileWorkspace = memo(function FileWorkspace({
       <div className="min-h-0 flex flex-1">
         <div className="min-h-0 flex-1">
           {activeView === 'document' && activeFile ? (
-            <FileDocumentView file={activeFile} />
+            <FileDocumentView key={activeFile.id} file={activeFile} />
           ) : activeView === 'canvas' ? (
             <FileCanvasView
               nodes={displayNodes}
