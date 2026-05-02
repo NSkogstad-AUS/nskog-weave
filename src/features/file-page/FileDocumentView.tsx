@@ -723,7 +723,7 @@ function NoteEditor({
 // ─── PDF renderer ──────────────────────────────────────────────────────────────
 
 const DOC_RENDER_SCALE = 1.5;
-const DOC_MAX_PAGES = 200;
+const DOC_MAX_PAGES = 1000;
 
 type PdfDocState =
   | { status: 'loading' }
@@ -1140,6 +1140,16 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       }
       const blockWidth = scaledWidth + (NOTES_FLEX_GAP + NOTES_PANEL_WIDTH) * scale;
       return (total - blockWidth) / 2;
+    }
+    // For PDFs (notes closed), the page may be narrower than CONTENT_WIDTH_PX
+    // (e.g. beamer slides). Measure the actual rendered page width from the DOM
+    // so the centering matches what the user actually sees.
+    if (kind === 'pdf') {
+      const pageElement = contentRef.current?.querySelector<HTMLElement>('[data-document-pdf-page]');
+      const actualWidth = pageElement ? pageElement.clientWidth * (scaledWidth / CONTENT_WIDTH_PX) : scaledWidth;
+      return actualWidth >= total
+        ? (total - actualWidth) / 2
+        : Math.max(32, (total - actualWidth) / 2);
     }
     return scaledWidth >= total
       ? (total - scaledWidth) / 2
