@@ -9,6 +9,8 @@ import {
   BoldIcon,
   CheckIcon,
   ChevronDownIcon,
+  ChevronLeftIcon,
+  ChevronRightIcon,
   ChevronUpIcon,
   DownloadIcon,
   Heading1Icon,
@@ -47,6 +49,10 @@ const CONTENT_BOTTOM_PADDING = 32;
 const NOTES_PANEL_WIDTH = 384; // px — matches w-96 Tailwind class
 const NOTES_PANEL_GAP = 24; // gap between content and notes panel (fixed overlay fallback)
 const NOTES_FLEX_GAP = 16; // ml-4 in px — gap used in the in-canvas flex row
+const PDF_PAGE_SIDEBAR_WIDTH = 176;
+const PDF_PAGE_SIDEBAR_COLLAPSED_WIDTH = 38;
+const PDF_PAGE_SIDEBAR_MARGIN = 16;
+const PDF_PAGE_THUMBNAIL_WIDTH = 112;
 const DOC_RENDER_MAX_CONCURRENT = 2;
 const EMPTY_PAGE_NOTES: Record<number, string> = {};
 const NOTE_EDITOR_EXTENSIONS = [
@@ -737,6 +743,12 @@ type PdfDocState =
   | { status: 'error' };
 
 type PdfPageStatus = 'waiting' | 'rendering' | 'ready' | 'error';
+type PdfSidebarDocument = {
+  fileId: string;
+  pdf: PDFDocumentProxy;
+  pageCount: number;
+  totalPageCount: number;
+} | null;
 
 function PdfPage({
   pdf,
@@ -885,11 +897,165 @@ function PdfPage({
   );
 }
 
+function PdfPageThumbnail({
+  isActive,
+  onClick,
+  pageNumber,
+  pdf,
+}: {
+  isActive: boolean;
+  onClick: () => void;
+  pageNumber: number;
+  pdf: PDFDocumentProxy;
+}) {
+  const rootRef = useRef<HTMLButtonElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [status, setStatus] = useState<PdfPageStatus>('waiting');
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) {
+      return;
+    }
+
+    let cancelled = false;
+    let hasStarted = false;
+    let renderTask: { promise: Promise<void>; cancel: () => void } | null = null;
+    setStatus('waiting');
+
+    async function renderThumbnail() {
+      if (cancelled || hasStarted) return;
+
+      hasStarted = true;
+      setStatus('rendering');
+
+      try {
+        await scheduleDocumentPageRender(async () => {
+          if (cancelled) return;
+
+          const page = await pdf.getPage(pageNumber);
+
+          if (cancelled) {
+            page.cleanup();
+            return;
+          }
+
+          const baseViewport = page.getViewport({ scale: 1 });
+          const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+          const renderScale =
+            baseViewport.width > 0
+              ? (PDF_PAGE_THUMBNAIL_WIDTH * pixelRatio) / baseViewport.width
+              : pixelRatio;
+          const viewport = page.getViewport({ scale: renderScale });
+          const canvas = canvasRef.current;
+          const ctx = canvas?.getContext('2d');
+
+          if (!canvas || !ctx) {
+            page.cleanup();
+            setStatus('error');
+            return;
+          }
+
+          canvas.width = Math.floor(viewport.width);
+          canvas.height = Math.floor(viewport.height);
+          canvas.style.width = `${PDF_PAGE_THUMBNAIL_WIDTH}px`;
+          canvas.style.height = `${Math.round(
+            baseViewport.width > 0
+              ? PDF_PAGE_THUMBNAIL_WIDTH * (baseViewport.height / baseViewport.width)
+              : viewport.height / pixelRatio,
+          )}px`;
+          renderTask = page.render({ canvas, canvasContext: ctx, viewport });
+          await renderTask.promise;
+          page.cleanup();
+
+          if (!cancelled) {
+            setStatus('ready');
+          }
+        });
+      } catch {
+        if (!cancelled) {
+          setStatus('error');
+        }
+      }
+    }
+
+    if (!('IntersectionObserver' in window)) {
+      void renderThumbnail();
+      return () => {
+        cancelled = true;
+        try {
+          renderTask?.cancel();
+        } catch {
+          // Ignore cancellation races from pdf.js.
+        }
+      };
+    }
+
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (!entry.isIntersecting) return;
+
+        observer.disconnect();
+        void renderThumbnail();
+      },
+      { rootMargin: '500px 0px' },
+    );
+
+    observer.observe(root);
+
+    return () => {
+      cancelled = true;
+      observer.disconnect();
+      try {
+        renderTask?.cancel();
+      } catch {
+        // Ignore cancellation races from pdf.js.
+      }
+    };
+  }, [pageNumber, pdf]);
+
+  return (
+    <button
+      ref={rootRef}
+      type="button"
+      data-pdf-page-nav={pageNumber}
+      aria-current={isActive ? 'page' : undefined}
+      aria-label={`Go to page ${pageNumber}`}
+      onClick={onClick}
+      className={`mb-3 flex w-full flex-col items-center gap-1.5 rounded-lg border p-1.5 text-left transition ${
+        isActive
+          ? 'border-slate-900/60 bg-slate-900/[0.06] text-slate-900 shadow-sm dark:border-white/45 dark:bg-white/[0.08] dark:text-slate-100'
+          : 'border-transparent text-muted-foreground hover:border-sidebar-border/65 hover:bg-sidebar-accent/55 hover:text-sidebar-accent-foreground'
+      }`}
+    >
+      <div
+        className="relative overflow-hidden rounded-md border border-slate-200/85 bg-white shadow-[0_8px_22px_-20px_rgba(15,23,42,0.7)] dark:border-white/[0.08] dark:bg-white"
+        style={{ width: PDF_PAGE_THUMBNAIL_WIDTH, minHeight: 72 }}
+      >
+        <canvas
+          ref={canvasRef}
+          aria-hidden="true"
+          className={`block ${status === 'ready' ? '' : 'invisible'}`}
+        />
+        {status !== 'ready' ? (
+          <div className="absolute inset-0 flex items-center justify-center bg-slate-50 text-[0.62rem] text-slate-300 dark:bg-slate-800/45 dark:text-slate-500">
+            {status === 'error' ? 'Error' : pageNumber}
+          </div>
+        ) : null}
+      </div>
+      <span className="w-full px-0.5 text-center text-[0.66rem] font-medium">
+        {pageNumber}
+      </span>
+    </button>
+  );
+}
+
 function PdfDocument({
   activeNotePage,
   fileId,
   isNotesOpen,
   onActivateNote,
+  onPdfReady,
   pageNotes,
   onNoteChange,
   onPageCount,
@@ -898,6 +1064,7 @@ function PdfDocument({
   fileId: string;
   isNotesOpen: boolean;
   onActivateNote: (page: number) => void;
+  onPdfReady: (document: PdfSidebarDocument) => void;
   pageNotes: Record<number, string>;
   onNoteChange: (page: number, text: string) => void;
   onPageCount: (count: number) => void;
@@ -909,6 +1076,7 @@ function PdfDocument({
     let loadedPdf: PDFDocumentProxy | null = null;
 
     setState({ status: 'loading' });
+    onPdfReady(null);
 
     async function load() {
       try {
@@ -937,6 +1105,12 @@ function PdfDocument({
 
         const pageCount = Math.min(loadedPdf.numPages, DOC_MAX_PAGES);
         onPageCount(pageCount);
+        onPdfReady({
+          fileId,
+          pdf: loadedPdf,
+          pageCount,
+          totalPageCount: loadedPdf.numPages,
+        });
         setState({
           status: 'ready',
           pdf: loadedPdf,
@@ -954,9 +1128,10 @@ function PdfDocument({
 
     return () => {
       cancelled = true;
+      onPdfReady(null);
       void loadedPdf?.destroy();
     };
-  }, [fileId]);
+  }, [fileId, onPdfReady]);
 
   if (state.status === 'loading') {
     return (
@@ -981,7 +1156,12 @@ function PdfDocument({
       {Array.from({ length: state.pageCount }, (_, index) => {
         const pageNumber = index + 1;
         return (
-          <div key={`${fileId}-${pageNumber}`} data-document-page-row className="flex items-start">
+          <div
+            key={`${fileId}-${pageNumber}`}
+            data-document-page-row
+            data-document-page-number={pageNumber}
+            className="flex items-start"
+          >
             <PdfPage pdf={state.pdf} pageNumber={pageNumber} totalPages={state.pageCount} />
             {isNotesOpen && (
               <div data-document-page-note className="ml-4 flex w-96 shrink-0 self-stretch flex-col overflow-hidden border-t border-sidebar-border/25 bg-sidebar/85 backdrop-blur-sm">
@@ -1042,6 +1222,9 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [activeNotePage, setActiveNotePage] = useState<number | null>(null);
   const [notesByFile, setNotesByFile] = useState<Record<string, Record<number, string>>>({});
   const [pdfPageCount, setPdfPageCount] = useState(0);
+  const [activePdfPage, setActivePdfPage] = useState(1);
+  const [pdfSidebarDocument, setPdfSidebarDocument] = useState<PdfSidebarDocument>(null);
+  const [isPdfSidebarCollapsed, setIsPdfSidebarCollapsed] = useState(false);
   const pageNotes = notesByFile[file.id] ?? EMPTY_PAGE_NOTES;
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
@@ -1055,6 +1238,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const isDraggingRef = useRef(false);
   const dragStartRef = useRef({ clientX: 0, clientY: 0, panX: 0, panY: 0 });
   const dropdownRef = useRef<HTMLDivElement | null>(null);
+  const pageSidebarRef = useRef<HTMLDivElement | null>(null);
 
   const scale = zoomPercent / 100;
   const displayZoom = isNotesOpen ? Math.round(zoomPercent / 2) : zoomPercent;
@@ -1103,6 +1287,50 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       return updated;
     });
   }, [file.id, file.label]);
+
+  const updatePdfSidebarDocument = useCallback((document: PdfSidebarDocument) => {
+    setPdfSidebarDocument(document);
+  }, []);
+
+  const updateActivePdfPage = useCallback(() => {
+    if (kind !== 'pdf' || pdfPageCount <= 0) {
+      setActivePdfPage(1);
+      return;
+    }
+
+    const rows = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>('[data-document-page-row]') ?? [],
+    );
+    if (rows.length === 0) {
+      return;
+    }
+
+    const currentScale = vpRef.current.zoomPercent / 100;
+    const focusY = CONTENT_INITIAL_TOP + 24;
+    let nearestPage = 1;
+    let nearestDistance = Number.POSITIVE_INFINITY;
+
+    for (const row of rows) {
+      const rawPageNumber = Number(row.dataset.documentPageNumber);
+      const pageNumber = Number.isFinite(rawPageNumber) && rawPageNumber > 0 ? rawPageNumber : nearestPage;
+      const top = vpRef.current.panY + row.offsetTop * currentScale;
+      const bottom = top + row.offsetHeight * currentScale;
+
+      if (focusY >= top && focusY <= bottom) {
+        nearestPage = pageNumber;
+        nearestDistance = 0;
+        break;
+      }
+
+      const distance = Math.min(Math.abs(focusY - top), Math.abs(focusY - bottom));
+      if (distance < nearestDistance) {
+        nearestDistance = distance;
+        nearestPage = pageNumber;
+      }
+    }
+
+    setActivePdfPage((current) => (current === nearestPage ? current : nearestPage));
+  }, [kind, pdfPageCount]);
 
   const clampPanY = useCallback((candidateY: number, nextZoomPercent = vpRef.current.zoomPercent) => {
     const root = rootRef.current;
@@ -1219,6 +1447,8 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
         };
         setPan({ x: nextPanX, y: clampedY });
       }
+
+      updateActivePdfPage();
     };
 
     updateContentHeight();
@@ -1233,7 +1463,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       resizeObserver.disconnect();
       window.removeEventListener('resize', updateContentHeight);
     };
-  }, [calcCentreX, clampPanY, file.id, initialized, kind]);
+  }, [calcCentreX, clampPanY, file.id, initialized, kind, updateActivePdfPage]);
 
   // Keep vpRef, isFreePanRef, isNotesOpenRef in sync with React state
   useEffect(() => {
@@ -1243,8 +1473,22 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, [zoomPercent, pan, isFreePan, isNotesOpen]);
 
   useEffect(() => {
+    updateActivePdfPage();
+  }, [pan, pdfPageCount, updateActivePdfPage, zoomPercent]);
+
+  useEffect(() => {
+    if (kind !== 'pdf') return;
+    const activeButton = pageSidebarRef.current?.querySelector<HTMLElement>(
+      `[data-pdf-page-nav="${activePdfPage}"]`,
+    );
+    activeButton?.scrollIntoView({ block: 'nearest' });
+  }, [activePdfPage, kind]);
+
+  useEffect(() => {
     setActiveNotePage(null);
     setPdfPageCount(0);
+    setActivePdfPage(1);
+    setPdfSidebarDocument(null);
   }, [file.id, kind]);
 
   useEffect(() => {
@@ -1311,6 +1555,33 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     setZoomPercent(100);
     setPan({ x, y: CONTENT_INITIAL_TOP });
   }, [calcCentreX]);
+
+  const jumpToPdfPage = useCallback((pageNumber: number) => {
+    if (kind !== 'pdf') return;
+
+    const root = rootRef.current;
+    const rows = Array.from(
+      contentRef.current?.querySelectorAll<HTMLElement>('[data-document-page-row]') ?? [],
+    );
+    const targetRow = rows[pageNumber - 1];
+    if (!root || !targetRow) return;
+
+    const currentZoomPercent = vpRef.current.zoomPercent;
+    const currentScale = currentZoomPercent / 100;
+    const nextPanY = clampPanY(CONTENT_INITIAL_TOP - targetRow.offsetTop * currentScale, currentZoomPercent);
+    const scaledWidth = CONTENT_WIDTH_PX * currentScale;
+    const nextPanX = calcCentreX(root, scaledWidth);
+
+    isFreePanRef.current = false;
+    vpRef.current = {
+      zoomPercent: currentZoomPercent,
+      panX: nextPanX,
+      panY: nextPanY,
+    };
+    setIsFreePan(false);
+    setPan({ x: nextPanX, y: nextPanY });
+    setActivePdfPage(pageNumber);
+  }, [calcCentreX, clampPanY, kind]);
 
   // Post-paint re-centre: fires once after initialization to correct any
   // layout that hadn't fully settled when the synchronous layoutEffect ran.
@@ -1532,6 +1803,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       fileId={file.id}
       isNotesOpen={isNotesOpen}
       onActivateNote={setActiveNotePage}
+      onPdfReady={updatePdfSidebarDocument}
       pageNotes={pageNotes}
       onNoteChange={updatePageNote}
       onPageCount={setPdfPageCount}
@@ -1578,6 +1850,75 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           {documentContent}
         </div>
       </div>
+
+      {kind === 'pdf' && pdfSidebarDocument?.fileId === file.id && (
+        <nav
+          aria-label="PDF pages"
+          className={`pointer-events-auto fixed z-30 hidden overflow-hidden rounded-xl border border-sidebar-border/45 bg-background/86 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.46)] backdrop-blur-md transition-[width,opacity] duration-200 sm:flex dark:bg-slate-900/90 ${
+            isPdfSidebarCollapsed ? 'opacity-65 hover:opacity-100' : 'opacity-95'
+          }`}
+          style={{
+            right: overlayInsets.right + PDF_PAGE_SIDEBAR_MARGIN,
+            top: isHeaderCollapsed ? 16 : 80,
+            bottom: 72,
+            width: isPdfSidebarCollapsed ? PDF_PAGE_SIDEBAR_COLLAPSED_WIDTH : PDF_PAGE_SIDEBAR_WIDTH,
+          }}
+        >
+          <div className="flex min-h-0 w-full flex-col">
+            <div className="flex h-10 shrink-0 items-center justify-between border-b border-sidebar-border/45 px-2">
+              {!isPdfSidebarCollapsed && (
+                <span className="text-[0.68rem] font-semibold uppercase text-muted-foreground">
+                  Pages
+                </span>
+              )}
+              <button
+                type="button"
+                aria-label={isPdfSidebarCollapsed ? 'Expand page sidebar' : 'Collapse page sidebar'}
+                aria-expanded={!isPdfSidebarCollapsed}
+                onClick={() => setIsPdfSidebarCollapsed((value) => !value)}
+                className="ml-auto flex size-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+              >
+                {isPdfSidebarCollapsed ? (
+                  <ChevronLeftIcon className="size-3.5" />
+                ) : (
+                  <ChevronRightIcon className="size-3.5" />
+                )}
+              </button>
+            </div>
+
+            {isPdfSidebarCollapsed ? (
+              <button
+                type="button"
+                aria-label={`Current page ${activePdfPage}. Expand page sidebar`}
+                onClick={() => setIsPdfSidebarCollapsed(false)}
+                className="mx-auto mt-2 flex min-h-8 w-7 items-center justify-center rounded-lg bg-slate-900/80 font-mono text-[0.66rem] text-white shadow-sm transition hover:bg-slate-900 dark:bg-slate-100/90 dark:text-slate-950"
+              >
+                {activePdfPage}
+              </button>
+            ) : (
+              <div ref={pageSidebarRef} className="soft-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
+                {Array.from({ length: pdfSidebarDocument.pageCount }, (_, index) => {
+                  const pageNumber = index + 1;
+                  return (
+                    <PdfPageThumbnail
+                      key={`${pdfSidebarDocument.fileId}-${pageNumber}`}
+                      isActive={pageNumber === activePdfPage}
+                      onClick={() => jumpToPdfPage(pageNumber)}
+                      pageNumber={pageNumber}
+                      pdf={pdfSidebarDocument.pdf}
+                    />
+                  );
+                })}
+                {pdfSidebarDocument.totalPageCount > pdfSidebarDocument.pageCount ? (
+                  <p className="px-1 pb-2 text-center text-[0.66rem] text-muted-foreground">
+                    First {pdfSidebarDocument.pageCount} of {pdfSidebarDocument.totalPageCount}
+                  </p>
+                ) : null}
+              </div>
+            )}
+          </div>
+        </nav>
+      )}
 
       {/* Fixed title overlay */}
       <div
