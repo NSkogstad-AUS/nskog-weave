@@ -722,7 +722,7 @@ function NoteEditor({
 
 // ─── PDF renderer ──────────────────────────────────────────────────────────────
 
-const DOC_RENDER_SCALE = 1.5;
+const DOC_RENDER_PIXEL_RATIO = 2;
 const DOC_MAX_PAGES = 1000;
 
 type PdfDocState =
@@ -783,7 +783,12 @@ function PdfPage({
             return;
           }
 
-          const viewport = page.getViewport({ scale: DOC_RENDER_SCALE });
+          const baseViewport = page.getViewport({ scale: 1 });
+          const renderScale =
+            baseViewport.width > 0
+              ? (CONTENT_WIDTH_PX * DOC_RENDER_PIXEL_RATIO) / baseViewport.width
+              : DOC_RENDER_PIXEL_RATIO;
+          const viewport = page.getViewport({ scale: renderScale });
           const canvas = canvasRef.current;
           const ctx = canvas?.getContext('2d');
 
@@ -795,6 +800,12 @@ function PdfPage({
 
           canvas.width = Math.floor(viewport.width);
           canvas.height = Math.floor(viewport.height);
+          canvas.style.width = `${CONTENT_WIDTH_PX}px`;
+          canvas.style.height = `${Math.round(
+            baseViewport.width > 0
+              ? CONTENT_WIDTH_PX * (baseViewport.height / baseViewport.width)
+              : viewport.height / DOC_RENDER_PIXEL_RATIO,
+          )}px`;
           renderTask = page.render({ canvas, canvasContext: ctx, viewport });
           await renderTask.promise;
           page.cleanup();
@@ -852,7 +863,10 @@ function PdfPage({
       data-document-pdf-page
       ref={rootRef}
       className="relative overflow-hidden rounded-xl border border-slate-200/70 bg-white shadow-[0_2px_16px_rgba(15,23,42,0.08)] dark:border-white/[0.07] dark:bg-white dark:shadow-[0_0_0_1px_rgba(255,255,255,0.06),0_8px_40px_rgba(0,0,0,0.55)]"
-      style={status === 'ready' ? undefined : { minHeight: 420 }}
+      style={{
+        width: CONTENT_WIDTH_PX,
+        ...(status === 'ready' ? {} : { minHeight: 420 }),
+      }}
     >
       <canvas
         ref={canvasRef}

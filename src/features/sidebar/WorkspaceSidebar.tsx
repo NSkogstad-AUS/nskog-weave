@@ -58,7 +58,6 @@ type PendingFolderDelete =
     }
   | null;
 
-type SidebarFilterMode = 'all' | 'files' | 'folders';
 type SidebarSortMode = 'custom' | 'name-asc' | 'name-desc' | 'type';
 
 function queueAfterMenuClose(callback: () => void) {
@@ -75,46 +74,6 @@ function compareSidebarLabels(
   return direction === 'asc'
     ? left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
     : right.label.localeCompare(left.label, undefined, { numeric: true, sensitivity: 'base' });
-}
-
-function filterFoldersBySidebarMode(
-  folders: WorkspaceFolder[],
-  filterMode: SidebarFilterMode,
-): WorkspaceFolder[] {
-  if (filterMode === 'all') {
-    return folders;
-  }
-
-  return folders.flatMap((folder) => {
-    const filteredChildren = filterFoldersBySidebarMode(folder.children, filterMode);
-
-    if (filterMode === 'folders') {
-      return [
-        {
-          ...folder,
-          children: filteredChildren,
-          files: [],
-          separators: [],
-          itemOrder: undefined,
-        },
-      ];
-    }
-
-    const hasVisibleFiles = folder.files.length > 0 || filteredChildren.length > 0;
-
-    if (!hasVisibleFiles) {
-      return [];
-    }
-
-    return [
-      {
-        ...folder,
-        children: filteredChildren,
-        separators: [],
-        itemOrder: undefined,
-      },
-    ];
-  });
 }
 
 function sortSidebarFolders(
@@ -242,10 +201,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     () => new Set(getAllFolderIds(controlledFolders ?? createWorkspaceFolders())),
   );
   const [searchQuery, setSearchQuery] = useState('');
-  const [filterMode, setFilterMode] = useState<SidebarFilterMode>('all');
   const [sortMode, setSortMode] = useState<SidebarSortMode>('custom');
   const deferredSearchQuery = useDeferredValue(searchQuery);
-  const deferredFilterMode = useDeferredValue(filterMode);
   const deferredSortMode = useDeferredValue(sortMode);
   const searchActive = deferredSearchQuery.trim().length > 0;
   const searchableFolders = useMemo(
@@ -253,17 +210,11 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     [deferredSearchQuery, folders],
   );
   const visibleFolders = useMemo(
-    () => {
-      const filteredFolders =
-        deferredFilterMode === 'all'
-          ? searchableFolders
-          : filterFoldersBySidebarMode(searchableFolders, deferredFilterMode);
-
-      return deferredSortMode === 'custom'
-        ? filteredFolders
-        : sortSidebarFolders(filteredFolders, deferredSortMode);
-    },
-    [deferredFilterMode, deferredSortMode, searchableFolders],
+    () =>
+      deferredSortMode === 'custom'
+        ? searchableFolders
+        : sortSidebarFolders(searchableFolders, deferredSortMode),
+    [deferredSortMode, searchableFolders],
   );
   const allSelectableItems = useMemo(
     () => collectVisibleSidebarItems(folders, new Set(getAllFolderIds(folders)), true),
@@ -519,24 +470,6 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     </div>
 
                     <div className="mt-3 grid gap-2">
-                      <label className="group relative flex h-9 items-center rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-3 text-sm transition hover:border-sidebar-border hover:bg-sidebar/70 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
-                        <span className="flex min-w-20 shrink-0 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                          Filter
-                        </span>
-                        <select
-                          value={filterMode}
-                          onChange={(event) =>
-                            setFilterMode(event.target.value as SidebarFilterMode)
-                          }
-                          className="h-full min-w-0 flex-1 appearance-none bg-transparent pr-7 text-sm font-medium text-foreground outline-none"
-                        >
-                          <option value="all">All items</option>
-                          <option value="files">Files only</option>
-                          <option value="folders">Folders only</option>
-                        </select>
-                        <ChevronDownIcon className="pointer-events-none absolute right-3 size-4 text-muted-foreground transition group-focus-within:text-foreground" />
-                      </label>
-
                       <label className="group relative flex h-9 items-center rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-3 text-sm transition hover:border-sidebar-border hover:bg-sidebar/70 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
                         <span className="flex min-w-20 shrink-0 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                           Sort
