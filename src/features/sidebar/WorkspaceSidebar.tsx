@@ -445,7 +445,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
         containerClassName="rounded-none"
       >
         <div className="flex h-full bg-sidebar/95">
-          <div className="flex w-[4.25rem] shrink-0 flex-col border-r border-sidebar-border/80">
+          <div className="flex w-(--sidebar-width-icon) shrink-0 flex-col border-r border-sidebar-border/80">
             <div className="flex h-16 items-center justify-center border-b border-sidebar-border/80 px-2">
               <SidebarTrigger className="size-9 rounded-2xl border border-sidebar-border bg-background/80 shadow-sm" />
             </div>

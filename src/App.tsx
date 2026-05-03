@@ -1169,7 +1169,7 @@ function App() {
         style={
           {
             '--sidebar-width': '24rem',
-            '--sidebar-width-icon': '4.25rem',
+            '--sidebar-width-icon': '3rem',
           } as React.CSSProperties
         }
         className="min-h-screen w-full bg-transparent"
