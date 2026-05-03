@@ -16,8 +16,7 @@ interface FileContentPreviewProps {
 
 const MAX_SIDE_PREVIEW_CHARACTERS = 20_000;
 const PDF_PREVIEW_PAGE_WIDTH = 228;
-const PDF_PREVIEW_THUMBNAIL_WIDTH = 70;
-const PDF_PREVIEW_THUMBNAIL_SIDEBAR_WIDTH = 104;
+const PDF_PREVIEW_THUMBNAIL_WIDTH = 64;
 
 type PdfPreviewState =
   | { status: 'loading' }
@@ -182,10 +181,10 @@ function PdfPreviewThumbnail({
       aria-current={isActive ? 'page' : undefined}
       aria-label={`Preview page ${pageNumber}`}
       onClick={onClick}
-      className={`mb-2 flex w-full flex-col items-center gap-1 rounded-lg border p-1 transition ${
+      className={`mb-2 flex w-full flex-col items-center gap-1 rounded-md border px-1 py-1.5 transition ${
         isActive
-          ? 'border-slate-900/55 bg-slate-900/[0.06] text-slate-950 shadow-sm dark:border-white/45 dark:bg-white/[0.08] dark:text-slate-100'
-          : 'border-transparent text-slate-500 hover:border-slate-200/80 hover:bg-slate-50 dark:text-slate-400 dark:hover:border-slate-600/40 dark:hover:bg-slate-800/50'
+          ? 'border-slate-900/35 bg-white text-slate-950 shadow-[0_8px_22px_-20px_rgba(15,23,42,0.7)] dark:border-white/35 dark:bg-white/[0.08] dark:text-slate-100'
+          : 'border-transparent text-slate-500 hover:bg-slate-100/65 dark:text-slate-400 dark:hover:bg-slate-800/45'
       }`}
     >
       {shouldRender ? (
@@ -313,7 +312,7 @@ function PdfDocumentPreview({ document }: { document: PreviewDocument }) {
         aria-label={isSidebarCollapsed ? 'Show preview page sidebar' : 'Hide preview page sidebar'}
         aria-expanded={!isSidebarCollapsed}
         onClick={() => setIsSidebarCollapsed((value) => !value)}
-        className="pointer-events-auto absolute right-0 top-0 z-20 flex size-8 items-center justify-center rounded-full border border-slate-200/85 bg-white/90 text-slate-700 shadow-sm backdrop-blur-md transition-[background-color,transform] duration-200 hover:bg-white active:scale-95 dark:border-slate-600/40 dark:bg-slate-900/90 dark:text-slate-200"
+        className="pointer-events-auto absolute right-2 top-2 z-20 flex size-8 items-center justify-center rounded-full border border-slate-200/75 bg-white/92 text-slate-700 shadow-[0_10px_28px_-20px_rgba(15,23,42,0.65)] backdrop-blur-md transition-[background-color,box-shadow,transform] duration-200 hover:bg-white hover:shadow-[0_14px_34px_-22px_rgba(15,23,42,0.7)] active:scale-95 dark:border-slate-600/40 dark:bg-slate-900/90 dark:text-slate-200"
       >
         {isSidebarCollapsed ? (
           <ChevronLeftIcon className="size-4" strokeWidth={2.5} />
@@ -327,19 +326,19 @@ function PdfDocumentPreview({ document }: { document: PreviewDocument }) {
         className={`flex shrink-0 flex-col overflow-hidden border-l bg-white/78 transition-[width,opacity] duration-200 ease-out dark:bg-slate-900/62 ${
           isSidebarCollapsed
             ? 'pointer-events-none w-0 border-transparent opacity-0 dark:border-transparent'
-            : 'pointer-events-auto w-[104px] border-slate-200/75 opacity-100 dark:border-slate-600/35'
+            : 'pointer-events-auto w-[96px] border-slate-200/65 opacity-100 dark:border-slate-600/35'
         }`}
         onWheel={(event) => event.stopPropagation()}
       >
-          <div className="flex h-8 shrink-0 items-center border-b border-slate-200/70 pl-2 pr-1 dark:border-slate-600/35">
-            <span className="ml-1 text-[0.62rem] font-semibold uppercase text-slate-400 dark:text-slate-500">
+          <div className="flex h-10 shrink-0 items-center border-b border-slate-200/65 px-3 dark:border-slate-600/35">
+            <span className="text-[0.62rem] font-semibold uppercase tracking-wide text-slate-400 dark:text-slate-500">
               Pages
             </span>
           </div>
 
           <div
             ref={sidebarRef}
-            className="soft-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2"
+            className="soft-scrollbar min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-3"
             onWheel={(event) => event.stopPropagation()}
           >
             {Array.from({ length: state.pageCount }, (_, index) => {
