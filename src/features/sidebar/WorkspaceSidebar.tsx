@@ -1,6 +1,6 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { SettingsPopover } from './SettingsPopover';
-import { ArrowUpDownIcon, ListFilterIcon, SearchIcon } from 'lucide-react';
+import { ChevronDownIcon, SearchIcon } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -518,10 +518,9 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                       />
                     </div>
 
-                    <div className="mt-3 flex flex-wrap items-center gap-2">
-                      <label className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          <ListFilterIcon className="size-3.5" />
+                    <div className="mt-3 grid gap-2">
+                      <label className="group relative flex h-9 items-center rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-3 text-sm transition hover:border-sidebar-border hover:bg-sidebar/70 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+                        <span className="flex min-w-20 shrink-0 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                           Filter
                         </span>
                         <select
@@ -529,17 +528,17 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                           onChange={(event) =>
                             setFilterMode(event.target.value as SidebarFilterMode)
                           }
-                          className="h-8 rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-2.5 text-sm font-medium normal-case tracking-normal text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35"
+                          className="h-full min-w-0 flex-1 appearance-none bg-transparent pr-7 text-sm font-medium text-foreground outline-none"
                         >
                           <option value="all">All items</option>
                           <option value="files">Files only</option>
                           <option value="folders">Folders only</option>
                         </select>
+                        <ChevronDownIcon className="pointer-events-none absolute right-3 size-4 text-muted-foreground transition group-focus-within:text-foreground" />
                       </label>
 
-                      <label className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                        <span className="flex shrink-0 items-center gap-1.5">
-                          <ArrowUpDownIcon className="size-3.5" />
+                      <label className="group relative flex h-9 items-center rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-3 text-sm transition hover:border-sidebar-border hover:bg-sidebar/70 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/30">
+                        <span className="flex min-w-20 shrink-0 items-center text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                           Sort
                         </span>
                         <select
@@ -547,24 +546,15 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                           onChange={(event) =>
                             setSortMode(event.target.value as SidebarSortMode)
                           }
-                          className="h-8 rounded-lg border border-sidebar-border/70 bg-sidebar/40 px-2.5 text-sm font-medium normal-case tracking-normal text-foreground outline-none transition focus-visible:border-ring focus-visible:ring-2 focus-visible:ring-ring/35"
+                          className="h-full min-w-0 flex-1 appearance-none bg-transparent pr-7 text-sm font-medium text-foreground outline-none"
                         >
                           <option value="custom">Manual order</option>
                           <option value="name-asc">Name A-Z</option>
                           <option value="name-desc">Name Z-A</option>
                           <option value="type">Type</option>
                         </select>
+                        <ChevronDownIcon className="pointer-events-none absolute right-3 size-4 text-muted-foreground transition group-focus-within:text-foreground" />
                       </label>
-                    </div>
-
-                    <div className="mt-2 flex items-center justify-between gap-3 px-0.5 text-[11px] font-medium text-muted-foreground">
-                      <span>
-                        {visibleSelectableItems.length} visible item
-                        {visibleSelectableItems.length === 1 ? '' : 's'}
-                      </span>
-                      <span>
-                        {selectedItems.length} selected
-                      </span>
                     </div>
                   </div>
 
