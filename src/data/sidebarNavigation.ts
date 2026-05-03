@@ -314,6 +314,60 @@ function normalizeWorkspaceFolders(folders: WorkspaceFolder[]) {
   return folders.map((folder) => normalizeFolderOrdering(folder));
 }
 
+function normalizeSearchText(value: string) {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim()
+    .replace(/\s+/g, ' ');
+}
+
+function getSearchTokens(value: string) {
+  return normalizeSearchText(value).split(' ').filter(Boolean);
+}
+
+function searchTokenMatches(token: string, candidateTokens: string[]) {
+  if (/^\d+$/.test(token)) {
+    return candidateTokens.some((candidate) => candidate === token);
+  }
+
+  return candidateTokens.some(
+    (candidate) =>
+      candidate.includes(token) ||
+      token.includes(candidate),
+  );
+}
+
+function searchableFileText(file: WorkspaceFile) {
+  return [
+    file.label,
+    file.description,
+    file.kind,
+    file.mimeType ?? '',
+  ].join(' ');
+}
+
+function searchTextMatches(value: string, queryTokens: string[]) {
+  if (queryTokens.length === 0) {
+    return true;
+  }
+
+  const candidateTokens = getSearchTokens(value);
+  const compactCandidate = candidateTokens.join('');
+  const compactQuery = queryTokens.join('');
+
+  if (candidateTokens.length === 0) {
+    return false;
+  }
+
+  return (
+    compactCandidate.includes(compactQuery) ||
+    queryTokens.every((token) => searchTokenMatches(token, candidateTokens))
+  );
+}
+
 function insertSeparatorIntoFolder(
   folders: WorkspaceFolder[],
   folderId: string,
@@ -830,20 +884,18 @@ export function filterWorkspaceFolders(
   folders: WorkspaceFolder[],
   rawQuery: string,
 ): WorkspaceFolder[] {
-  const query = rawQuery.trim().toLowerCase();
+  const queryTokens = getSearchTokens(rawQuery);
 
-  if (!query) {
+  if (queryTokens.length === 0) {
     return folders;
   }
 
   return folders.flatMap((folder) => {
-    const folderMatches = folder.label.toLowerCase().includes(query);
+    const folderMatches = searchTextMatches(folder.label, queryTokens);
     const matchingFiles = folder.files.filter(
-      (file) =>
-        file.label.toLowerCase().includes(query) ||
-        file.description.toLowerCase().includes(query),
+      (file) => searchTextMatches(searchableFileText(file), queryTokens),
     );
-    const matchingChildren = filterWorkspaceFolders(folder.children, query);
+    const matchingChildren = filterWorkspaceFolders(folder.children, rawQuery);
 
     if (!folderMatches && !matchingFiles.length && !matchingChildren.length) {
       return [];
