@@ -49,8 +49,9 @@ const CONTENT_BOTTOM_PADDING = 32;
 const NOTES_PANEL_WIDTH = 384; // px — matches w-96 Tailwind class
 const NOTES_PANEL_GAP = 24; // gap between content and notes panel (fixed overlay fallback)
 const NOTES_FLEX_GAP = 16; // ml-4 in px — gap used in the in-canvas flex row
+const PDF_PAGE_SIDEBAR_TOP = 68;
+const PDF_PAGE_SIDEBAR_BUTTON_TOP = 60;
 const PDF_PAGE_SIDEBAR_WIDTH = 176;
-const PDF_PAGE_SIDEBAR_COLLAPSED_WIDTH = 38;
 const PDF_PAGE_SIDEBAR_MARGIN = 16;
 const PDF_PAGE_THUMBNAIL_WIDTH = 112;
 const DOC_RENDER_MAX_CONCURRENT = 2;
@@ -85,6 +86,20 @@ function scheduleDocumentPageRender<T>(task: () => Promise<T>): Promise<T> {
       documentPageRenderQueue.push(run);
     }
   });
+}
+
+function getIsolatedWheelDelta(event: WheelEvent, element: HTMLElement) {
+  const baseDelta = Math.abs(event.deltaY) >= Math.abs(event.deltaX) ? event.deltaY : event.deltaX;
+
+  if (event.deltaMode === WheelEvent.DOM_DELTA_LINE) {
+    return baseDelta * 16;
+  }
+
+  if (event.deltaMode === WheelEvent.DOM_DELTA_PAGE) {
+    return baseDelta * element.clientHeight;
+  }
+
+  return baseDelta;
 }
 
 type DocKind = 'pdf' | 'markdown' | 'json' | 'code' | 'text';
@@ -1485,6 +1500,21 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, [activePdfPage, kind]);
 
   useEffect(() => {
+    const element = pageSidebarRef.current;
+    if (!element) return undefined;
+
+    const handleSidebarWheel = (event: WheelEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      element.scrollTop += getIsolatedWheelDelta(event, element);
+    };
+
+    element.addEventListener('wheel', handleSidebarWheel, { passive: false });
+    return () => element.removeEventListener('wheel', handleSidebarWheel);
+  }, [isPdfSidebarCollapsed, pdfSidebarDocument?.fileId]);
+
+  useEffect(() => {
     setActiveNotePage(null);
     setPdfPageCount(0);
     setActivePdfPage(1);
@@ -1852,70 +1882,66 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       </div>
 
       {kind === 'pdf' && pdfSidebarDocument?.fileId === file.id && (
+        <button
+          type="button"
+          aria-label={isPdfSidebarCollapsed ? 'Show page sidebar' : 'Hide page sidebar'}
+          aria-expanded={!isPdfSidebarCollapsed}
+          onClick={() => setIsPdfSidebarCollapsed((value) => !value)}
+          className="pointer-events-auto fixed z-40 flex size-9 items-center justify-center rounded-full border border-sidebar-border bg-background/88 text-foreground shadow-sm backdrop-blur-md transition-[background-color,transform] duration-200 hover:bg-background/96 active:scale-95"
+          style={{
+            right: overlayInsets.right + PDF_PAGE_SIDEBAR_MARGIN,
+            top: PDF_PAGE_SIDEBAR_BUTTON_TOP,
+          }}
+        >
+          {isPdfSidebarCollapsed ? (
+            <ChevronLeftIcon className="size-4" strokeWidth={2.5} />
+          ) : (
+            <ChevronRightIcon className="size-4" strokeWidth={2.5} />
+          )}
+        </button>
+      )}
+
+      {kind === 'pdf' && pdfSidebarDocument?.fileId === file.id && (
         <nav
           aria-label="PDF pages"
-          className={`pointer-events-auto fixed z-30 hidden overflow-hidden rounded-xl border border-sidebar-border/45 bg-background/86 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.46)] backdrop-blur-md transition-[width,opacity] duration-200 sm:flex dark:bg-slate-900/90 ${
-            isPdfSidebarCollapsed ? 'opacity-65 hover:opacity-100' : 'opacity-95'
+          className={`fixed z-30 hidden overflow-visible rounded-xl border border-sidebar-border/45 bg-background/86 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.46)] backdrop-blur-md transition-[opacity,transform] duration-200 ease-out sm:flex dark:bg-slate-900/90 ${
+            isPdfSidebarCollapsed
+              ? 'pointer-events-none translate-x-[calc(100%+1rem)] opacity-0'
+              : 'pointer-events-auto translate-x-0 opacity-95'
           }`}
           style={{
             right: overlayInsets.right + PDF_PAGE_SIDEBAR_MARGIN,
-            top: isHeaderCollapsed ? 16 : 80,
+            top: PDF_PAGE_SIDEBAR_TOP,
             bottom: 72,
-            width: isPdfSidebarCollapsed ? PDF_PAGE_SIDEBAR_COLLAPSED_WIDTH : PDF_PAGE_SIDEBAR_WIDTH,
+            width: PDF_PAGE_SIDEBAR_WIDTH,
           }}
         >
-          <div className="flex min-h-0 w-full flex-col">
-            <div className="flex h-10 shrink-0 items-center justify-between border-b border-sidebar-border/45 px-2">
-              {!isPdfSidebarCollapsed && (
-                <span className="text-[0.68rem] font-semibold uppercase text-muted-foreground">
-                  Pages
-                </span>
-              )}
-              <button
-                type="button"
-                aria-label={isPdfSidebarCollapsed ? 'Expand page sidebar' : 'Collapse page sidebar'}
-                aria-expanded={!isPdfSidebarCollapsed}
-                onClick={() => setIsPdfSidebarCollapsed((value) => !value)}
-                className="ml-auto flex size-7 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-              >
-                {isPdfSidebarCollapsed ? (
-                  <ChevronLeftIcon className="size-3.5" />
-                ) : (
-                  <ChevronRightIcon className="size-3.5" />
-                )}
-              </button>
+          <div className="flex min-h-0 w-full flex-col overflow-hidden rounded-xl">
+            <div className="flex h-10 shrink-0 items-center justify-between border-b border-sidebar-border/45 pl-3 pr-2">
+              <span className="text-[0.68rem] font-semibold uppercase text-muted-foreground">
+                Pages
+              </span>
             </div>
 
-            {isPdfSidebarCollapsed ? (
-              <button
-                type="button"
-                aria-label={`Current page ${activePdfPage}. Expand page sidebar`}
-                onClick={() => setIsPdfSidebarCollapsed(false)}
-                className="mx-auto mt-2 flex min-h-8 w-7 items-center justify-center rounded-lg bg-slate-900/80 font-mono text-[0.66rem] text-white shadow-sm transition hover:bg-slate-900 dark:bg-slate-100/90 dark:text-slate-950"
-              >
-                {activePdfPage}
-              </button>
-            ) : (
-              <div ref={pageSidebarRef} className="soft-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
-                {Array.from({ length: pdfSidebarDocument.pageCount }, (_, index) => {
-                  const pageNumber = index + 1;
-                  return (
-                    <PdfPageThumbnail
-                      key={`${pdfSidebarDocument.fileId}-${pageNumber}`}
-                      isActive={pageNumber === activePdfPage}
-                      onClick={() => jumpToPdfPage(pageNumber)}
-                      pageNumber={pageNumber}
-                      pdf={pdfSidebarDocument.pdf}
-                    />
-                  );
-                })}
-                {pdfSidebarDocument.totalPageCount > pdfSidebarDocument.pageCount ? (
-                  <p className="px-1 pb-2 text-center text-[0.66rem] text-muted-foreground">
-                    First {pdfSidebarDocument.pageCount} of {pdfSidebarDocument.totalPageCount}
-                  </p>
-                ) : null}
-              </div>
-            )}
+            <div ref={pageSidebarRef} className="soft-scrollbar min-h-0 flex-1 overflow-y-auto px-3 py-3">
+              {Array.from({ length: pdfSidebarDocument.pageCount }, (_, index) => {
+                const pageNumber = index + 1;
+                return (
+                  <PdfPageThumbnail
+                    key={`${pdfSidebarDocument.fileId}-${pageNumber}`}
+                    isActive={pageNumber === activePdfPage}
+                    onClick={() => jumpToPdfPage(pageNumber)}
+                    pageNumber={pageNumber}
+                    pdf={pdfSidebarDocument.pdf}
+                  />
+                );
+              })}
+              {pdfSidebarDocument.totalPageCount > pdfSidebarDocument.pageCount ? (
+                <p className="px-1 pb-2 text-center text-[0.66rem] text-muted-foreground">
+                  First {pdfSidebarDocument.pageCount} of {pdfSidebarDocument.totalPageCount}
+                </p>
+              ) : null}
+            </div>
           </div>
         </nav>
       )}
