@@ -73,8 +73,8 @@ function compareSidebarLabels(
   direction: 'asc' | 'desc',
 ) {
   return direction === 'asc'
-    ? left.label.localeCompare(right.label, undefined, { sensitivity: 'base' })
-    : right.label.localeCompare(left.label, undefined, { sensitivity: 'base' });
+    ? left.label.localeCompare(right.label, undefined, { numeric: true, sensitivity: 'base' })
+    : right.label.localeCompare(left.label, undefined, { numeric: true, sensitivity: 'base' });
 }
 
 function filterFoldersBySidebarMode(

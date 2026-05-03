@@ -68,6 +68,30 @@ type SeparatorDropTarget = {
   index: number;
 };
 
+type PreviewOrderedItem =
+  | {
+      type: 'item';
+      item: OrderedWorkspaceFolderItem;
+      sourceIndex: number;
+    }
+  | {
+      type: 'placeholder';
+      key: string;
+      target: SeparatorDropTarget;
+    };
+
+type PreviewRootFolder =
+  | {
+      type: 'folder';
+      folder: WorkspaceFolder;
+      sourceIndex: number;
+    }
+  | {
+      type: 'placeholder';
+      key: string;
+      target: SeparatorDropTarget;
+    };
+
 const SIDEBAR_HIGHLIGHT_CLASS =
   'bg-sidebar-accent/30 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
 const SIDEBAR_SELECTED_CLASS =
@@ -134,6 +158,10 @@ function getOrderEntryKey(entry: WorkspaceFolderOrderEntry) {
   return `${entry.type}:${entry.id}`;
 }
 
+function getDropPlaceholderKey(dropTarget: SeparatorDropTarget) {
+  return `drop-placeholder:${getDropTargetKey(dropTarget)}`;
+}
+
 function orderedItemMatchesEntry(
   item: OrderedWorkspaceFolderItem,
   entry: WorkspaceFolderOrderEntry,
@@ -141,10 +169,10 @@ function orderedItemMatchesEntry(
   return getOrderedItemKey(item) === getOrderEntryKey(entry);
 }
 
-function insertOrderedItemAt(
-  items: OrderedWorkspaceFolderItem[],
+function insertOrderedItemAt<T>(
+  items: T[],
   index: number,
-  item: OrderedWorkspaceFolderItem,
+  item: T,
 ) {
   const nextItems = [...items];
   const targetIndex = Math.max(0, Math.min(index, nextItems.length));
@@ -153,10 +181,10 @@ function insertOrderedItemAt(
   return nextItems;
 }
 
-function insertFolderAt(
-  folders: WorkspaceFolder[],
+function insertFolderAt<T>(
+  folders: T[],
   index: number,
-  folder: WorkspaceFolder,
+  folder: T,
 ) {
   const nextFolders = [...folders];
   const targetIndex = Math.max(0, Math.min(index, nextFolders.length));
@@ -200,11 +228,16 @@ function getPreviewOrderedItems(
   draggingItem: DraggedSeparator | null,
   activeDropTarget: SeparatorDropTarget | null,
   draggedOrderedItem: OrderedWorkspaceFolderItem | null,
-) {
+): PreviewOrderedItem[] {
   const orderedItems = getOrderedWorkspaceFolderItems(folder);
+  const previewItems: PreviewOrderedItem[] = orderedItems.map((item, sourceIndex) => ({
+    type: 'item',
+    item,
+    sourceIndex,
+  }) satisfies PreviewOrderedItem);
 
   if (!draggingItem || !activeDropTarget || !draggedOrderedItem) {
-    return orderedItems;
+    return previewItems;
   }
 
   const sourceIndex = orderedItems.findIndex((item) =>
@@ -214,11 +247,13 @@ function getPreviewOrderedItems(
     draggingItem.parentFolderId === folder.id || activeDropTarget.parentFolderId === folder.id;
 
   if (!removesFromFolder) {
-    return orderedItems;
+    return previewItems;
   }
 
-  const withoutDraggedItem = orderedItems.filter(
-    (item) => !orderedItemMatchesEntry(item, draggingItem.item),
+  const withoutDraggedItem: PreviewOrderedItem[] = previewItems.filter(
+    (previewItem) =>
+      previewItem.type !== 'item' ||
+      !orderedItemMatchesEntry(previewItem.item, draggingItem.item),
   );
 
   if (activeDropTarget.parentFolderId !== folder.id) {
@@ -232,7 +267,11 @@ function getPreviewOrderedItems(
       ? activeDropTarget.index - 1
       : activeDropTarget.index;
 
-  return insertOrderedItemAt(withoutDraggedItem, targetIndex, draggedOrderedItem);
+  return insertOrderedItemAt(withoutDraggedItem, targetIndex, {
+    type: 'placeholder',
+    key: getDropPlaceholderKey(activeDropTarget),
+    target: activeDropTarget,
+  });
 }
 
 function getPreviewRootFolders(
@@ -240,9 +279,15 @@ function getPreviewRootFolders(
   draggingItem: DraggedSeparator | null,
   activeDropTarget: SeparatorDropTarget | null,
   draggedOrderedItem: OrderedWorkspaceFolderItem | null,
-) {
+): PreviewRootFolder[] {
+  const previewFolders: PreviewRootFolder[] = folders.map((folder, sourceIndex) => ({
+    type: 'folder',
+    folder,
+    sourceIndex,
+  }) satisfies PreviewRootFolder);
+
   if (!draggingItem || draggingItem.item.type !== 'folder' || !activeDropTarget) {
-    return folders;
+    return previewFolders;
   }
 
   const draggedFolder =
@@ -252,10 +297,13 @@ function getPreviewRootFolders(
     draggingItem.parentFolderId === null || activeDropTarget.parentFolderId === null;
 
   if (!removesFromRoot) {
-    return folders;
+    return previewFolders;
   }
 
-  const withoutDraggedFolder = folders.filter((folder) => folder.id !== draggingItem.item.id);
+  const withoutDraggedFolder: PreviewRootFolder[] = previewFolders.filter(
+    (previewFolder) =>
+      previewFolder.type !== 'folder' || previewFolder.folder.id !== draggingItem.item.id,
+  );
 
   if (activeDropTarget.parentFolderId !== null || !draggedFolder) {
     return withoutDraggedFolder;
@@ -268,7 +316,11 @@ function getPreviewRootFolders(
       ? activeDropTarget.index - 1
       : activeDropTarget.index;
 
-  return insertFolderAt(withoutDraggedFolder, targetIndex, draggedFolder);
+  return insertFolderAt(withoutDraggedFolder, targetIndex, {
+    type: 'placeholder',
+    key: getDropPlaceholderKey(activeDropTarget),
+    target: activeDropTarget,
+  });
 }
 
 function collectVisibleSidebarItemsFromFolder(
@@ -400,7 +452,7 @@ function SeparatorDropZone({
       {active && visible ? (
         <motion.span
           layoutId="sidebar-drop-lens"
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.1, ease: [0.22, 1, 0.36, 1] }}
           className="absolute inset-x-2 top-0 z-30 h-0.5 -translate-y-1/2 rounded-full bg-sidebar-accent/75 shadow-[0_0_0_1px_rgba(255,255,255,0.8)] dark:shadow-[0_0_0_1px_rgba(15,23,42,0.8)]"
         />
       ) : null}
@@ -433,6 +485,39 @@ function SidebarDragPreview({
     <div className="flex h-8 w-48 items-center gap-2 rounded-md border border-sidebar-border/70 bg-sidebar/95 px-2.5 text-sm font-medium text-sidebar-foreground shadow-[0_10px_26px_-18px_rgba(15,23,42,0.42)]">
       <Icon className="size-4 shrink-0 text-muted-foreground" />
       <span className="min-w-0 truncate">{label}</span>
+    </div>
+  );
+}
+
+function SidebarDropPlaceholder({
+  level,
+  onDrop,
+  onHover,
+}: {
+  level: number;
+  onDrop: () => void;
+  onHover: () => void;
+}) {
+  return (
+    <div
+      aria-hidden="true"
+      onDragEnter={(event) => {
+        event.preventDefault();
+        onHover();
+      }}
+      onDragOver={(event) => {
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        onHover();
+      }}
+      onDrop={(event) => {
+        event.preventDefault();
+        onDrop();
+      }}
+      className="relative py-0.5"
+      style={{ paddingLeft: `${getRowPaddingLeft(level)}px` }}
+    >
+      <div className="h-7 rounded-md border border-dashed border-sidebar-accent/45 bg-sidebar-accent/12 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.12)]" />
     </div>
   );
 }
@@ -916,7 +1001,7 @@ function FolderRow({
                 {activeDropTargetKey === rowDropTargetKey ? (
                   <motion.span
                     layoutId="sidebar-folder-drop-lens"
-                    transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                    transition={{ duration: 0.1, ease: [0.22, 1, 0.36, 1] }}
                     className="pointer-events-none absolute inset-0 rounded-md bg-sidebar-accent/18 ring-1 ring-sidebar-accent/35"
                   />
                 ) : null}
@@ -1056,12 +1141,30 @@ function FolderRow({
                 onDrop={() => onDropSeparator({ parentFolderId: folder.id, index: 0 })}
               />
 
-              {orderedItems.map((item, index) => (
+              {orderedItems.map((previewItem) => (
                 <motion.div
-                  key={`${item.type}:${item.type === 'folder' ? item.folder.id : item.type === 'file' ? item.file.id : item.separator.id}`}
+                  key={
+                    previewItem.type === 'placeholder'
+                      ? previewItem.key
+                      : getOrderedItemKey(previewItem.item)
+                  }
                   layout="position"
-                  transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+                  transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
                 >
+                  {previewItem.type === 'placeholder' ? (
+                    <SidebarDropPlaceholder
+                      level={level + 1}
+                      onHover={() => onHoverDropTarget(previewItem.target)}
+                      onDrop={() => onDropSeparator(previewItem.target)}
+                    />
+                  ) : (
+                    <>
+                  {(() => {
+                    const item = previewItem.item;
+                    const sourceIndex = previewItem.sourceIndex;
+
+                    return (
+                      <>
                   {item.type === 'folder' ? (
                     <FolderRow
                       activeDropTarget={activeDropTarget}
@@ -1072,7 +1175,7 @@ function FolderRow({
                       draggedOrderedItem={draggedOrderedItem}
                       hasDraggedItem={hasDraggedItem}
                       highlightedItemKeys={highlightedItemKeys}
-                      itemIndex={index}
+                      itemIndex={sourceIndex}
                       level={level + 1}
                       parentFolderId={folder.id}
                       selectedItemKeys={selectedItemKeys}
@@ -1115,7 +1218,7 @@ function FolderRow({
                       isHighlighted={highlightedItemKeys.has(
                         getSidebarItemKey({ type: 'file', id: item.file.id }),
                       )}
-                      itemIndex={index}
+                      itemIndex={sourceIndex}
                       level={level + 1}
                       parentFolderId={folder.id}
                       onBeginRename={() =>
@@ -1142,7 +1245,7 @@ function FolderRow({
                   ) : (
                     <SeparatorRow
                       draggingItem={draggingItem}
-                      itemIndex={index}
+                      itemIndex={sourceIndex}
                       level={level + 1}
                       onDelete={() => onDeleteSeparator(item.separator.id)}
                       onDragEnd={onDragEndSeparator}
@@ -1155,12 +1258,17 @@ function FolderRow({
                   )}
 
                   <SeparatorDropZone
-                    active={activeDropTargetKey === getDropTargetKey({ parentFolderId: folder.id, index: index + 1 })}
+                    active={activeDropTargetKey === getDropTargetKey({ parentFolderId: folder.id, index: sourceIndex + 1 })}
                     visible={hasDraggedItem}
                     level={level + 1}
-                    onHover={() => onHoverDropTarget({ parentFolderId: folder.id, index: index + 1 })}
-                    onDrop={() => onDropSeparator({ parentFolderId: folder.id, index: index + 1 })}
+                    onHover={() => onHoverDropTarget({ parentFolderId: folder.id, index: sourceIndex + 1 })}
+                    onDrop={() => onDropSeparator({ parentFolderId: folder.id, index: sourceIndex + 1 })}
                   />
+                      </>
+                    );
+                  })()}
+                    </>
+                  )}
                 </motion.div>
               ))}
             </SidebarMenuSub>
@@ -1233,17 +1341,20 @@ export function SidebarTree({
   const [dragPreviewVisible, setDragPreviewVisible] = useState(false);
   const canDropAtRoot = draggingSeparator?.item.type === 'folder';
   const dragPreviewVisibleRef = useRef(false);
+  const pendingDropTargetRef = useRef<SeparatorDropTarget | null>(null);
+  const pendingDropTargetFrameRef = useRef<number | null>(null);
+  const activeDropTargetKeyRef = useRef('');
   const dragX = useMotionValue(0);
   const dragY = useMotionValue(0);
   const smoothDragX = useSpring(dragX, {
-    stiffness: 520,
-    damping: 44,
-    mass: 0.55,
+    stiffness: 1200,
+    damping: 58,
+    mass: 0.25,
   });
   const smoothDragY = useSpring(dragY, {
-    stiffness: 520,
-    damping: 44,
-    mass: 0.55,
+    stiffness: 1200,
+    damping: 58,
+    mass: 0.25,
   });
   const draggedOrderedItem = useMemo(
     () => (draggingSeparator ? findOrderedItemByEntry(folders, draggingSeparator.item) : null),
@@ -1255,9 +1366,35 @@ export function SidebarTree({
   );
 
   function updateActiveDropTarget(target: SeparatorDropTarget) {
-    setActiveDropTarget((current) =>
-      getDropTargetKey(current) === getDropTargetKey(target) ? current : target,
-    );
+    const targetKey = getDropTargetKey(target);
+
+    if (activeDropTargetKeyRef.current === targetKey) {
+      return;
+    }
+
+    pendingDropTargetRef.current = target;
+
+    if (pendingDropTargetFrameRef.current !== null) {
+      return;
+    }
+
+    pendingDropTargetFrameRef.current = window.requestAnimationFrame(() => {
+      const nextTarget = pendingDropTargetRef.current;
+      pendingDropTargetFrameRef.current = null;
+
+      if (!nextTarget) {
+        return;
+      }
+
+      const nextKey = getDropTargetKey(nextTarget);
+
+      if (activeDropTargetKeyRef.current === nextKey) {
+        return;
+      }
+
+      activeDropTargetKeyRef.current = nextKey;
+      setActiveDropTarget(nextTarget);
+    });
   }
 
   useEffect(() => {
@@ -1265,9 +1402,29 @@ export function SidebarTree({
   }, [dragPreviewVisible]);
 
   useEffect(() => {
+    activeDropTargetKeyRef.current = getDropTargetKey(activeDropTarget);
+  }, [activeDropTarget]);
+
+  useEffect(
+    () => () => {
+      if (pendingDropTargetFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingDropTargetFrameRef.current);
+      }
+    },
+    [],
+  );
+
+  useEffect(() => {
     if (!draggingSeparator) {
       setDragPreviewVisible(false);
       dragPreviewVisibleRef.current = false;
+      pendingDropTargetRef.current = null;
+      activeDropTargetKeyRef.current = '';
+
+      if (pendingDropTargetFrameRef.current !== null) {
+        window.cancelAnimationFrame(pendingDropTargetFrameRef.current);
+        pendingDropTargetFrameRef.current = null;
+      }
       return;
     }
 
@@ -1329,25 +1486,49 @@ export function SidebarTree({
           setActiveDropTarget(null);
         }}
       />
-      {previewFolders.map((folder, index) => (
+      {previewFolders.map((previewFolder, displayIndex) => (
         <motion.div
-          key={folder.id}
+          key={previewFolder.type === 'placeholder' ? previewFolder.key : previewFolder.folder.id}
           layout="position"
-          transition={{ duration: 0.18, ease: [0.22, 1, 0.36, 1] }}
+          transition={{ duration: 0.12, ease: [0.22, 1, 0.36, 1] }}
         >
+          {previewFolder.type === 'placeholder' ? (
+            <SidebarDropPlaceholder
+              level={0}
+              onHover={() => {
+                if (canDropAtRoot) {
+                  updateActiveDropTarget(previewFolder.target);
+                }
+              }}
+              onDrop={() => {
+                if (!draggingSeparator || draggingSeparator.item.type !== 'folder') {
+                  return;
+                }
+
+                onMoveItem(
+                  draggingSeparator.item,
+                  previewFolder.target.parentFolderId,
+                  previewFolder.target.index,
+                );
+                setDraggingSeparator(null);
+                setActiveDropTarget(null);
+              }}
+            />
+          ) : (
+            <>
           <FolderRow
             activeDropTarget={activeDropTarget}
             draggingItem={draggingSeparator}
             editingItem={editingItem}
             expandedFolderIds={expandedFolderIds}
-            folder={folder}
+            folder={previewFolder.folder}
             draggedOrderedItem={draggedOrderedItem}
             hasDraggedItem={draggingSeparator !== null}
             highlightedItemKeys={highlightedItemKeys}
-            itemIndex={index}
+            itemIndex={previewFolder.sourceIndex}
             level={0}
             parentFolderId={null}
-            rootIndex={index}
+            rootIndex={displayIndex}
             selectedItemKeys={selectedItemKeys}
             onBeginRename={onBeginRename}
             onCancelRename={onCancelRename}
@@ -1390,7 +1571,7 @@ export function SidebarTree({
             active={
               Boolean(canDropAtRoot) &&
               activeDropTarget?.parentFolderId === null &&
-              activeDropTarget.index === index + 1
+              activeDropTarget.index === previewFolder.sourceIndex + 1
             }
             visible={Boolean(canDropAtRoot)}
             level={0}
@@ -1398,7 +1579,7 @@ export function SidebarTree({
               if (canDropAtRoot) {
                 updateActiveDropTarget({
                   parentFolderId: null,
-                  index: index + 1,
+                  index: previewFolder.sourceIndex + 1,
                 });
               }
             }}
@@ -1407,11 +1588,13 @@ export function SidebarTree({
                 return;
               }
 
-              onMoveItem(draggingSeparator.item, null, index + 1);
+              onMoveItem(draggingSeparator.item, null, previewFolder.sourceIndex + 1);
               setDraggingSeparator(null);
               setActiveDropTarget(null);
             }}
           />
+            </>
+          )}
         </motion.div>
       ))}
     </SidebarMenu>
