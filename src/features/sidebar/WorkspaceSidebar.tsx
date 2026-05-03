@@ -1,6 +1,6 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
 import { SettingsPopover } from './SettingsPopover';
-import { ChevronDownIcon, SearchIcon } from 'lucide-react';
+import { ChevronDownIcon, FolderPlusIcon, SearchIcon } from 'lucide-react';
 
 import {
   AlertDialog,
@@ -41,6 +41,14 @@ import {
   type WorkspaceSeparator,
 } from '@/data/sidebarNavigation';
 import { Input } from '@/components/ui/input';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuLabel,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
 import {
   SidebarTree,
   areSidebarItemsEqual,
@@ -415,6 +423,29 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     setExpandedFolderIds((current) => new Set(current).add(folderId));
   }
 
+  function createRootFolder() {
+    const folderId = `folder-${Date.now()}`;
+    const nextFolder: WorkspaceFolder = {
+      id: folderId,
+      label: 'Untitled folder',
+      children: [],
+      files: [],
+      separators: [],
+      itemOrder: [],
+    };
+
+    updateFolders((current) => [...current, nextFolder]);
+    setExpandedFolderIds((current) => new Set(current).add(folderId));
+    selectSidebarItem({ type: 'folder', id: folderId });
+    queueAfterMenuClose(() =>
+      setEditingItem({
+        type: 'folder',
+        id: folderId,
+        value: nextFolder.label,
+      }),
+    );
+  }
+
   function deleteSeparator(separatorId: string) {
     updateFolders((current) => deleteSeparatorById(current, separatorId));
   }
@@ -456,8 +487,8 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
 
           <div className="flex min-w-0 flex-1 flex-col group-data-[collapsible=icon]:hidden">
             <SidebarContent className="soft-scrollbar gap-0">
-              <SidebarGroup className="px-4 py-4">
-                <SidebarGroupContent>
+              <SidebarGroup className="min-h-full flex-1 px-4 py-4">
+                <SidebarGroupContent className="flex min-h-full flex-col">
                   <div className="mb-3 border-b border-sidebar-border/70 pb-3">
                     <div className="relative">
                       <SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
@@ -557,6 +588,26 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     }
                     searchActive={searchActive}
                   />
+                  <ContextMenu>
+                    <ContextMenuTrigger asChild>
+                      <div
+                        aria-hidden="true"
+                        className="min-h-24 flex-1 cursor-default"
+                      />
+                    </ContextMenuTrigger>
+                    <ContextMenuContent
+                      side="right"
+                      className="ml-2 w-56"
+                      onCloseAutoFocus={(event) => event.preventDefault()}
+                    >
+                      <ContextMenuLabel>Sidebar</ContextMenuLabel>
+                      <ContextMenuSeparator />
+                      <ContextMenuItem onSelect={createRootFolder}>
+                        <FolderPlusIcon />
+                        Add folder
+                      </ContextMenuItem>
+                    </ContextMenuContent>
+                  </ContextMenu>
                 </SidebarGroupContent>
               </SidebarGroup>
             </SidebarContent>

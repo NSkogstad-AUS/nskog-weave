@@ -96,6 +96,7 @@ const SIDEBAR_HIGHLIGHT_CLASS =
   'bg-sidebar-accent/30 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
 const SIDEBAR_SELECTED_CLASS =
   'bg-sidebar-accent/45 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
+const SIDEBAR_ROW_INSET_CLASS = 'mx-px w-[calc(100%-2px)]';
 
 export function getSidebarItemKey(item: ActiveItem) {
   return item ? `${item.type}:${item.id}` : '';
@@ -639,6 +640,7 @@ function FileRow({
               onDragEnd={onDragEnd}
               className={cn(
                 'w-full cursor-grab pr-10 transition-[background-color,box-shadow,opacity,transform] duration-150 data-[active=true]:bg-sidebar-accent/45 active:cursor-grabbing',
+                SIDEBAR_ROW_INSET_CLASS,
                 isSelected && SIDEBAR_SELECTED_CLASS,
                 isHighlighted && !isSelected && SIDEBAR_HIGHLIGHT_CLASS,
                 isBeingDragged && 'scale-[0.99] opacity-55',
@@ -990,6 +992,7 @@ function FolderRow({
                 onDragEnd={onDragEndSeparator}
                 className={cn(
                   'relative w-full cursor-grab overflow-visible pr-14 transition-[background-color,box-shadow,opacity,transform] duration-150 data-[active=true]:bg-sidebar-accent/45 active:cursor-grabbing',
+                  SIDEBAR_ROW_INSET_CLASS,
                   isSelected && SIDEBAR_SELECTED_CLASS,
                   isHighlighted && !isSelected && SIDEBAR_HIGHLIGHT_CLASS,
                   activeDropTargetKey === rowDropTargetKey && 'shadow-[inset_0_-2px_0_0_rgba(125,211,252,0.8)]',

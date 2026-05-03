@@ -1254,6 +1254,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const dragStartRef = useRef({ clientX: 0, clientY: 0, panX: 0, panY: 0 });
   const dropdownRef = useRef<HTMLDivElement | null>(null);
   const pageSidebarRef = useRef<HTMLDivElement | null>(null);
+  const pdfPageJumpLockUntilRef = useRef(0);
 
   const scale = zoomPercent / 100;
   const displayZoom = isNotesOpen ? Math.round(zoomPercent / 2) : zoomPercent;
@@ -1313,6 +1314,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       return;
     }
 
+    if (performance.now() < pdfPageJumpLockUntilRef.current) {
+      return;
+    }
+
     const rows = Array.from(
       contentRef.current?.querySelectorAll<HTMLElement>('[data-document-page-row]') ?? [],
     );
@@ -1320,8 +1325,14 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       return;
     }
 
+    const root = rootRef.current;
     const currentScale = vpRef.current.zoomPercent / 100;
-    const focusY = CONTENT_INITIAL_TOP + 24;
+    const focusY = root
+      ? Math.min(
+          Math.max(root.clientHeight * 0.35, CONTENT_INITIAL_TOP + 72),
+          Math.max(CONTENT_INITIAL_TOP + 24, root.clientHeight - 80),
+        )
+      : CONTENT_INITIAL_TOP + 72;
     let nearestPage = 1;
     let nearestDistance = Number.POSITIVE_INFINITY;
 
@@ -1492,14 +1503,6 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   }, [pan, pdfPageCount, updateActivePdfPage, zoomPercent]);
 
   useEffect(() => {
-    if (kind !== 'pdf') return;
-    const activeButton = pageSidebarRef.current?.querySelector<HTMLElement>(
-      `[data-pdf-page-nav="${activePdfPage}"]`,
-    );
-    activeButton?.scrollIntoView({ block: 'nearest' });
-  }, [activePdfPage, kind]);
-
-  useEffect(() => {
     const element = pageSidebarRef.current;
     if (!element) return undefined;
 
@@ -1602,6 +1605,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     const scaledWidth = CONTENT_WIDTH_PX * currentScale;
     const nextPanX = calcCentreX(root, scaledWidth);
 
+    pdfPageJumpLockUntilRef.current = performance.now() + 350;
     isFreePanRef.current = false;
     vpRef.current = {
       zoomPercent: currentZoomPercent,
