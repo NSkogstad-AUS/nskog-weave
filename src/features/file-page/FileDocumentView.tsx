@@ -49,11 +49,11 @@ const CONTENT_BOTTOM_PADDING = 32;
 const NOTES_PANEL_WIDTH = 384; // px — matches w-96 Tailwind class
 const NOTES_PANEL_GAP = 24; // gap between content and notes panel (fixed overlay fallback)
 const NOTES_FLEX_GAP = 16; // ml-4 in px — gap used in the in-canvas flex row
-const PDF_PAGE_SIDEBAR_TOP = 68;
-const PDF_PAGE_SIDEBAR_BUTTON_TOP = 60;
-const PDF_PAGE_SIDEBAR_WIDTH = 176;
+const PDF_PAGE_SIDEBAR_TOP = 60;
+const PDF_PAGE_SIDEBAR_BUTTON_TOP = 63;
+const PDF_PAGE_SIDEBAR_WIDTH = 200;
 const PDF_PAGE_SIDEBAR_MARGIN = 16;
-const PDF_PAGE_THUMBNAIL_WIDTH = 112;
+const PDF_PAGE_THUMBNAIL_WIDTH = 140;
 const DOC_RENDER_MAX_CONCURRENT = 2;
 const EMPTY_PAGE_NOTES: Record<number, string> = {};
 const NOTE_EDITOR_EXTENSIONS = [
@@ -1887,7 +1887,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
           aria-label={isPdfSidebarCollapsed ? 'Show page sidebar' : 'Hide page sidebar'}
           aria-expanded={!isPdfSidebarCollapsed}
           onClick={() => setIsPdfSidebarCollapsed((value) => !value)}
-          className="pointer-events-auto fixed z-40 flex size-9 items-center justify-center rounded-full border border-sidebar-border bg-background/88 text-foreground shadow-sm backdrop-blur-md transition-[background-color,transform] duration-200 hover:bg-background/96 active:scale-95"
+          className="pointer-events-auto fixed z-40 flex size-9 items-center justify-center rounded-full border border-sidebar-border bg-background/88 text-foreground shadow-sm backdrop-blur-md transition-[background-color,transform] duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] hover:bg-background/96 active:scale-95"
           style={{
             right: overlayInsets.right + PDF_PAGE_SIDEBAR_MARGIN,
             top: PDF_PAGE_SIDEBAR_BUTTON_TOP,
@@ -1904,10 +1904,10 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
       {kind === 'pdf' && pdfSidebarDocument?.fileId === file.id && (
         <nav
           aria-label="PDF pages"
-          className={`fixed z-30 hidden overflow-visible rounded-xl border border-sidebar-border/45 bg-background/86 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.46)] backdrop-blur-md transition-[opacity,transform] duration-200 ease-out sm:flex dark:bg-slate-900/90 ${
+          className={`fixed z-30 hidden overflow-visible rounded-xl border border-sidebar-border/45 bg-background/86 shadow-[0_18px_48px_-36px_rgba(15,23,42,0.46)] backdrop-blur-md transition-transform duration-[240ms] ease-[cubic-bezier(0.4,0,0.2,1)] will-change-transform sm:flex dark:bg-slate-900/90 ${
             isPdfSidebarCollapsed
-              ? 'pointer-events-none translate-x-[calc(100%+1rem)] opacity-0'
-              : 'pointer-events-auto translate-x-0 opacity-95'
+              ? 'pointer-events-none translate-x-[calc(100%+1rem)]'
+              : 'pointer-events-auto translate-x-0'
           }`}
           style={{
             right: overlayInsets.right + PDF_PAGE_SIDEBAR_MARGIN,
