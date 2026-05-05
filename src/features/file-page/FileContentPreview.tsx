@@ -1,5 +1,4 @@
 import { useEffect, useRef, useState } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import {
   ChevronLeftIcon,
   ChevronRightIcon,
@@ -8,6 +7,7 @@ import {
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
+import type { PdfDocument } from '@/lib/pdfRuntime';
 import { formatUploadedFileSize, type PreviewDocument } from '@/lib/workspaceFiles';
 
 interface FileContentPreviewProps {
@@ -20,7 +20,7 @@ const PDF_PREVIEW_THUMBNAIL_WIDTH = 64;
 
 type PdfPreviewState =
   | { status: 'loading' }
-  | { status: 'ready'; pdf: PDFDocumentProxy; pageCount: number }
+  | { status: 'ready'; pdf: PdfDocument; pageCount: number }
   | { status: 'no-data' }
   | { status: 'error' };
 
@@ -51,7 +51,7 @@ function PdfPreviewCanvas({
   width,
 }: {
   pageNumber: number;
-  pdf: PDFDocumentProxy;
+  pdf: PdfDocument;
   width: number;
 }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -145,7 +145,7 @@ function PdfPreviewThumbnail({
   isActive: boolean;
   onClick: () => void;
   pageNumber: number;
-  pdf: PDFDocumentProxy;
+  pdf: PdfDocument;
 }) {
   const rootRef = useRef<HTMLButtonElement | null>(null);
   const [shouldRender, setShouldRender] = useState(false);
@@ -210,7 +210,7 @@ function PdfDocumentPreview({ document }: { document: PreviewDocument }) {
 
   useEffect(() => {
     let cancelled = false;
-    let loadedPdf: PDFDocumentProxy | null = null;
+    let loadedPdf: PdfDocument | null = null;
 
     setState({ status: 'loading' });
     setSelectedPage(1);

@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
-import type { PDFDocumentProxy } from 'pdfjs-dist/types/src/display/api';
 import type { Editor } from '@tiptap/core';
 import { useEditor, EditorContent } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
@@ -26,6 +25,7 @@ import {
 
 import { getPdfBinary } from '@/lib/pdfBinaryStore';
 import { loadPdfJs } from '@/lib/pdfRuntime';
+import type { PdfDocument } from '@/lib/pdfRuntime';
 import type { WorkspaceFile } from '@/data/sidebarNavigation';
 
 // ─── File-type detection ───────────────────────────────────────────────────────
@@ -750,7 +750,7 @@ type PdfDocState =
   | { status: 'loading' }
   | {
       status: 'ready';
-      pdf: PDFDocumentProxy;
+      pdf: PdfDocument;
       pageCount: number;
       totalPageCount: number;
     }
@@ -760,7 +760,7 @@ type PdfDocState =
 type PdfPageStatus = 'waiting' | 'rendering' | 'ready' | 'error';
 type PdfSidebarDocument = {
   fileId: string;
-  pdf: PDFDocumentProxy;
+  pdf: PdfDocument;
   pageCount: number;
   totalPageCount: number;
 } | null;
@@ -770,7 +770,7 @@ function PdfPage({
   pageNumber,
   totalPages,
 }: {
-  pdf: PDFDocumentProxy;
+  pdf: PdfDocument;
   pageNumber: number;
   totalPages: number;
 }) {
@@ -921,7 +921,7 @@ function PdfPageThumbnail({
   isActive: boolean;
   onClick: () => void;
   pageNumber: number;
-  pdf: PDFDocumentProxy;
+  pdf: PdfDocument;
 }) {
   const rootRef = useRef<HTMLButtonElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -1088,7 +1088,7 @@ function PdfDocument({
 
   useEffect(() => {
     let cancelled = false;
-    let loadedPdf: PDFDocumentProxy | null = null;
+    let loadedPdf: PdfDocument | null = null;
 
     setState({ status: 'loading' });
     onPdfReady(null);

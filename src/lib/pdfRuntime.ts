@@ -1,4 +1,5 @@
 type PdfJsModule = typeof import('pdfjs-dist');
+export type PdfDocument = Awaited<ReturnType<PdfJsModule['getDocument']>['promise']>;
 
 let pdfJsPromise: Promise<PdfJsModule> | null = null;
 
