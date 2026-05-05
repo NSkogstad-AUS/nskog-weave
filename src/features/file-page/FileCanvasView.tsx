@@ -14,10 +14,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DragEvent as ReactDragEvent,
+  MouseEvent as ReactMouseEvent,
   MutableRefObject,
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
+import { flushSync } from 'react-dom';
 import {
   MinusIcon,
   PlusIcon,
@@ -245,6 +247,7 @@ export function FileCanvasView({
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
   const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
   const [canvasContextMenuKey, setCanvasContextMenuKey] = useState(0);
+  const [nodeContextMenuResetKey, setNodeContextMenuResetKey] = useState(0);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
@@ -1059,6 +1062,50 @@ export function FileCanvasView({
 
   // ── Canvas context menu point ──────────────────────────────────────────────
 
+  function findCanvasNodeElement(nodeId: string) {
+    const candidates = canvasRef.current?.querySelectorAll<HTMLElement>('[data-canvas-node-id]');
+
+    return Array.from(candidates ?? []).find(
+      (candidate) => candidate.dataset.canvasNodeId === nodeId,
+    ) ?? null;
+  }
+
+  function dispatchContextMenuAt(target: HTMLElement, clientX: number, clientY: number) {
+    target.dispatchEvent(
+      new MouseEvent('contextmenu', {
+        bubbles: true,
+        cancelable: true,
+        clientX,
+        clientY,
+        button: 2,
+        buttons: 2,
+      }),
+    );
+  }
+
+  function closeAndReopenCanvasContextMenu(
+    clientX: number,
+    clientY: number,
+    targetNodeId?: string,
+  ) {
+    canvasContextMenuOpenRef.current = false;
+    contextMenuNodeIdRef.current = null;
+
+    flushSync(() => {
+      setContextMenuNodeId(null);
+      setCanvasContextMenuKey((current) => current + 1);
+      setNodeContextMenuResetKey((current) => current + 1);
+    });
+
+    window.setTimeout(() => {
+      const target = targetNodeId ? findCanvasNodeElement(targetNodeId) : canvasRef.current;
+
+      if (target) {
+        dispatchContextMenuAt(target, clientX, clientY);
+      }
+    }, 0);
+  }
+
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
     if (
       (event.target as HTMLElement).closest('[data-canvas-node="true"]') ||
@@ -1069,28 +1116,12 @@ export function FileCanvasView({
 
     contextMenuPointRef.current = getLocalPoint(event.clientX, event.clientY);
 
-    if (!canvasContextMenuOpenRef.current) {
+    if (!canvasContextMenuOpenRef.current && !contextMenuNodeIdRef.current) {
       return;
     }
 
     event.preventDefault();
-
-    const { clientX, clientY } = event;
-    canvasContextMenuOpenRef.current = false;
-    setCanvasContextMenuKey((current) => current + 1);
-
-    window.requestAnimationFrame(() => {
-      canvasRef.current?.dispatchEvent(
-        new MouseEvent('contextmenu', {
-          bubbles: true,
-          cancelable: true,
-          clientX,
-          clientY,
-          button: 2,
-          buttons: 2,
-        }),
-      );
-    });
+    closeAndReopenCanvasContextMenu(event.clientX, event.clientY);
   }
 
   // ── Worker connection drag ─────────────────────────────────────────────────
@@ -1767,7 +1798,13 @@ export function FileCanvasView({
   }, []);
 
   const openNodeContextMenu = useCallback(
-    (node: FilePageNode) => {
+    (node: FilePageNode, event?: ReactMouseEvent<HTMLButtonElement>) => {
+      if (event && (canvasContextMenuOpenRef.current || contextMenuNodeIdRef.current)) {
+        event.preventDefault();
+        closeAndReopenCanvasContextMenu(event.clientX, event.clientY, node.id);
+        return;
+      }
+
       armedPrimaryOpenNodeIdRef.current = null;
       nodeClickShouldOpenRef.current = false;
       setContextMenuNodeId(node.id);
@@ -2444,6 +2481,7 @@ export function FileCanvasView({
         isHighlighted={highlightedIdSet.has(node.id)}
         isSelected={selectedIdSet.has(node.id)}
         node={node}
+        contextMenuResetKey={nodeContextMenuResetKey}
         snapPreviewPosition={showSnapPreview ? previewPosition : undefined}
         onApplyIcon={applyNodeIcon}
         onApplyResize={applyNodeResize}

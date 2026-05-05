@@ -1,5 +1,8 @@
-import { memo, useRef, useState } from 'react';
-import type { PointerEvent as ReactPointerEvent } from 'react';
+import { memo } from 'react';
+import type {
+  MouseEvent as ReactMouseEvent,
+  PointerEvent as ReactPointerEvent,
+} from 'react';
 import {
   AlignCenterHorizontalIcon,
   AlertTriangleIcon,
@@ -64,6 +67,7 @@ interface FileCanvasNodeProps {
   resizeAxis?: GroupResizeAxis;
   isSelected: boolean;
   node: FilePageNode;
+  contextMenuResetKey?: number;
   snapPreviewPosition?: Point;
   onApplyIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
   onApplyResize: (node: FilePageNode, size: FilePageNode['size']) => void;
@@ -71,7 +75,7 @@ interface FileCanvasNodeProps {
   onClearIconPreview: (nodeId?: string) => void;
   onClearSizePreview: (nodeId?: string) => void;
   onCommitRename: (node: FilePageNode) => void;
-  onContextMenu: (node: FilePageNode) => void;
+  onContextMenu: (node: FilePageNode, event: ReactMouseEvent<HTMLButtonElement>) => void;
   onContextMenuOpenChange: (node: FilePageNode, open: boolean) => void;
   onDelete: (node: FilePageNode) => void;
   onCenterGroupContents?: (node: FilePageNode) => void;
@@ -118,6 +122,7 @@ function FileCanvasNodeComponent({
   resizeAxis,
   isSelected,
   node,
+  contextMenuResetKey = 0,
   snapPreviewPosition,
   onApplyIcon,
   onApplyResize,
@@ -203,9 +208,6 @@ function FileCanvasNodeComponent({
     workerProgress,
     node.workerLastError ?? null,
   );
-  const nodeButtonRef = useRef<HTMLButtonElement | null>(null);
-  const contextMenuOpenRef = useRef(false);
-  const [contextMenuKey, setContextMenuKey] = useState(0);
   const canRunWorker = isWorkerNode && workerInputCount > 0 && workerStatus !== 'processing';
   const elementIconToneClassName =
     elementIcon === 'lightbulb'
@@ -220,7 +222,6 @@ function FileCanvasNodeComponent({
 
   const buttonNode = (
     <button
-      ref={nodeButtonRef}
       type="button"
       data-canvas-node="true"
       data-canvas-node-id={node.id}
@@ -251,30 +252,7 @@ function FileCanvasNodeComponent({
       }}
       onContextMenu={(event) => {
         event.stopPropagation();
-        onContextMenu(node);
-
-        if (!contextMenuOpenRef.current) {
-          return;
-        }
-
-        event.preventDefault();
-
-        const { clientX, clientY } = event;
-        contextMenuOpenRef.current = false;
-        setContextMenuKey((current) => current + 1);
-
-        window.requestAnimationFrame(() => {
-          nodeButtonRef.current?.dispatchEvent(
-            new MouseEvent('contextmenu', {
-              bubbles: true,
-              cancelable: true,
-              clientX,
-              clientY,
-              button: 2,
-              buttons: 2,
-            }),
-          );
-        });
+        onContextMenu(node, event);
       }}
       className={cn(
         NODE_CARD_CLASS,
@@ -574,9 +552,8 @@ function FileCanvasNodeComponent({
 
   return (
     <ContextMenu
-      key={contextMenuKey}
+      key={contextMenuResetKey}
       onOpenChange={(open) => {
-        contextMenuOpenRef.current = open;
         onContextMenuOpenChange(node, open);
 
         if (!open) {
