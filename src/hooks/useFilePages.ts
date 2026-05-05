@@ -6,6 +6,10 @@ import {
   FILE_PAGES_STORAGE_KEY,
 } from '@/lib/filePages';
 import {
+  GROUP_MAX_GRID_UNITS,
+  MAX_NODE_GRID_UNITS,
+} from '@/features/file-page/canvas/constants';
+import {
   FILE_PAGE_CONTENT_ITEM_KINDS,
   FILE_PAGE_NODE_KINDS,
   FILE_PAGE_WORKER_FOCUSES,
@@ -26,14 +30,12 @@ import type { Point } from '@/types/geometry';
 
 type FilePagesStore = Record<string, FilePageState>;
 
-const MAX_STORED_GRID_UNITS = 12;
-
-function normalizeUnit(value: unknown, minimum = 1) {
+function normalizeUnit(value: unknown, minimum = 1, maximum = MAX_NODE_GRID_UNITS) {
   if (!Number.isFinite(value)) {
     return minimum;
   }
 
-  return Math.max(minimum, Math.min(MAX_STORED_GRID_UNITS, Math.round(Number(value))));
+  return Math.max(minimum, Math.min(maximum, Math.round(Number(value))));
 }
 
 function normalizeNodeKind(value: unknown): FilePageNodeKind | null {
@@ -196,8 +198,16 @@ function hydrateFilePages(): FilePagesStore {
                 y: position.y,
               },
               size: {
-                widthUnits: normalizeUnit(node?.size?.widthUnits),
-                heightUnits: normalizeUnit(node?.size?.heightUnits),
+                widthUnits: normalizeUnit(
+                  node?.size?.widthUnits,
+                  1,
+                  kind === 'group' ? GROUP_MAX_GRID_UNITS : MAX_NODE_GRID_UNITS,
+                ),
+                heightUnits: normalizeUnit(
+                  node?.size?.heightUnits,
+                  1,
+                  kind === 'group' ? GROUP_MAX_GRID_UNITS : MAX_NODE_GRID_UNITS,
+                ),
               },
               workerMode: normalizeWorkerMode(node?.workerMode),
               workerFocus: normalizeWorkerFocus(node?.workerFocus),

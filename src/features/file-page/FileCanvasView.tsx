@@ -19,7 +19,6 @@ import type {
   PointerEvent as ReactPointerEvent,
   WheelEvent as ReactWheelEvent,
 } from 'react';
-import { flushSync } from 'react-dom';
 import {
   MinusIcon,
   PlusIcon,
@@ -205,6 +204,10 @@ export function FileCanvasView({
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const contextMenuNodeIdRef = useRef<string | null>(null);
   const canvasContextMenuOpenRef = useRef(false);
+  // Set when onOpenChange(false) fires (during pointerdown, before contextmenu fires).
+  // Consumed in handleCanvasContextMenu to detect that a reopen is needed even though
+  // canvasContextMenuOpenRef is already false by the time contextmenu fires.
+  const canvasContextMenuJustClosedRef = useRef(false);
   const armedPrimaryOpenNodeIdRef = useRef<string | null>(null);
   const nodeClickShouldOpenRef = useRef(false);
   const editingNodeIdRef = useRef<string | null>(null);
@@ -1091,19 +1094,17 @@ export function FileCanvasView({
     canvasContextMenuOpenRef.current = false;
     contextMenuNodeIdRef.current = null;
 
-    flushSync(() => {
-      setContextMenuNodeId(null);
-      setCanvasContextMenuKey((current) => current + 1);
-      setNodeContextMenuResetKey((current) => current + 1);
-    });
+    setContextMenuNodeId(null);
+    setCanvasContextMenuKey((current) => current + 1);
+    setNodeContextMenuResetKey((current) => current + 1);
 
-    window.setTimeout(() => {
+    window.requestAnimationFrame(() => {
       const target = targetNodeId ? findCanvasNodeElement(targetNodeId) : canvasRef.current;
 
       if (target) {
         dispatchContextMenuAt(target, clientX, clientY);
       }
-    }, 0);
+    });
   }
 
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
@@ -1116,7 +1117,14 @@ export function FileCanvasView({
 
     contextMenuPointRef.current = getLocalPoint(event.clientX, event.clientY);
 
-    if (!canvasContextMenuOpenRef.current && !contextMenuNodeIdRef.current) {
+    // Radix's DismissableLayer fires on pointerdown (capture phase, before contextmenu),
+    // so canvasContextMenuOpenRef is already false by the time this handler runs.
+    // canvasContextMenuJustClosedRef bridges that gap: it's set in onOpenChange(false)
+    // and consumed here to detect that a force-reopen is needed.
+    const needsReopen = canvasContextMenuJustClosedRef.current || contextMenuNodeIdRef.current !== null;
+    canvasContextMenuJustClosedRef.current = false;
+
+    if (!needsReopen) {
       return;
     }
 
@@ -1789,9 +1797,13 @@ export function FileCanvasView({
 
   const setNodeContextMenuOpen = useCallback((node: FilePageNode, open: boolean) => {
     if (open) {
+      contextMenuNodeIdRef.current = node.id;
       setContextMenuNodeId(node.id);
       onHoverNodeChangeRef.current(node);
       return;
+    }
+    if (contextMenuNodeIdRef.current === node.id) {
+      contextMenuNodeIdRef.current = null;
     }
     setContextMenuNodeId((c) => (c === node.id ? null : c));
     onHoverNodeChangeRef.current(null);
@@ -1805,6 +1817,7 @@ export function FileCanvasView({
         return;
       }
 
+      contextMenuNodeIdRef.current = node.id;
       armedPrimaryOpenNodeIdRef.current = null;
       nodeClickShouldOpenRef.current = false;
       setContextMenuNodeId(node.id);
@@ -2588,6 +2601,9 @@ export function FileCanvasView({
       key={canvasContextMenuKey}
       onOpenChange={(open) => {
         canvasContextMenuOpenRef.current = open;
+        if (!open) {
+          canvasContextMenuJustClosedRef.current = true;
+        }
       }}
     >
       <ContextMenuTrigger asChild>

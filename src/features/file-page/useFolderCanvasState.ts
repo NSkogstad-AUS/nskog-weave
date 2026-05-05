@@ -14,7 +14,9 @@ import {
   GROUP_CONTENT_INSET_TOP,
   GROUP_CONTENT_PADDING_BOTTOM,
   GROUP_CONTENT_PADDING_X,
+  GROUP_MAX_GRID_UNITS,
   GROUP_MIN_GRID_UNITS,
+  MAX_NODE_GRID_UNITS,
   SLOT_STEP_X,
   SLOT_STEP_Y,
 } from './canvas/constants';
@@ -50,14 +52,13 @@ const FOLDER_NODE_PREFIX = 'folder:';
 const FILE_NODE_PREFIX = 'file:';
 export const FOLDER_CANVAS_STORAGE_KEY = 'weave:folder-canvas:v1';
 export const FOLDER_CANVAS_UPDATED_EVENT = 'weave:folder-canvas:updated';
-const MAX_STORED_GRID_UNITS = 12;
 
-function normalizeUnit(value: unknown, minimum = 1) {
+function normalizeUnit(value: unknown, minimum = 1, maximum = MAX_NODE_GRID_UNITS) {
   if (!Number.isFinite(value)) {
     return minimum;
   }
 
-  return Math.max(minimum, Math.min(MAX_STORED_GRID_UNITS, Math.round(Number(value))));
+  return Math.max(minimum, Math.min(maximum, Math.round(Number(value))));
 }
 
 function normalizeNodeKind(value: unknown): FilePageNodeKind | null {
@@ -205,8 +206,16 @@ function normalizeStoredFolderCanvasNodes(raw: string | null): FolderCanvasStore
                   heightUnits: 3,
                 }
               : {
-                  widthUnits: normalizeUnit(node?.size?.widthUnits),
-                  heightUnits: normalizeUnit(node?.size?.heightUnits),
+                  widthUnits: normalizeUnit(
+                    node?.size?.widthUnits,
+                    1,
+                    kind === 'group' ? GROUP_MAX_GRID_UNITS : MAX_NODE_GRID_UNITS,
+                  ),
+                  heightUnits: normalizeUnit(
+                    node?.size?.heightUnits,
+                    1,
+                    kind === 'group' ? GROUP_MAX_GRID_UNITS : MAX_NODE_GRID_UNITS,
+                  ),
                 };
 
           return [
