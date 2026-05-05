@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useRef, useState } from 'react';
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import {
   AlignCenterHorizontalIcon,
@@ -203,6 +203,9 @@ function FileCanvasNodeComponent({
     workerProgress,
     node.workerLastError ?? null,
   );
+  const nodeButtonRef = useRef<HTMLButtonElement | null>(null);
+  const contextMenuOpenRef = useRef(false);
+  const [contextMenuKey, setContextMenuKey] = useState(0);
   const canRunWorker = isWorkerNode && workerInputCount > 0 && workerStatus !== 'processing';
   const elementIconToneClassName =
     elementIcon === 'lightbulb'
@@ -217,8 +220,10 @@ function FileCanvasNodeComponent({
 
   const buttonNode = (
     <button
+      ref={nodeButtonRef}
       type="button"
       data-canvas-node="true"
+      data-canvas-node-id={node.id}
       onPointerDown={(event) => onPointerDown(event, node)}
       onClick={(event) => {
         if (event.shiftKey) {
@@ -230,7 +235,6 @@ function FileCanvasNodeComponent({
         if (
           !onOpenPreview ||
           isDragging ||
-          !isSelected ||
           (node.kind !== 'file' && node.kind !== 'folder')
         ) {
           return;
@@ -248,6 +252,29 @@ function FileCanvasNodeComponent({
       onContextMenu={(event) => {
         event.stopPropagation();
         onContextMenu(node);
+
+        if (!contextMenuOpenRef.current) {
+          return;
+        }
+
+        event.preventDefault();
+
+        const { clientX, clientY } = event;
+        contextMenuOpenRef.current = false;
+        setContextMenuKey((current) => current + 1);
+
+        window.requestAnimationFrame(() => {
+          nodeButtonRef.current?.dispatchEvent(
+            new MouseEvent('contextmenu', {
+              bubbles: true,
+              cancelable: true,
+              clientX,
+              clientY,
+              button: 2,
+              buttons: 2,
+            }),
+          );
+        });
       }}
       className={cn(
         NODE_CARD_CLASS,
@@ -547,7 +574,9 @@ function FileCanvasNodeComponent({
 
   return (
     <ContextMenu
+      key={contextMenuKey}
       onOpenChange={(open) => {
+        contextMenuOpenRef.current = open;
         onContextMenuOpenChange(node, open);
 
         if (!open) {

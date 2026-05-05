@@ -203,6 +203,8 @@ export function FileCanvasView({
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const contextMenuNodeIdRef = useRef<string | null>(null);
   const canvasContextMenuOpenRef = useRef(false);
+  const armedPrimaryOpenNodeIdRef = useRef<string | null>(null);
+  const nodeClickShouldOpenRef = useRef(false);
   const editingNodeIdRef = useRef<string | null>(null);
   const editingLabelRef = useRef('');
   const onMoveNodesRef = useRef(onMoveNodes);
@@ -1008,6 +1010,8 @@ export function FileCanvasView({
       if (!localPoint) return;
 
       if (event.shiftKey) {
+        armedPrimaryOpenNodeIdRef.current = null;
+        nodeClickShouldOpenRef.current = false;
         const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
         const nextSelection = currentSelection.includes(node.id)
           ? currentSelection.filter((nodeId) => nodeId !== node.id)
@@ -1021,6 +1025,10 @@ export function FileCanvasView({
 
       const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
       const currentSelectionSet = new Set(currentSelection);
+      nodeClickShouldOpenRef.current =
+        armedPrimaryOpenNodeIdRef.current === node.id &&
+        currentSelection.length === 1 &&
+        currentSelectionSet.has(node.id);
       const nextSelectedIds =
         currentSelectionSet.has(node.id) && currentSelection.length > 1
           ? currentSelection
@@ -1652,14 +1660,20 @@ export function FileCanvasView({
 
       if (liveDrag && nodeDragMovedRef.current) {
         suppressPreviewOpenUntilRef.current = Date.now() + 180;
+        armedPrimaryOpenNodeIdRef.current = null;
+        nodeClickShouldOpenRef.current = false;
       }
 
       if (liveDrag && !nodeDragMovedRef.current) {
         onSelectNodesRef.current(liveDrag.selectedNodeIds);
+        armedPrimaryOpenNodeIdRef.current =
+          liveDrag.selectedNodeIds.length === 1 ? liveDrag.selectedNodeIds[0] : null;
       }
 
       if (liveMarquee && marqueeMovedRef.current) {
         suppressPreviewOpenUntilRef.current = Date.now() + 180;
+        armedPrimaryOpenNodeIdRef.current = null;
+        nodeClickShouldOpenRef.current = false;
       }
 
       // Commit resize
@@ -1754,6 +1768,8 @@ export function FileCanvasView({
 
   const openNodeContextMenu = useCallback(
     (node: FilePageNode) => {
+      armedPrimaryOpenNodeIdRef.current = null;
+      nodeClickShouldOpenRef.current = false;
       setContextMenuNodeId(node.id);
       onHoverNodeChangeRef.current(node);
       const currentSelection = draftSelectedNodeIdsRef.current ?? selectedNodeIdsRef.current;
@@ -1767,8 +1783,16 @@ export function FileCanvasView({
   const openNodePrimaryAction = useCallback(
     (node: FilePageNode) => {
       if (Date.now() < suppressPreviewOpenUntilRef.current) {
+        nodeClickShouldOpenRef.current = false;
         return;
       }
+
+      if (!nodeClickShouldOpenRef.current || armedPrimaryOpenNodeIdRef.current !== node.id) {
+        nodeClickShouldOpenRef.current = false;
+        return;
+      }
+
+      nodeClickShouldOpenRef.current = false;
 
       if (node.kind === 'file') {
         const fileId = resolveCanvasFileId?.(node) ?? null;
@@ -2552,6 +2576,8 @@ export function FileCanvasView({
               }
 
               event.preventDefault();
+              armedPrimaryOpenNodeIdRef.current = null;
+              nodeClickShouldOpenRef.current = false;
 
               if (event.shiftKey) {
                 const localPoint = getLocalPoint(event.clientX, event.clientY);
