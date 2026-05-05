@@ -19,41 +19,40 @@ import type {
   WheelEvent as ReactWheelEvent,
 } from 'react';
 import {
-  AlignCenterHorizontalIcon,
-  ArrowUpDownIcon,
   MinusIcon,
   PlusIcon,
   RotateCcwIcon,
   ShapesIcon,
-  Trash2Icon,
 } from 'lucide-react';
 
 import {
   ContextMenu,
   ContextMenuContent,
   ContextMenuItem,
-  ContextMenuSeparator,
   ContextMenuTrigger,
 } from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
   GRID_SIZE,
+  GROUP_CONTENT_INSET_BOTTOM,
   GROUP_CONTENT_INSET_LEFT,
+  GROUP_CONTENT_INSET_RIGHT,
   GROUP_CONTENT_INSET_TOP,
+  GROUP_CONTENT_PADDING_BOTTOM,
+  GROUP_CONTENT_PADDING_TOP,
+  GROUP_CONTENT_PADDING_X,
+  GROUP_MAX_GRID_UNITS,
+  GROUP_MIN_GRID_UNITS,
   NODE_CARD_CLASS,
   SLOT_STEP_X,
   SLOT_STEP_Y,
 } from './canvas/constants';
-import type {
-  CanvasPaletteSidebarItem,
-  CanvasPaletteTemplateId,
-} from './canvas/CanvasPaletteSidebar';
+import type { CanvasPaletteTemplateId } from './canvas/CanvasPaletteSidebar';
 import {
   FileCanvasFloatingInspector,
   type CanvasFloatingInspectorTab,
 } from './canvas/FileCanvasFloatingInspector';
-import { FileCanvasFloatingToolbar } from './canvas/FileCanvasFloatingToolbar';
 import { FileCanvasNode } from './canvas/FileCanvasNode';
 import type { GroupResizeAxis } from './canvas/groupChrome';
 import { ELEMENT_ICON_META, NODE_META } from './canvas/meta';
@@ -79,18 +78,12 @@ import {
   isCanvasPaletteTemplateId,
   pointIsWithinBounds,
   readCanvasPaletteTemplate,
-  setTransparentDragImage,
   sortCanvasContentItems,
-  CANVAS_PALETTE_DATA_TRANSFER_TYPE,
-  CANVAS_PALETTE_TEXT_PREFIX,
 } from './canvas/canvasUtils';
 import {
   areSizesEqual,
-  buildBasicElementNode,
-  buildCanvasPaletteItems,
   buildCanvasPaletteNode,
   buildGroupNode,
-  buildWorkerNode,
   getMinimumNodeSize,
 } from './canvas/nodeBuilders';
 import { useCanvasLayout } from './canvas/useCanvasLayout';
@@ -209,6 +202,7 @@ export function FileCanvasView({
 
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const contextMenuNodeIdRef = useRef<string | null>(null);
+  const canvasContextMenuOpenRef = useRef(false);
   const editingNodeIdRef = useRef<string | null>(null);
   const editingLabelRef = useRef('');
   const onMoveNodesRef = useRef(onMoveNodes);
@@ -248,6 +242,7 @@ export function FileCanvasView({
   const [draftIcons, setDraftIcons] = useState<Record<string, FilePageElementIcon>>({});
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
   const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
+  const [canvasContextMenuKey, setCanvasContextMenuKey] = useState(0);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
@@ -715,22 +710,6 @@ export function FileCanvasView({
     [centerNodesInGroup],
   );
 
-  const selectedCenterGroupId = useMemo(() => {
-    if (displaySelectedNodeIds.length === 0) return null;
-
-    const selectedNodes = displaySelectedNodeIds.map((nodeId) => getNodeById(nodeId));
-    const firstGroupId = selectedNodes[0]?.groupId ?? null;
-
-    if (!firstGroupId) return null;
-
-    return selectedNodes.every(
-      (node): node is FilePageNode =>
-        Boolean(node && node.kind !== 'group' && node.groupId === firstGroupId),
-    )
-      ? firstGroupId
-      : null;
-  }, [displaySelectedNodeIds, getNodeById, nodes]);
-
   const inspectors = useFloatingInspectors({
     canvasRef,
     suppressPreviewOpenUntilRef,
@@ -1079,7 +1058,31 @@ export function FileCanvasView({
     ) {
       return;
     }
+
     contextMenuPointRef.current = getLocalPoint(event.clientX, event.clientY);
+
+    if (!canvasContextMenuOpenRef.current) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const { clientX, clientY } = event;
+    canvasContextMenuOpenRef.current = false;
+    setCanvasContextMenuKey((current) => current + 1);
+
+    window.requestAnimationFrame(() => {
+      canvasRef.current?.dispatchEvent(
+        new MouseEvent('contextmenu', {
+          bubbles: true,
+          cancelable: true,
+          clientX,
+          clientY,
+          button: 2,
+          buttons: 2,
+        }),
+      );
+    });
   }
 
   // ── Worker connection drag ─────────────────────────────────────────────────
@@ -1161,6 +1164,7 @@ export function FileCanvasView({
                     : localPoint.x - liveResize.origin.x),
                 SLOT_STEP_X,
                 liveResize.minimumSize.widthUnits,
+                resizingNode.kind === 'group' ? GROUP_MAX_GRID_UNITS : undefined,
               ),
           heightUnits: !resizesHeight
             ? currentSize.heightUnits
@@ -1171,6 +1175,7 @@ export function FileCanvasView({
                     : localPoint.y - liveResize.origin.y),
                 SLOT_STEP_Y,
                 liveResize.minimumSize.heightUnits,
+                resizingNode.kind === 'group' ? GROUP_MAX_GRID_UNITS : undefined,
               ),
         };
 
@@ -1647,6 +1652,10 @@ export function FileCanvasView({
 
       if (liveDrag && nodeDragMovedRef.current) {
         suppressPreviewOpenUntilRef.current = Date.now() + 180;
+      }
+
+      if (liveDrag && !nodeDragMovedRef.current) {
+        onSelectNodesRef.current(liveDrag.selectedNodeIds);
       }
 
       if (liveMarquee && marqueeMovedRef.current) {
@@ -2190,39 +2199,86 @@ export function FileCanvasView({
     [addNodeWithPosition, resolveInsertionPosition],
   );
 
-  const addNodeInViewport = useCallback(
-    (node: Omit<FilePageNode, 'position'>) => {
-      if (!canvasRef.current) {
-        addNodeWithPosition(node, resolveInsertionPosition(node));
-        return;
-      }
-      const rect = canvasRef.current.getBoundingClientRect();
-      const viewportCenter: Point = {
-        x: (rect.width / 2 - viewportRef.current.x) / zoomRef.current,
-        y: (rect.height / 2 - viewportRef.current.y) / zoomRef.current,
-      };
-      addNodeWithPosition(node, resolveInsertionPosition(node, viewportCenter, 'center'));
-      contextMenuPointRef.current = null;
-    },
-    [addNodeWithPosition, resolveInsertionPosition],
-  );
-
   // Context menu add handlers
-  function handleAddBasicElement() { addNodeAtContext(buildBasicElementNode()); }
   function handleAddGroup() { addNodeAtContext(buildGroupNode()); }
-  function handleAddSortWorker() { addNodeAtContext(buildWorkerNode('sort-data')); }
 
-  // ── Palette items ──────────────────────────────────────────────────────────
+  const selectedGroupableNodes = useMemo(() => {
+    const selectedIds = new Set(displaySelectedNodeIds);
 
-  const canvasPaletteItems = useMemo(() => buildCanvasPaletteItems(), []);
-  const structurePaletteItems = useMemo(
-    () => canvasPaletteItems.filter((item) => item.section === 'Structure') as CanvasPaletteSidebarItem[],
-    [canvasPaletteItems],
-  );
-  const workerPaletteItems = useMemo(
-    () => canvasPaletteItems.filter((item) => item.section === 'Workers') as CanvasPaletteSidebarItem[],
-    [canvasPaletteItems],
-  );
+    return nodes.filter((node) => selectedIds.has(node.id) && node.kind !== 'group');
+  }, [displaySelectedNodeIds, nodes]);
+
+  const canGroupSelectedNodes = selectedGroupableNodes.length > 1;
+
+  const handleAddSelectedNodesToGroup = useCallback(() => {
+    if (selectedGroupableNodes.length < 2) {
+      return;
+    }
+
+    const selectedBounds = selectedGroupableNodes
+      .map((node) =>
+        getNodeBoundsWithSize(
+          draftPositionsRef.current[node.id] ?? node.position,
+          draftSizesRef.current[node.id] ?? node.size,
+          node.kind,
+        ),
+      )
+      .reduce(
+        (bounds, nodeBounds) => ({
+          left: Math.min(bounds.left, nodeBounds.left),
+          top: Math.min(bounds.top, nodeBounds.top),
+          right: Math.max(bounds.right, nodeBounds.right),
+          bottom: Math.max(bounds.bottom, nodeBounds.bottom),
+        }),
+        {
+          left: Number.POSITIVE_INFINITY,
+          top: Number.POSITIVE_INFINITY,
+          right: Number.NEGATIVE_INFINITY,
+          bottom: Number.NEGATIVE_INFINITY,
+        },
+      );
+    const selectedWidth = selectedBounds.right - selectedBounds.left;
+    const selectedHeight = selectedBounds.bottom - selectedBounds.top;
+    const groupSize: FilePageNode['size'] = {
+      widthUnits: getUnitsForDimension(
+        selectedWidth +
+          GROUP_CONTENT_PADDING_X * 2 +
+          GROUP_CONTENT_INSET_LEFT +
+          GROUP_CONTENT_INSET_RIGHT,
+        SLOT_STEP_X,
+        GROUP_MIN_GRID_UNITS,
+        GROUP_MAX_GRID_UNITS,
+      ),
+      heightUnits: getUnitsForDimension(
+        selectedHeight +
+          GROUP_CONTENT_PADDING_TOP +
+          GROUP_CONTENT_PADDING_BOTTOM +
+          GROUP_CONTENT_INSET_TOP +
+          GROUP_CONTENT_INSET_BOTTOM,
+        SLOT_STEP_Y,
+        GROUP_MIN_GRID_UNITS,
+        GROUP_MAX_GRID_UNITS,
+      ),
+    };
+    const nextGroup = {
+      ...buildGroupNode(),
+      id: `group-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      position: {
+        x: clampToCanvas(selectedBounds.left - GROUP_CONTENT_PADDING_X),
+        y: clampToCanvas(selectedBounds.top - GROUP_CONTENT_PADDING_TOP),
+      },
+      size: groupSize,
+    } satisfies FilePageNode;
+
+    onPreviewContentItemChange?.(null);
+    onAddNodeRef.current(nextGroup);
+    selectedGroupableNodes.forEach((node) => {
+      onUpdateNodeRef.current(node.id, { groupId: nextGroup.id });
+    });
+    onSelectNodesRef.current(selectedGroupableNodes.map((node) => node.id));
+    setDraftSelectedNodeIds(selectedGroupableNodes.map((node) => node.id));
+    contextMenuPointRef.current = null;
+  }, [onPreviewContentItemChange, selectedGroupableNodes]);
 
   // ── Palette drag handlers ──────────────────────────────────────────────────
 
@@ -2234,25 +2290,6 @@ export function FileCanvasView({
     setPaletteDragPreviewPoint(null);
     setIsPaletteDragOverCanvas(false);
   }, [cancelScheduledFrame]);
-
-  const handleInsertPaletteNode = useCallback(
-    (templateId: CanvasPaletteTemplateId) => {
-      addNodeInViewport(buildCanvasPaletteNode(templateId));
-    },
-    [addNodeInViewport],
-  );
-
-  const handlePaletteItemDragStart = useCallback(
-    (templateId: CanvasPaletteTemplateId, event: ReactDragEvent<HTMLElement>) => {
-      setDraggedPaletteTemplateId(templateId);
-      setPaletteDragPreviewPoint(null);
-      event.dataTransfer.effectAllowed = 'copy';
-      event.dataTransfer.setData(CANVAS_PALETTE_DATA_TRANSFER_TYPE, templateId);
-      event.dataTransfer.setData('text/plain', `${CANVAS_PALETTE_TEXT_PREFIX}${templateId}`);
-      setTransparentDragImage(event.dataTransfer);
-    },
-    [],
-  );
 
   const handleCanvasPaletteDragEnter = useCallback(
     (event: ReactDragEvent<HTMLDivElement>) => {
@@ -2386,6 +2423,8 @@ export function FileCanvasView({
         snapPreviewPosition={showSnapPreview ? previewPosition : undefined}
         onApplyIcon={applyNodeIcon}
         onApplyResize={applyNodeResize}
+        canAddSelectionToGroup={canGroupSelectedNodes && selectedIdSet.has(node.id)}
+        onAddSelectionToGroup={handleAddSelectedNodesToGroup}
         onClearIconPreview={clearNodeIconPreview}
         onClearSizePreview={clearNodeSizePreview}
         onCommitRename={commitNodeRename}
@@ -2483,7 +2522,12 @@ export function FileCanvasView({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <ContextMenu>
+    <ContextMenu
+      key={canvasContextMenuKey}
+      onOpenChange={(open) => {
+        canvasContextMenuOpenRef.current = open;
+      }}
+    >
       <ContextMenuTrigger asChild>
         <div className="flex h-full min-h-[34rem] overflow-hidden rounded-none bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]">
           <div
@@ -2531,15 +2575,6 @@ export function FileCanvasView({
               panState ? 'cursor-grabbing' : 'cursor-grab',
             )}
           >
-            <FileCanvasFloatingToolbar
-              draggedItemId={draggedPaletteTemplateId}
-              structureItems={structurePaletteItems}
-              workerItems={workerPaletteItems}
-              onDragEndItem={clearPaletteDragState}
-              onDragStartItem={handlePaletteItemDragStart}
-              onInsertItem={handleInsertPaletteNode}
-            />
-
             <div
               data-canvas-chrome="true"
               className="panel-surface absolute bottom-4 left-4 z-30 flex items-center gap-1 rounded-[1.35rem] p-1.5"
@@ -2774,35 +2809,17 @@ export function FileCanvasView({
       </ContextMenuTrigger>
 
       <ContextMenuContent className="ml-2 w-52">
-        {displaySelectedNodeIds.length > 0 ? (
-          <>
-            {selectedCenterGroupId ? (
-              <ContextMenuItem
-                onSelect={() => centerNodesInGroup(selectedCenterGroupId, displaySelectedNodeIds)}
-              >
-                <AlignCenterHorizontalIcon className="size-4" />
-                Center selection in group
-              </ContextMenuItem>
-            ) : null}
-            <ContextMenuItem onSelect={deleteSelectedNodes}>
-              <Trash2Icon className="size-4" />
-              Delete selected
-            </ContextMenuItem>
-            <ContextMenuSeparator />
-          </>
-        ) : null}
-        <ContextMenuItem onSelect={handleAddSortWorker}>
-          <ArrowUpDownIcon className="size-4" />
-          Add sort worker
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={handleAddGroup}>
-          <ShapesIcon className="size-4" />
-          Add group
-        </ContextMenuItem>
-        <ContextMenuItem onSelect={handleAddBasicElement}>
-          <PlusIcon className="size-4" />
-          Add basic element
-        </ContextMenuItem>
+        {canGroupSelectedNodes ? (
+          <ContextMenuItem onSelect={handleAddSelectedNodesToGroup}>
+            <ShapesIcon className="size-4" />
+            Add to group
+          </ContextMenuItem>
+        ) : (
+          <ContextMenuItem onSelect={handleAddGroup}>
+            <ShapesIcon className="size-4" />
+            Add group
+          </ContextMenuItem>
+        )}
       </ContextMenuContent>
     </ContextMenu>
   );

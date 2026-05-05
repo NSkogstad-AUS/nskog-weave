@@ -5,9 +5,10 @@ import { cn } from '@/lib/utils';
 import { CheckIcon, ChevronRightIcon } from 'lucide-react';
 
 function ContextMenu({
+  modal = false,
   ...props
 }: React.ComponentProps<typeof ContextMenuPrimitive.Root>) {
-  return <ContextMenuPrimitive.Root data-slot="context-menu" {...props} />;
+  return <ContextMenuPrimitive.Root data-slot="context-menu" modal={modal} {...props} />;
 }
 
 function ContextMenuTrigger({

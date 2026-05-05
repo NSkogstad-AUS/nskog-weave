@@ -8,6 +8,7 @@ import {
   LoaderCircleIcon,
   PencilLineIcon,
   PlayIcon,
+  ShapesIcon,
   SparklesIcon,
   Trash2Icon,
 } from 'lucide-react';
@@ -66,6 +67,7 @@ interface FileCanvasNodeProps {
   snapPreviewPosition?: Point;
   onApplyIcon: (node: FilePageNode, icon: FilePageElementIcon) => void;
   onApplyResize: (node: FilePageNode, size: FilePageNode['size']) => void;
+  onAddSelectionToGroup?: () => void;
   onClearIconPreview: (nodeId?: string) => void;
   onClearSizePreview: (nodeId?: string) => void;
   onCommitRename: (node: FilePageNode) => void;
@@ -96,6 +98,7 @@ interface FileCanvasNodeProps {
     node: FilePageNode,
   ) => void;
   canResize: (nodeId: string, size: FilePageNode['size']) => boolean;
+  canAddSelectionToGroup?: boolean;
 }
 
 function FileCanvasNodeComponent({
@@ -118,6 +121,7 @@ function FileCanvasNodeComponent({
   snapPreviewPosition,
   onApplyIcon,
   onApplyResize,
+  onAddSelectionToGroup,
   onClearIconPreview,
   onClearSizePreview,
   onCommitRename,
@@ -141,6 +145,7 @@ function FileCanvasNodeComponent({
   onStopRename,
   onWorkerInputHandlePointerDown,
   canResize,
+  canAddSelectionToGroup = false,
 }: FileCanvasNodeProps) {
   const meta = NODE_META[node.kind];
   const elementIcon = draftIcon ?? node.icon;
@@ -222,7 +227,12 @@ function FileCanvasNodeComponent({
           return;
         }
 
-        if (!onOpenPreview || isDragging || (node.kind !== 'file' && node.kind !== 'folder')) {
+        if (
+          !onOpenPreview ||
+          isDragging ||
+          !isSelected ||
+          (node.kind !== 'file' && node.kind !== 'folder')
+        ) {
           return;
         }
 
@@ -586,6 +596,12 @@ function FileCanvasNodeComponent({
             <PencilLineIcon className="size-4" />
             Rename
           </ContextMenuItem>
+          {canAddSelectionToGroup && node.kind !== 'group' && onAddSelectionToGroup ? (
+            <ContextMenuItem onSelect={onAddSelectionToGroup}>
+              <ShapesIcon className="size-4" />
+              Add to group
+            </ContextMenuItem>
+          ) : null}
           {node.kind === 'group' && onCenterGroupContents ? (
             <ContextMenuItem onSelect={() => onCenterGroupContents(node)}>
               <AlignCenterHorizontalIcon className="size-4" />

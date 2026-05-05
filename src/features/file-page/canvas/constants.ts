@@ -8,6 +8,7 @@ export const SLOT_STEP_X = NODE_UNIT + SLOT_GAP_X;
 export const SLOT_STEP_Y = NODE_UNIT + SLOT_GAP_Y;
 export const COLLISION_GAP = 10;
 export const MAX_NODE_GRID_UNITS = 12;
+export const GROUP_MAX_GRID_UNITS = 24;
 export const GROUP_MIN_GRID_UNITS = 2;
 export const GROUP_CONTENT_INSET_LEFT = 20;
 export const GROUP_CONTENT_INSET_RIGHT = 0;
