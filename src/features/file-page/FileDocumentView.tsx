@@ -1239,7 +1239,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
   const [pdfPageCount, setPdfPageCount] = useState(0);
   const [activePdfPage, setActivePdfPage] = useState(1);
   const [pdfSidebarDocument, setPdfSidebarDocument] = useState<PdfSidebarDocument>(null);
-  const [isPdfSidebarCollapsed, setIsPdfSidebarCollapsed] = useState(false);
+  const [isPdfSidebarCollapsed, setIsPdfSidebarCollapsed] = useState(true);
   const pageNotes = notesByFile[file.id] ?? EMPTY_PAGE_NOTES;
 
   // Mutable ref for synchronous reads in event handlers — kept in sync with state
@@ -1522,6 +1522,7 @@ export function FileDocumentView({ file }: FileDocumentViewProps) {
     setPdfPageCount(0);
     setActivePdfPage(1);
     setPdfSidebarDocument(null);
+    setIsPdfSidebarCollapsed(true);
   }, [file.id, kind]);
 
   useEffect(() => {

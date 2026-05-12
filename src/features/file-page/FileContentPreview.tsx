@@ -205,7 +205,7 @@ function PdfPreviewThumbnail({
 function PdfDocumentPreview({ document }: { document: PreviewDocument }) {
   const [state, setState] = useState<PdfPreviewState>({ status: 'loading' });
   const [selectedPage, setSelectedPage] = useState(1);
-  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(true);
   const sidebarRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -214,6 +214,7 @@ function PdfDocumentPreview({ document }: { document: PreviewDocument }) {
 
     setState({ status: 'loading' });
     setSelectedPage(1);
+    setIsSidebarCollapsed(true);
 
     async function load() {
       try {
