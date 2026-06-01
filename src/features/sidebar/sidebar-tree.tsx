@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
   DragEvent as ReactDragEvent,
   MouseEvent as ReactMouseEvent,
+  ReactNode,
 } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ChevronDownIcon,
   DownloadIcon,
@@ -23,17 +25,6 @@ import {
   SidebarMenuItem,
   SidebarMenuSub,
 } from '@/components/animate-ui/components/radix/sidebar';
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuLabel,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import {
   folderHasContents,
   getFolderDescendantCounts,
@@ -97,6 +88,14 @@ const SIDEBAR_HIGHLIGHT_CLASS =
 const SIDEBAR_SELECTED_CLASS =
   'bg-sidebar-accent/45 text-sidebar-accent-foreground shadow-[inset_0_0_0_1px_rgba(71,85,105,0.55)]';
 const SIDEBAR_ROW_INSET_CLASS = 'mx-px w-[calc(100%-2px)]';
+const SIDEBAR_CONTEXT_MENU_CLASS =
+  'fixed z-50 overflow-hidden rounded-md border border-sidebar-border/80 bg-background/98 p-1 text-popover-foreground shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)]';
+const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
+  'flex min-h-8 w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75 disabled:pointer-events-none disabled:opacity-50 [&_svg]:size-4 [&_svg]:shrink-0';
+const SIDEBAR_CONTEXT_MENU_LABEL_CLASS =
+  'px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground';
+
+type MenuPosition = { x: number; y: number };
 
 export function getSidebarItemKey(item: ActiveItem) {
   return item ? `${item.type}:${item.id}` : '';
@@ -114,6 +113,81 @@ function queueAfterMenuClose(callback: () => void) {
   window.requestAnimationFrame(() => {
     window.requestAnimationFrame(callback);
   });
+}
+
+function useFixedContextMenu() {
+  const [position, setPosition] = useState<MenuPosition | null>(null);
+
+  useEffect(() => {
+    if (!position) return;
+
+    const close = () => setPosition(null);
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('[data-sidebar-context-menu="true"]')) {
+        return;
+      }
+      close();
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('blur', close);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('blur', close);
+    };
+  }, [position]);
+
+  return {
+    close: () => setPosition(null),
+    open: (event: ReactMouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      setPosition({ x: event.clientX, y: event.clientY });
+    },
+    position,
+  };
+}
+
+function SidebarContextMenu({
+  children,
+  className,
+  onClose,
+  position,
+}: {
+  children: ReactNode;
+  className?: string;
+  onClose: () => void;
+  position: MenuPosition | null;
+}) {
+  if (!position) return null;
+
+  return createPortal(
+    <div
+      data-sidebar-context-menu="true"
+      role="menu"
+      className={cn(SIDEBAR_CONTEXT_MENU_CLASS, className)}
+      style={{ left: position.x, top: position.y }}
+      onContextMenu={(event) => event.preventDefault()}
+      onClick={onClose}
+    >
+      {children}
+    </div>,
+    document.body,
+  );
+}
+
+function SidebarContextMenuLabel({ children }: { children: ReactNode }) {
+  return <div className={SIDEBAR_CONTEXT_MENU_LABEL_CLASS}>{children}</div>;
+}
+
+function SidebarContextMenuSeparator() {
+  return <div className="-mx-1 my-1 h-px bg-border" />;
 }
 
 function getRowPaddingLeft(level: number) {
@@ -573,6 +647,7 @@ function FileRow({
     parentFolderId,
     index: getDropRatio(event) > 0.5 ? itemIndex + 1 : itemIndex,
   });
+  const contextMenu = useFixedContextMenu();
 
   return (
     <SidebarMenuItem className="relative w-full">
@@ -587,18 +662,15 @@ function FileRow({
           />
         </div>
       ) : (
-        <ContextMenu
-          onOpenChange={(open) => {
-            if (open) {
-              onSelectForContextMenu();
-            }
-          }}
-        >
-          <ContextMenuTrigger asChild>
+        <>
             <SidebarMenuButton
               isActive={isSelected}
               draggable
               onClick={onSelect}
+              onContextMenu={(event) => {
+                onSelectForContextMenu();
+                contextMenu.open(event);
+              }}
               onDoubleClick={onBeginRename}
               onDragEnter={(event) => {
                 if (!draggingItem) {
@@ -651,50 +723,46 @@ function FileRow({
               <FileTextIcon className="ml-[-4px]" />
               <span>{file.label}</span>
             </SidebarMenuButton>
-          </ContextMenuTrigger>
-          <ContextMenuContent
-            side="right"
-            className="ml-2 w-56 overflow-hidden"
-            onCloseAutoFocus={(event) => event.preventDefault()}
-          >
-            <ContextMenuLabel>File actions</ContextMenuLabel>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              onSelect={() => {
+          <SidebarContextMenu position={contextMenu.position} onClose={contextMenu.close} className="w-56">
+            <SidebarContextMenuLabel>File actions</SidebarContextMenuLabel>
+            <SidebarContextMenuSeparator />
+            <button
+              type="button"
+              role="menuitem"
+              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+              onClick={() => {
                 onSelectForContextMenu();
                 queueAfterMenuClose(onBeginRename);
               }}
             >
               <PencilIcon />
               Rename
-            </ContextMenuItem>
+            </button>
             {onDownload ? (
-              <ContextMenuItem
-                onSelect={() => {
+              <button
+                type="button"
+                role="menuitem"
+                className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+                onClick={() => {
                   onSelectForContextMenu();
                   onDownload();
                 }}
               >
                 <DownloadIcon />
                 Download
-              </ContextMenuItem>
+              </button>
             ) : null}
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Trash2Icon className="size-4 shrink-0" />
-                Delete
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="ml-2 w-52">
-                <ContextMenuLabel>Are you sure you want to delete</ContextMenuLabel>
-                <ContextMenuSeparator />
-                <ContextMenuItem variant="destructive" onSelect={onDelete}>
-                  Yes
-                </ContextMenuItem>
-                <ContextMenuItem>No</ContextMenuItem>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
-          </ContextMenuContent>
-        </ContextMenu>
+            <button
+              type="button"
+              role="menuitem"
+              className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} text-destructive hover:bg-destructive/10 focus:bg-destructive/10`}
+              onClick={onDelete}
+            >
+              <Trash2Icon />
+              Delete
+            </button>
+          </SidebarContextMenu>
+        </>
       )}
     </SidebarMenuItem>
   );
@@ -729,14 +797,15 @@ function SeparatorRow({
     parentFolderId,
     index: getDropRatio(event) > 0.5 ? itemIndex + 1 : itemIndex,
   });
+  const contextMenu = useFixedContextMenu();
 
   return (
     <SidebarMenuItem className="relative w-full py-1.5">
       <TreeElbow level={level} />
-      <ContextMenu>
-        <ContextMenuTrigger asChild>
+      <>
           <div
             draggable
+            onContextMenu={contextMenu.open}
             onDragEnter={(event) => {
               if (!draggingItem) {
                 return;
@@ -784,20 +853,20 @@ function SeparatorRow({
             <GripVerticalIcon className="size-3.5 shrink-0 opacity-45" />
             <span className="h-px flex-1 rounded-full bg-sidebar-border/80" />
           </div>
-        </ContextMenuTrigger>
-        <ContextMenuContent
-          side="right"
-          className="ml-2 w-48"
-          onCloseAutoFocus={(event) => event.preventDefault()}
-        >
-          <ContextMenuLabel>Separator</ContextMenuLabel>
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={onDelete}>
+        <SidebarContextMenu position={contextMenu.position} onClose={contextMenu.close} className="w-48">
+          <SidebarContextMenuLabel>Separator</SidebarContextMenuLabel>
+          <SidebarContextMenuSeparator />
+          <button
+            type="button"
+            role="menuitem"
+            className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} text-destructive hover:bg-destructive/10 focus:bg-destructive/10`}
+            onClick={onDelete}
+          >
             <Trash2Icon />
             Delete
-          </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+          </button>
+        </SidebarContextMenu>
+      </>
     </SidebarMenuItem>
   );
 }
@@ -918,6 +987,7 @@ function FolderRow({
 
     return rowDropTarget;
   };
+  const contextMenu = useFixedContextMenu();
 
   return (
     <SidebarMenuItem className={cn('relative w-full', level === 0 && rootIndex && rootIndex > 0 && 'mt-4')}>
@@ -932,19 +1002,16 @@ function FolderRow({
           />
         </div>
       ) : (
-        <ContextMenu
-          onOpenChange={(open) => {
-            if (open) {
-              onSelectFolderForContextMenu(folder.id);
-            }
-          }}
-        >
-          <ContextMenuTrigger asChild>
+        <>
             <div className="relative w-full">
               <SidebarMenuButton
                 isActive={isSelected}
                 draggable
                 onClick={(event) => onSelectFolder(folder.id, event)}
+                onContextMenu={(event) => {
+                  onSelectFolderForContextMenu(folder.id);
+                  contextMenu.open(event);
+                }}
                 onDoubleClick={() =>
                   onBeginRename({
                     type: 'folder',
@@ -1044,34 +1111,38 @@ function FolderRow({
                 </span>
               </SidebarMenuButton>
             </div>
-          </ContextMenuTrigger>
-          <ContextMenuContent
-            side="right"
-            className="ml-2 w-56"
-            onCloseAutoFocus={(event) => event.preventDefault()}
-          >
-            <ContextMenuLabel>Folder actions</ContextMenuLabel>
-            <ContextMenuSeparator />
-            <ContextMenuItem
-              onSelect={() => {
+          <SidebarContextMenu position={contextMenu.position} onClose={contextMenu.close} className="w-56">
+            <SidebarContextMenuLabel>Folder actions</SidebarContextMenuLabel>
+            <SidebarContextMenuSeparator />
+            <button
+              type="button"
+              role="menuitem"
+              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+              onClick={() => {
                 onSelectFolderForContextMenu(folder.id);
                 onCreateFile(folder.id);
               }}
             >
               <FilePlus2Icon />
               Add file
-            </ContextMenuItem>
-            <ContextMenuItem
-              onSelect={() => {
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+              onClick={() => {
                 onSelectFolderForContextMenu(folder.id);
                 onCreateSeparator(folder.id);
               }}
             >
               <MinusIcon />
               Add separator
-            </ContextMenuItem>
-            <ContextMenuItem
-              onSelect={() => {
+            </button>
+            <button
+              type="button"
+              role="menuitem"
+              className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+              onClick={() => {
                 onSelectFolderForContextMenu(folder.id);
                 queueAfterMenuClose(() =>
                   onBeginRename({
@@ -1084,27 +1155,37 @@ function FolderRow({
             >
               <PencilIcon />
               Rename
-            </ContextMenuItem>
+            </button>
             {onRequestDownloadFolder ? (
-              <ContextMenuItem
-                onSelect={() => {
+              <button
+                type="button"
+                role="menuitem"
+                className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+                onClick={() => {
                   onSelectFolderForContextMenu(folder.id);
                   onRequestDownloadFolder(folder.id);
                 }}
               >
                 <DownloadIcon />
                 Download
-              </ContextMenuItem>
+              </button>
             ) : null}
             {hasChildren ? (
-              <ContextMenuItem onSelect={() => onToggleExpanded(folder.id)}>
+              <button
+                type="button"
+                role="menuitem"
+                className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+                onClick={() => onToggleExpanded(folder.id)}
+              >
                 {isExpanded ? <FolderIcon /> : <FolderOpenIcon />}
                 {isExpanded ? 'Collapse' : 'Expand'}
-              </ContextMenuItem>
+              </button>
             ) : null}
-            <ContextMenuItem
-              variant="destructive"
-              onSelect={() => {
+            <button
+              type="button"
+              role="menuitem"
+              className={`${SIDEBAR_CONTEXT_MENU_ITEM_CLASS} text-destructive hover:bg-destructive/10 focus:bg-destructive/10`}
+              onClick={() => {
                 onSelectFolderForContextMenu(folder.id);
 
                 if (folderHasContents(folder)) {
@@ -1117,9 +1198,9 @@ function FolderRow({
             >
               <Trash2Icon />
               Delete
-            </ContextMenuItem>
-          </ContextMenuContent>
-        </ContextMenu>
+            </button>
+          </SidebarContextMenu>
+        </>
       )}
 
       {hasChildren ? (

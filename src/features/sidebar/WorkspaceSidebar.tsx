@@ -1,4 +1,6 @@
 import { memo, useDeferredValue, useEffect, useMemo, useState } from 'react';
+import type { MouseEvent as ReactMouseEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { SettingsPopover } from './SettingsPopover';
 import { ChevronDownIcon, FolderPlusIcon, SearchIcon } from 'lucide-react';
 
@@ -42,14 +44,6 @@ import {
 } from '@/data/sidebarNavigation';
 import { Input } from '@/components/ui/input';
 import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuLabel,
-  ContextMenuSeparator,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
-import {
   SidebarTree,
   areSidebarItemsEqual,
   collectVisibleSidebarItems,
@@ -67,6 +61,14 @@ type PendingFolderDelete =
   | null;
 
 type SidebarSortMode = 'custom' | 'name-asc' | 'name-desc' | 'type';
+type MenuPosition = { x: number; y: number };
+
+const SIDEBAR_CONTEXT_MENU_CLASS =
+  'fixed z-50 overflow-hidden rounded-md border border-sidebar-border/80 bg-background/98 p-1 text-popover-foreground shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)]';
+const SIDEBAR_CONTEXT_MENU_ITEM_CLASS =
+  'flex min-h-8 w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75 [&_svg]:size-4 [&_svg]:shrink-0';
+const SIDEBAR_CONTEXT_MENU_LABEL_CLASS =
+  'px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground';
 
 function queueAfterMenuClose(callback: () => void) {
   window.requestAnimationFrame(() => {
@@ -208,6 +210,7 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
   const [expandedFolderIds, setExpandedFolderIds] = useState<Set<string>>(
     () => new Set(getAllFolderIds(controlledFolders ?? createWorkspaceFolders())),
   );
+  const [blankContextMenuPosition, setBlankContextMenuPosition] = useState<MenuPosition | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
   const [sortMode, setSortMode] = useState<SidebarSortMode>('custom');
   const deferredSearchQuery = useDeferredValue(searchQuery);
@@ -468,6 +471,37 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
     }
   }
 
+  useEffect(() => {
+    if (!blankContextMenuPosition) return;
+
+    const close = () => setBlankContextMenuPosition(null);
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('[data-sidebar-blank-context-menu="true"]')) {
+        return;
+      }
+      close();
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('blur', close);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('blur', close);
+    };
+  }, [blankContextMenuPosition]);
+
+  const openBlankContextMenu = (event: ReactMouseEvent<HTMLElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    setBlankContextMenuPosition({ x: event.clientX, y: event.clientY });
+  };
+
   return (
     <>
       <Sidebar
@@ -588,26 +622,37 @@ export const WorkspaceSidebar = memo(function WorkspaceSidebar({
                     }
                     searchActive={searchActive}
                   />
-                  <ContextMenu>
-                    <ContextMenuTrigger asChild>
-                      <div
-                        aria-hidden="true"
-                        className="min-h-24 flex-1 cursor-default"
-                      />
-                    </ContextMenuTrigger>
-                    <ContextMenuContent
-                      side="right"
-                      className="ml-2 w-56"
-                      onCloseAutoFocus={(event) => event.preventDefault()}
+                  <div
+                    aria-hidden="true"
+                    className="min-h-24 flex-1 cursor-default"
+                    onContextMenu={openBlankContextMenu}
+                  />
+                  {blankContextMenuPosition ? createPortal(
+                    <div
+                      data-sidebar-blank-context-menu="true"
+                      role="menu"
+                      className={`${SIDEBAR_CONTEXT_MENU_CLASS} w-56`}
+                      style={{
+                        left: blankContextMenuPosition.x,
+                        top: blankContextMenuPosition.y,
+                      }}
+                      onContextMenu={(event) => event.preventDefault()}
+                      onClick={() => setBlankContextMenuPosition(null)}
                     >
-                      <ContextMenuLabel>Sidebar</ContextMenuLabel>
-                      <ContextMenuSeparator />
-                      <ContextMenuItem onSelect={createRootFolder}>
+                      <div className={SIDEBAR_CONTEXT_MENU_LABEL_CLASS}>Sidebar</div>
+                      <div className="-mx-1 my-1 h-px bg-border" />
+                      <button
+                        type="button"
+                        role="menuitem"
+                        className={SIDEBAR_CONTEXT_MENU_ITEM_CLASS}
+                        onClick={createRootFolder}
+                      >
                         <FolderPlusIcon />
                         Add folder
-                      </ContextMenuItem>
-                    </ContextMenuContent>
-                  </ContextMenu>
+                      </button>
+                    </div>,
+                    document.body,
+                  ) : null}
                 </SidebarGroupContent>
               </SidebarGroup>
             </SidebarContent>
