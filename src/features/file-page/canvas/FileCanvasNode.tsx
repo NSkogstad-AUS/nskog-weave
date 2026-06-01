@@ -1,4 +1,4 @@
-import { memo } from 'react';
+import { memo, useEffect, useState } from 'react';
 import type {
   MouseEvent as ReactMouseEvent,
   PointerEvent as ReactPointerEvent,
@@ -16,16 +16,6 @@ import {
   Trash2Icon,
 } from 'lucide-react';
 
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuSeparator,
-  ContextMenuSub,
-  ContextMenuSubContent,
-  ContextMenuSubTrigger,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import {
   Tooltip,
   TooltipContent,
@@ -219,6 +209,56 @@ function FileCanvasNodeComponent({
           : elementIcon === 'shapes'
             ? 'border-violet-200/80 bg-violet-50/85 text-violet-600'
             : 'border-emerald-200/80 bg-emerald-50/85 text-emerald-600';
+  const [contextMenuPosition, setContextMenuPosition] = useState<Point | null>(null);
+
+  const closeContextMenu = () => {
+    setContextMenuPosition(null);
+    onContextMenuOpenChange(node, false);
+    onClearSizePreview(node.id);
+    onClearIconPreview(node.id);
+  };
+
+  useEffect(() => {
+    setContextMenuPosition(null);
+  }, [contextMenuResetKey]);
+
+  useEffect(() => {
+    if (!isContextMenuOpen) {
+      setContextMenuPosition(null);
+    }
+  }, [isContextMenuOpen]);
+
+  useEffect(() => {
+    if (!contextMenuPosition) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('[data-canvas-node-context-menu="true"]')) {
+        return;
+      }
+      closeContextMenu();
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeContextMenu();
+    };
+
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('blur', closeContextMenu);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('blur', closeContextMenu);
+    };
+  });
+
+  const menuItemClassName =
+    'flex min-h-8 w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75 disabled:pointer-events-none disabled:opacity-50';
+
+  const runMenuAction = (action: () => void) => {
+    action();
+    closeContextMenu();
+  };
 
   const buttonNode = (
     <button
@@ -251,8 +291,10 @@ function FileCanvasNodeComponent({
         }
       }}
       onContextMenu={(event) => {
+        event.preventDefault();
         event.stopPropagation();
         onContextMenu(node, event);
+        setContextMenuPosition({ x: event.clientX, y: event.clientY });
       }}
       className={cn(
         NODE_CARD_CLASS,
@@ -551,169 +593,166 @@ function FileCanvasNodeComponent({
   );
 
   return (
-    <ContextMenu
-      key={contextMenuResetKey}
-      onOpenChange={(open) => {
-        onContextMenuOpenChange(node, open);
-
-        if (!open) {
-          onClearSizePreview(node.id);
-          onClearIconPreview(node.id);
-        }
-      }}
-    >
-      <>
-        {isDragging && snapPreviewBounds ? (
-          <div
-            aria-hidden="true"
-            className={cn(
-              NODE_CARD_CLASS,
-              'pointer-events-none border-sky-300/70 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.15)] transition-[transform,opacity] duration-150 ease-out',
-            )}
-            style={{
-              width: dimensions.width,
-              height: dimensions.height,
-              transform: `translate3d(${snapPreviewBounds.left}px, ${snapPreviewBounds.top}px, 0)`,
-            }}
-          />
-        ) : null}
-        {showCompactElementTooltip ? (
-          <TooltipProvider openDelay={0}>
-            <Tooltip side="bottom" sideOffset={8}>
-              <TooltipTrigger asChild>
-                <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
-              </TooltipTrigger>
-              <TooltipContent className="rounded-md border border-slate-200/80 bg-white/95 text-slate-700 shadow-[0_10px_28px_-18px_rgba(15,23,42,0.35)]">
-                {node.label}
-              </TooltipContent>
-            </Tooltip>
-          </TooltipProvider>
-        ) : (
-          <ContextMenuTrigger asChild>{buttonNode}</ContextMenuTrigger>
-        )}
-        <ContextMenuContent side="right" className="ml-2 w-52">
+    <>
+      {isDragging && snapPreviewBounds ? (
+        <div
+          aria-hidden="true"
+          className={cn(
+            NODE_CARD_CLASS,
+            'pointer-events-none border-sky-300/70 bg-sky-100/40 shadow-[inset_0_0_0_1px_rgba(56,189,248,0.15)] transition-[transform,opacity] duration-150 ease-out',
+          )}
+          style={{
+            width: dimensions.width,
+            height: dimensions.height,
+            transform: `translate3d(${snapPreviewBounds.left}px, ${snapPreviewBounds.top}px, 0)`,
+          }}
+        />
+      ) : null}
+      {showCompactElementTooltip ? (
+        <TooltipProvider openDelay={0}>
+          <Tooltip side="bottom" sideOffset={8}>
+            <TooltipTrigger asChild>{buttonNode}</TooltipTrigger>
+            <TooltipContent className="rounded-md border border-slate-200/80 bg-white/95 text-slate-700 shadow-[0_10px_28px_-18px_rgba(15,23,42,0.35)]">
+              {node.label}
+            </TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      ) : (
+        buttonNode
+      )}
+      {contextMenuPosition ? (
+        <div
+          data-canvas-node-context-menu="true"
+          role="menu"
+          className="fixed z-50 max-h-[min(34rem,calc(100vh-2rem))] w-60 overflow-y-auto rounded-md border border-sidebar-border/80 bg-background/98 p-1 text-popover-foreground shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)]"
+          style={{
+            left: contextMenuPosition.x,
+            top: contextMenuPosition.y,
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+          onPointerLeave={() => {
+            onClearIconPreview(node.id);
+            onClearSizePreview(node.id);
+          }}
+        >
           {(node.kind === 'file' || node.kind === 'folder') && onDownload ? (
-            <ContextMenuItem onSelect={() => onDownload(node)}>
+            <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(() => onDownload(node))}>
               <DownloadIcon className="size-4" />
               Download
-            </ContextMenuItem>
+            </button>
           ) : null}
-          <ContextMenuItem onSelect={() => onStartRename(node)}>
+          <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(() => onStartRename(node))}>
             <PencilLineIcon className="size-4" />
             Rename
-          </ContextMenuItem>
+          </button>
           {canAddSelectionToGroup && node.kind !== 'group' && onAddSelectionToGroup ? (
-            <ContextMenuItem onSelect={onAddSelectionToGroup}>
+            <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(onAddSelectionToGroup)}>
               <ShapesIcon className="size-4" />
               Add to group
-            </ContextMenuItem>
+            </button>
           ) : null}
           {node.kind === 'group' && onCenterGroupContents ? (
-            <ContextMenuItem onSelect={() => onCenterGroupContents(node)}>
+            <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(() => onCenterGroupContents(node))}>
               <AlignCenterHorizontalIcon className="size-4" />
               Center contents
-            </ContextMenuItem>
+            </button>
           ) : null}
           {isWorkerNode && onRunWorker ? (
-            <ContextMenuItem disabled={!canRunWorker} onSelect={() => onRunWorker(node)}>
+            <button type="button" role="menuitem" disabled={!canRunWorker} className={menuItemClassName} onClick={() => runMenuAction(() => onRunWorker(node))}>
               <PlayIcon className="size-4" />
               {workerStatus === 'processing' ? 'Running...' : workerModeMeta.runActionLabel}
-            </ContextMenuItem>
+            </button>
           ) : null}
           {folderExpandState === 'expand' && onExpandFolder ? (
-            <ContextMenuItem onSelect={() => onExpandFolder(node)}>
+            <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(() => onExpandFolder(node))}>
               <ExpandIcon className="size-4" />
               Expand folder
-            </ContextMenuItem>
+            </button>
           ) : null}
           {folderExpandState === 'collapse' && onCollapseFolder ? (
-            <ContextMenuItem onSelect={() => onCollapseFolder(node)}>
+            <button type="button" role="menuitem" className={menuItemClassName} onClick={() => runMenuAction(() => onCollapseFolder(node))}>
               <ExpandIcon className="size-4" />
               Collapse folder
-            </ContextMenuItem>
+            </button>
           ) : null}
           {node.kind === 'element' ? (
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <Icon className="size-4" />
+            <div className="px-1 py-1.5">
+              <div className="mb-1 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <Icon className="size-3.5" />
                 Change icon
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-48" onPointerLeave={() => onClearIconPreview(node.id)}>
-                <div className="grid grid-cols-2 gap-1.5 p-1">
-                  {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
-                    const IconOption = iconMeta.icon;
+              </div>
+              <div className="grid grid-cols-2 gap-1.5">
+                {Object.entries(ELEMENT_ICON_META).map(([iconKey, iconMeta]) => {
+                  const IconOption = iconMeta.icon;
 
-                    return (
-                      <ContextMenuItem
-                        key={iconKey}
-                        onFocus={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
-                        onPointerEnter={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
-                        onSelect={() => onApplyIcon(node, iconKey as FilePageElementIcon)}
-                        className={cn(
-                          'min-h-0 rounded-xl p-2',
-                          elementIcon === iconKey && 'bg-sidebar-accent/55',
-                        )}
-                      >
-                        <span className="flex w-full items-center gap-2">
-                          <span className="flex size-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
-                            <IconOption className="size-4 text-slate-600" />
-                          </span>
-                          <span className="text-sm text-slate-700">{iconMeta.label}</span>
-                        </span>
-                      </ContextMenuItem>
-                    );
-                  })}
-                </div>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
+                  return (
+                    <button
+                      type="button"
+                      key={iconKey}
+                      onFocus={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
+                      onPointerEnter={() => onPreviewIcon(node, iconKey as FilePageElementIcon)}
+                      onClick={() => runMenuAction(() => onApplyIcon(node, iconKey as FilePageElementIcon))}
+                      className={cn(
+                        'flex min-h-0 items-center gap-2 rounded-xl p-2 text-left hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75',
+                        elementIcon === iconKey && 'bg-sidebar-accent/55',
+                      )}
+                    >
+                      <span className="flex size-8 items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
+                        <IconOption className="size-4 text-slate-600" />
+                      </span>
+                      <span className="text-sm text-slate-700 dark:text-white">{iconMeta.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
           {node.kind !== 'group' && node.kind !== 'worker' ? (
-            <ContextMenuSub>
-              <ContextMenuSubTrigger>
-                <ExpandIcon className="size-4" />
+            <div className="px-1 py-1.5">
+              <div className="mb-1 flex items-center gap-2 px-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                <ExpandIcon className="size-3.5" />
                 Resize
-              </ContextMenuSubTrigger>
-              <ContextMenuSubContent className="w-[15rem]" onPointerLeave={() => onClearSizePreview(node.id)}>
-                <div className="grid grid-cols-3 gap-1.5 p-1">
-                  {RESIZE_OPTIONS.map((size) => {
-                    const isAvailable = canResize(node.id, size);
-                    const isCurrent =
-                      node.size.widthUnits === size.widthUnits &&
-                      node.size.heightUnits === size.heightUnits;
+              </div>
+              <div className="grid grid-cols-3 gap-1.5">
+                {RESIZE_OPTIONS.map((size) => {
+                  const isAvailable = canResize(node.id, size);
+                  const isCurrent =
+                    node.size.widthUnits === size.widthUnits &&
+                    node.size.heightUnits === size.heightUnits;
 
-                    return (
-                      <ContextMenuItem
-                        key={`${size.widthUnits}x${size.heightUnits}`}
-                        disabled={!isAvailable}
-                        onFocus={() => onPreviewResize(node, size)}
-                        onPointerEnter={() => onPreviewResize(node, size)}
-                        onSelect={() => onApplyResize(node, size)}
-                        className={cn(
-                          'min-h-0 flex-col items-start gap-1.5 rounded-xl p-2',
-                          isCurrent && 'bg-sidebar-accent/55',
-                        )}
-                      >
-                        <span className="flex h-12 w-full items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
-                          <ResizeOptionSwatch size={size} />
-                        </span>
-                        <span className="text-[11px] font-medium text-slate-600">
-                          {size.widthUnits} x {size.heightUnits}
-                        </span>
-                      </ContextMenuItem>
-                    );
-                  })}
-                </div>
-              </ContextMenuSubContent>
-            </ContextMenuSub>
+                  return (
+                    <button
+                      type="button"
+                      key={`${size.widthUnits}x${size.heightUnits}`}
+                      disabled={!isAvailable}
+                      onFocus={() => onPreviewResize(node, size)}
+                      onPointerEnter={() => onPreviewResize(node, size)}
+                      onClick={() => runMenuAction(() => onApplyResize(node, size))}
+                      className={cn(
+                        'flex min-h-0 flex-col items-start gap-1.5 rounded-xl p-2 text-left hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75 disabled:pointer-events-none disabled:opacity-40',
+                        isCurrent && 'bg-sidebar-accent/55',
+                      )}
+                    >
+                      <span className="flex h-12 w-full items-center justify-center rounded-lg border border-slate-200/80 bg-white/90">
+                        <ResizeOptionSwatch size={size} />
+                      </span>
+                      <span className="text-[11px] font-medium text-slate-600 dark:text-white">
+                        {size.widthUnits} x {size.heightUnits}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
           ) : null}
-          <ContextMenuSeparator />
-          <ContextMenuItem variant="destructive" onSelect={() => onDelete(node)}>
+          <div className="-mx-1 my-1 h-px bg-border" />
+          <button type="button" role="menuitem" className={`${menuItemClassName} text-destructive hover:bg-destructive/10 focus:bg-destructive/10`} onClick={() => runMenuAction(() => onDelete(node))}>
             <Trash2Icon className="size-4" />
             Delete
-          </ContextMenuItem>
-        </ContextMenuContent>
-      </>
-    </ContextMenu>
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
 

@@ -26,12 +26,6 @@ import {
   ShapesIcon,
 } from 'lucide-react';
 
-import {
-  ContextMenu,
-  ContextMenuContent,
-  ContextMenuItem,
-  ContextMenuTrigger,
-} from '@/components/ui/context-menu';
 import { cn } from '@/lib/utils';
 import {
   CANVAS_PADDING,
@@ -204,10 +198,6 @@ export function FileCanvasView({
   const selectedNodeIdsRef = useRef(selectedNodeIds);
   const contextMenuNodeIdRef = useRef<string | null>(null);
   const canvasContextMenuOpenRef = useRef(false);
-  // Set when onOpenChange(false) fires (during pointerdown, before contextmenu fires).
-  // Consumed in handleCanvasContextMenu to detect that a reopen is needed even though
-  // canvasContextMenuOpenRef is already false by the time contextmenu fires.
-  const canvasContextMenuJustClosedRef = useRef(false);
   const armedPrimaryOpenNodeIdRef = useRef<string | null>(null);
   const nodeClickShouldOpenRef = useRef(false);
   const editingNodeIdRef = useRef<string | null>(null);
@@ -249,8 +239,8 @@ export function FileCanvasView({
   const [draftIcons, setDraftIcons] = useState<Record<string, FilePageElementIcon>>({});
   const [draftSelectedNodeIds, setDraftSelectedNodeIds] = useState<string[] | null>(null);
   const [contextMenuNodeId, setContextMenuNodeId] = useState<string | null>(null);
-  const [canvasContextMenuKey, setCanvasContextMenuKey] = useState(0);
   const [nodeContextMenuResetKey, setNodeContextMenuResetKey] = useState(0);
+  const [canvasContextMenuPosition, setCanvasContextMenuPosition] = useState<Point | null>(null);
   const [editingNodeId, setEditingNodeId] = useState<string | null>(null);
   const [editingLabel, setEditingLabel] = useState('');
   const [hoveredConnectorId, setHoveredConnectorId] = useState<string | null>(null);
@@ -1065,47 +1055,10 @@ export function FileCanvasView({
 
   // ── Canvas context menu point ──────────────────────────────────────────────
 
-  function findCanvasNodeElement(nodeId: string) {
-    const candidates = canvasRef.current?.querySelectorAll<HTMLElement>('[data-canvas-node-id]');
-
-    return Array.from(candidates ?? []).find(
-      (candidate) => candidate.dataset.canvasNodeId === nodeId,
-    ) ?? null;
-  }
-
-  function dispatchContextMenuAt(target: HTMLElement, clientX: number, clientY: number) {
-    target.dispatchEvent(
-      new MouseEvent('contextmenu', {
-        bubbles: true,
-        cancelable: true,
-        clientX,
-        clientY,
-        button: 2,
-        buttons: 2,
-      }),
-    );
-  }
-
-  function closeAndReopenCanvasContextMenu(
-    clientX: number,
-    clientY: number,
-    targetNodeId?: string,
-  ) {
+  const closeCanvasContextMenu = useCallback(() => {
     canvasContextMenuOpenRef.current = false;
-    contextMenuNodeIdRef.current = null;
-
-    setContextMenuNodeId(null);
-    setCanvasContextMenuKey((current) => current + 1);
-    setNodeContextMenuResetKey((current) => current + 1);
-
-    window.requestAnimationFrame(() => {
-      const target = targetNodeId ? findCanvasNodeElement(targetNodeId) : canvasRef.current;
-
-      if (target) {
-        dispatchContextMenuAt(target, clientX, clientY);
-      }
-    });
-  }
+    setCanvasContextMenuPosition(null);
+  }, []);
 
   function handleCanvasContextMenu(event: ReactPointerEvent<HTMLDivElement>) {
     if (
@@ -1115,22 +1068,40 @@ export function FileCanvasView({
       return;
     }
 
-    contextMenuPointRef.current = getLocalPoint(event.clientX, event.clientY);
-
-    // Radix's DismissableLayer fires on pointerdown (capture phase, before contextmenu),
-    // so canvasContextMenuOpenRef is already false by the time this handler runs.
-    // canvasContextMenuJustClosedRef bridges that gap: it's set in onOpenChange(false)
-    // and consumed here to detect that a force-reopen is needed.
-    const needsReopen = canvasContextMenuJustClosedRef.current || contextMenuNodeIdRef.current !== null;
-    canvasContextMenuJustClosedRef.current = false;
-
-    if (!needsReopen) {
-      return;
-    }
-
     event.preventDefault();
-    closeAndReopenCanvasContextMenu(event.clientX, event.clientY);
+    event.stopPropagation();
+
+    contextMenuPointRef.current = getLocalPoint(event.clientX, event.clientY);
+    canvasContextMenuOpenRef.current = true;
+    contextMenuNodeIdRef.current = null;
+    setContextMenuNodeId(null);
+    setNodeContextMenuResetKey((current) => current + 1);
+    setCanvasContextMenuPosition({ x: event.clientX, y: event.clientY });
   }
+
+  useEffect(() => {
+    if (!canvasContextMenuPosition) return;
+
+    const closeOnPointerDown = (event: PointerEvent) => {
+      if ((event.target as HTMLElement | null)?.closest('[data-canvas-context-menu="true"]')) {
+        return;
+      }
+      closeCanvasContextMenu();
+    };
+    const closeOnKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') closeCanvasContextMenu();
+    };
+
+    window.addEventListener('pointerdown', closeOnPointerDown);
+    window.addEventListener('keydown', closeOnKeyDown);
+    window.addEventListener('blur', closeCanvasContextMenu);
+
+    return () => {
+      window.removeEventListener('pointerdown', closeOnPointerDown);
+      window.removeEventListener('keydown', closeOnKeyDown);
+      window.removeEventListener('blur', closeCanvasContextMenu);
+    };
+  }, [canvasContextMenuPosition, closeCanvasContextMenu]);
 
   // ── Worker connection drag ─────────────────────────────────────────────────
 
@@ -1811,10 +1782,14 @@ export function FileCanvasView({
 
   const openNodeContextMenu = useCallback(
     (node: FilePageNode, event?: ReactMouseEvent<HTMLButtonElement>) => {
-      if (event && (canvasContextMenuOpenRef.current || contextMenuNodeIdRef.current)) {
+      if (event) {
         event.preventDefault();
-        closeAndReopenCanvasContextMenu(event.clientX, event.clientY, node.id);
-        return;
+        event.stopPropagation();
+        closeCanvasContextMenu();
+
+        if (contextMenuNodeIdRef.current && contextMenuNodeIdRef.current !== node.id) {
+          setNodeContextMenuResetKey((current) => current + 1);
+        }
       }
 
       contextMenuNodeIdRef.current = node.id;
@@ -1827,7 +1802,7 @@ export function FileCanvasView({
         selectSingleNode(node.id);
       }
     },
-    [selectSingleNode],
+    [closeCanvasContextMenu, selectSingleNode],
   );
 
   const openNodePrimaryAction = useCallback(
@@ -2597,17 +2572,8 @@ export function FileCanvasView({
   // ── Render ─────────────────────────────────────────────────────────────────
 
   return (
-    <ContextMenu
-      key={canvasContextMenuKey}
-      onOpenChange={(open) => {
-        canvasContextMenuOpenRef.current = open;
-        if (!open) {
-          canvasContextMenuJustClosedRef.current = true;
-        }
-      }}
-    >
-      <ContextMenuTrigger asChild>
-        <div className="flex h-full min-h-[34rem] overflow-hidden rounded-none bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]">
+    <>
+      <div className="flex h-full min-h-[34rem] overflow-hidden rounded-none bg-white/72 shadow-[0_36px_90px_-58px_rgba(15,23,42,0.22)] dark:bg-[rgba(30,41,59,0.56)] dark:shadow-[0_36px_90px_-58px_rgba(15,23,42,0.46)]">
           <div
             ref={canvasRef}
             onContextMenu={handleCanvasContextMenu}
@@ -2885,22 +2851,37 @@ export function FileCanvasView({
               ) : null}
             </div>
           </div>
-        </div>
-      </ContextMenuTrigger>
+      </div>
 
-      <ContextMenuContent className="ml-2 w-52">
-        {canGroupSelectedNodes ? (
-          <ContextMenuItem onSelect={handleAddSelectedNodesToGroup}>
+      {canvasContextMenuPosition ? (
+        <div
+          data-canvas-context-menu="true"
+          role="menu"
+          className="fixed z-50 w-52 overflow-hidden rounded-md border border-sidebar-border/80 bg-background/98 p-1 text-popover-foreground shadow-[0_18px_40px_-22px_rgba(15,23,42,0.35)]"
+          style={{
+            left: canvasContextMenuPosition.x,
+            top: canvasContextMenuPosition.y,
+          }}
+          onContextMenu={(event) => event.preventDefault()}
+        >
+          <button
+            type="button"
+            role="menuitem"
+            className="flex min-h-8 w-full cursor-default items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm outline-hidden select-none hover:bg-sidebar-accent/75 focus:bg-sidebar-accent/75"
+            onClick={() => {
+              if (canGroupSelectedNodes) {
+                handleAddSelectedNodesToGroup();
+              } else {
+                handleAddGroup();
+              }
+              closeCanvasContextMenu();
+            }}
+          >
             <ShapesIcon className="size-4" />
-            Add to group
-          </ContextMenuItem>
-        ) : (
-          <ContextMenuItem onSelect={handleAddGroup}>
-            <ShapesIcon className="size-4" />
-            Add group
-          </ContextMenuItem>
-        )}
-      </ContextMenuContent>
-    </ContextMenu>
+            {canGroupSelectedNodes ? 'Add to group' : 'Add group'}
+          </button>
+        </div>
+      ) : null}
+    </>
   );
 }
